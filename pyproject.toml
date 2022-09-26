@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pydatatask"
+version = "0.0.1"
+authors = [
+    { name = "Audrey Dutcher", email = "audrey@rhelmot.io" },
+]
+description = "Library for constructing data-centric processing pipelines"
+requires-python = ">=3.10"
+
+dependencies = [
+    "kubernetes",
+    "docker-registry-client",
+    "jinja2",
+    "pyyaml",
+]
