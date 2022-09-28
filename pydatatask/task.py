@@ -1,14 +1,16 @@
 from typing import Optional, Dict, Any, Union, List
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 import os
 from pathlib import Path
+import logging
 
 import yaml
 import jinja2
 
-from .repository import Repository, FileRepository, BlockingRepository, AggregateRepository, LiveKubeRepository
+from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository
 from .pod_manager import PodManager
 
+l = logging.getLogger(__name__)
 
 class Task:
     def __init__(
@@ -23,14 +25,17 @@ class Task:
 
     @property
     def ready(self):
-        return BlockingRepository(self.input, AggregateRepository(live=self.live, done=self.done))
+        return BlockingRepository(self.input, AggregateOrRepository(live=self.live, done=self.done))
 
     def waiting(self, repo):
         return BlockingRepository(repo, self.live)
 
     def launch_all(self):
         for job in self.ready:
-            self.launch(job)
+            try:
+                self.launch(job)
+            except:
+                l.exception("Failed to launch %s:%s", self, job)
 
     def launch(self, job):
         raise NotImplementedError
@@ -104,32 +109,50 @@ class KubeTask(Task):
 
         pods = self.podman.query(task=self.name)
         for pod in pods:
-            if pod.status.phase in ('Succeeded', 'Failed'):
-                self._cleanup(pod)
-            elif self.timeout is not None and datetime.utcnow() - pod.metadata.creationTimestamp > self.timeout:
-                self.handle_timeout(pod)
-                self._cleanup(pod)
+            try:
+                uptime: timedelta = datetime.now(timezone.utc) - pod.metadata.creation_timestamp
+                total_min = uptime.seconds // 60
+                uptime_hours, uptime_min = divmod(total_min, 60)
+                l.debug("Pod %s is alive for %dh%dm", pod.metadata.name, uptime_hours, uptime_min)
+                if pod.status.phase in ('Succeeded', 'Failed'):
+                    l.debug("...finished: %s", pod.status.phase)
+                    self._cleanup(pod)
+                elif self.timeout is not None and uptime > self.timeout:
+                    l.debug("...timed out")
+                    self.handle_timeout(pod)
+                    self._cleanup(pod)
+            except:
+                l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
 
     def handle_timeout(self, pod):
         pass
 
-#class LocalProcessTask(Task):
-#    def __init__(
-#            self,
-#            input: Repository,
-#            pids: FileRepository,
-#            done: FileRepository,
-#            args: List[str],
-#            env: Optional[Dict[str, str]],
-#    ):
-#        super().__init__(input, pids, done)
-#
-#        self.pids = pids
-#
-#    def update(self):
-#        pass
-#
-#    def launch(self, job):
-#        pass
-#
-#    STDOUT = object()
+class LocalProcessTask(Task):
+    """
+    A task that runs a script. The interpreter is specified by the shebang, or the default shell if none present.
+    """
+    def __init__(
+            self,
+            input: Repository,
+            pids: FileRepository,
+            done: FileRepository,
+            template: str,
+            stdout: Optional[FileRepository],
+            stderr: Optional[FileRepository],
+    ):
+        super().__init__(input, pids, done)
+
+        self.pids = pids
+        self.template = template
+
+    def update(self):
+        pass
+
+    def launch(self, job):
+        pass
+
+class StderrIsStdout(FileRepository):
+    def __init__(self):
+        pass
+
+STDOUT = StderrIsStdout()

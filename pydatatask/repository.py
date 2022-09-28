@@ -1,6 +1,8 @@
+from typing import Union
 import string
 from pathlib import Path
 import logging
+import yaml
 
 import docker_registry_client
 
@@ -93,8 +95,9 @@ class DockerRepository(Repository):
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
     """
-    def __init__(self, client: docker_registry_client.DockerRegistryClient, repository: str):
+    def __init__(self, client: docker_registry_client.DockerRegistryClient, domain: str, repository: str):
         self.client = client
+        self.domain = domain
         self.repository = repository
 
     def _unfiltered_iter(self):
@@ -107,10 +110,13 @@ class DockerRepository(Repository):
                 raise
 
     def __repr__(self):
-        return f'<DockerRepository {self.repository}>'
+        return f'<DockerRepository {self.domain}/{self.repository}>'
 
     def info(self, job):
-        return f'{self.repository}:{job}'
+        return {
+            'withdomain': f'{self.domain}/{self.repository}:{job}',
+            'withoutdomain': f'{self.repository}:{job}',
+        }
 
 class LiveKubeRepository(Repository):
     """
@@ -137,7 +143,7 @@ class LiveKubeRepository(Repository):
     def pods(self):
         return self.podman.query(task=self.task)
 
-class AggregateRepository(Repository):
+class AggregateAndRepository(Repository):
     """
     A repository which is said to contain a key if all its children also contain that key
     """
@@ -160,8 +166,31 @@ class AggregateRepository(Repository):
     def info(self, job):
         return AggregateRepositoryInfo(self, job)
 
+class AggregateOrRepository(Repository):
+    """
+    A repository which is said to contain a key if all its children also contain that key
+    """
+    def __init__(self, **children: Repository):
+        assert children
+        self.children = children
+
+    def _unfiltered_iter(self):
+        result = None
+        for child in self.children.values():
+            if result is None:
+                result = set(child._unfiltered_iter())
+            else:
+                result |= set(child._unfiltered_iter())
+        return result
+
+    def __contains__(self, item):
+        return any(item in child for child in self.children.values())
+
+    def info(self, job):
+        return AggregateRepositoryInfo(self, job)
+
 class AggregateRepositoryInfo:
-    def __init__(self, repo: AggregateRepository, job):
+    def __init__(self, repo: Union[AggregateAndRepository, AggregateOrRepository], job):
         self.repo = repo
         self.job = job
 
@@ -184,3 +213,15 @@ class BlockingRepository(Repository):
 
     def info(self, job):
         return self.source.info(job)
+
+class YamlMetadataRepository(FileRepository):
+    """
+    A metadata repository. When info is accessed, it will **load the target file into memory**, parse it as yaml, and
+    return the resulting object.
+    """
+    def __init__(self, filename, extension='yaml', case_insensitive=False):
+        super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
+
+    def info(self, job):
+        with self.open(job, 'r') as fp:
+            return yaml.safe_load(fp)
