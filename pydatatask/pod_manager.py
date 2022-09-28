@@ -6,6 +6,8 @@ from kubernetes.utils import parse_quantity
 
 l = logging.getLogger(__name__)
 
+__all__ = ('PodManager',)
+
 class PodManager:
     def __init__(
             self,

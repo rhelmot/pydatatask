@@ -1,13 +1,18 @@
+import shutil
 from typing import Union
 import string
 from pathlib import Path
 import logging
 import yaml
+import os
+import hashlib
 
-import docker_registry_client
+import dreg_client
+import dxf
 
 l = logging.getLogger(__name__)
 
+__all__ = ('Repository', 'DirectoryRepository', 'DockerRepository', 'BlockingRepository', 'FileRepository', 'FileRepositoryBase', 'AggregateOrRepository', 'AggregateAndRepository', 'AggregateRepositoryInfo', 'YamlMetadataRepository', 'LiveKubeRepository')
 
 class Repository:
     """
@@ -47,22 +52,22 @@ class Repository:
         """
         raise NotImplementedError
 
-class FileRepository(Repository):
-    """
-    A file repository is a directory where each key is a filename, optionally suffixed with an extension before hitting
-    the filesystem.
-    """
+    def __delitem__(self, key):
+        raise NotImplementedError
+
+class FileRepositoryBase(Repository):
     def __init__(self, basedir, extension='', case_insensitive=False):
         self.basedir = Path(basedir)
-        self.basedir.mkdir(exist_ok=True, parents=True)
         self.extension = extension
         self.case_insensitive = case_insensitive
+
+        self.ensure_exists()
 
     def __contains__(self, item):
         return (self.basedir / (item + self.extension)).exists()
 
     def __repr__(self):
-        return f'<FileRepository {self.basedir / ("*" + self.extension)}>'
+        return f'<{type(self).__name__} {self.basedir / ("*" + self.extension)}>'
 
     def _unfiltered_iter(self):
         return (
@@ -77,32 +82,52 @@ class FileRepository(Repository):
 
     def ensure_exists(self):
         self.basedir.mkdir(exist_ok=True, parents=True)
+        if not os.access(self.basedir, os.W_OK):
+            raise PermissionError(f"Cannot write to {self.basedir}")
 
     def fullpath(self, ident):
         return self.basedir / (ident + self.extension)
 
+    def info(self, job):
+        return str(self.fullpath(job))
+
+class FileRepository(FileRepositoryBase):
+    """
+    A file repository is a directory where each key is a filename, optionally suffixed with an extension before hitting
+    the filesystem.
+    """
+
     def open(self, ident, mode='r'):
         return open(self.fullpath(ident), mode)
+
+    def __delitem__(self, key):
+        self.fullpath(key).unlink(missing_ok=True)
+
+class DirectoryRepository(FileRepositoryBase):
+    """
+    A directory repository is like a file repository but its members are directories
+    """
 
     def mkdir(self, ident):
         self.fullpath(ident).mkdir(exist_ok=True)
 
-    def info(self, job):
-        return str(self.fullpath(job))
+    def __delitem__(self, key):
+        if key in self:
+            shutil.rmtree(self.fullpath(key))
 
 class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
     """
-    def __init__(self, client: docker_registry_client.DockerRegistryClient, domain: str, repository: str):
-        self.client = client
+    def __init__(self, registry: dreg_client.Registry, domain: str, repository: str):
+        self.registry = registry
         self.domain = domain
         self.repository = repository
 
     def _unfiltered_iter(self):
         try:
-            return self.client.repository(self.repository).tags()
+            return self.registry.repository(self.repository).tags()
         except Exception as e:
             if '404' in str(e):
                 return []
@@ -117,6 +142,27 @@ class DockerRepository(Repository):
             'withdomain': f'{self.domain}/{self.repository}:{job}',
             'withoutdomain': f'{self.repository}:{job}',
         }
+
+    def _dxf_auth(self, dxf_obj, response):
+        # what a fucking hack
+        username, password = self.registry._client._session.auth
+        dxf_obj.authenticate(username, password, response)
+
+    def __delitem__(self, key):
+        if key not in self:
+            return
+
+        random_data = os.urandom(16)
+        random_digest = 'sha256:' + hashlib.sha256(random_data).hexdigest()
+
+        d = dxf.DXF(
+            host=self.domain,
+            repo=self.repository,
+            auth=self._dxf_auth,
+        )
+        d.push_blob(data=random_data, digest=random_digest)
+        d.set_alias(key, random_digest)
+        d.del_alias(key)
 
 class LiveKubeRepository(Repository):
     """
@@ -143,6 +189,10 @@ class LiveKubeRepository(Repository):
     def pods(self):
         return self.podman.query(task=self.task)
 
+    def __delitem__(self, key):
+        # uhhhhhhh
+        pass
+
 class AggregateAndRepository(Repository):
     """
     A repository which is said to contain a key if all its children also contain that key
@@ -166,6 +216,10 @@ class AggregateAndRepository(Repository):
     def info(self, job):
         return AggregateRepositoryInfo(self, job)
 
+    def __delitem__(self, key):
+        for child in self.children.values():
+            del child[key]
+
 class AggregateOrRepository(Repository):
     """
     A repository which is said to contain a key if all its children also contain that key
@@ -188,6 +242,10 @@ class AggregateOrRepository(Repository):
 
     def info(self, job):
         return AggregateRepositoryInfo(self, job)
+
+    def __delitem__(self, key):
+        for child in self.children.values():
+            del child[key]
 
 class AggregateRepositoryInfo:
     def __init__(self, repo: Union[AggregateAndRepository, AggregateOrRepository], job):
@@ -213,6 +271,9 @@ class BlockingRepository(Repository):
 
     def info(self, job):
         return self.source.info(job)
+
+    def __delitem__(self, key):
+        del self.source[key]
 
 class YamlMetadataRepository(FileRepository):
     """
