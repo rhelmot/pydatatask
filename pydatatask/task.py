@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import yaml
 import jinja2
+from kubernetes.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, AggregateAndRepository
 from .pod_manager import PodManager
@@ -170,13 +171,20 @@ class KubeTask(Task):
         parsed = yaml.safe_load(rendered)
         self.podman.launch(job, self.name, parsed)
 
-    def _cleanup(self, pod):
+    def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels['job']
         if self.logs is not None:
             with self.logs.open(job, 'w') as fp:
                 fp.write(self.podman.logs(pod))
         if self.done_file is not None:
-            self.done_file.open(job, 'w').close()
+            data = {
+                'reason': reason,
+                'start_time': pod.metadata.creation_timestamp,
+                'end_time': datetime.now(timezone.utc),
+                'image': pod.status.container_statuses[0].image,
+            }
+            with self.done_file.open(job, 'w') as fp:
+                yaml.dump(data, fp)
         self.podman.delete(pod)
 
     def update(self):
@@ -191,11 +199,11 @@ class KubeTask(Task):
                 l.debug("Pod %s is alive for %dh%dm", pod.metadata.name, uptime_hours, uptime_min)
                 if pod.status.phase in ('Succeeded', 'Failed'):
                     l.debug("...finished: %s", pod.status.phase)
-                    self._cleanup(pod)
+                    self._cleanup(pod, pod.status.phase)
                 elif self.timeout is not None and uptime > self.timeout:
                     l.debug("...timed out")
                     self.handle_timeout(pod)
-                    self._cleanup(pod)
+                    self._cleanup(pod, 'Timeout')
             except:
                 l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
 
