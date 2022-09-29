@@ -1,9 +1,11 @@
 import argparse
 import sys
+from typing import Union
 
 from . import FileRepository
 from .pipeline import Pipeline
 from .repository import Repository
+from .task import Task
 
 def main(pipeline: Pipeline):
     parser = argparse.ArgumentParser()
@@ -51,6 +53,7 @@ def print_status(pipeline: Pipeline, args: argparse.Namespace):
         print()
 
 def delete_data(pipeline: Pipeline, args: argparse.Namespace):
+    item: Union[Task | Repository]
     if '.' in args.data:
         taskname, reponame = args.data.split('.')
         item = pipeline.tasks[taskname].links[reponame].repo
@@ -59,8 +62,13 @@ def delete_data(pipeline: Pipeline, args: argparse.Namespace):
 
     for dependant in pipeline.dependants(item, args.recursive):
         if isinstance(dependant, Repository):
-            del dependant[args.job]
-            print(args.job, dependant)
+            if args.job == '__all__':
+                jobs = list(dependant)
+            else:
+                jobs = [args.job]
+            for job in jobs:
+                del dependant[job]
+                print(job, dependant)
 
 def list_data(pipeline: Pipeline, args: argparse.Namespace):
     taskname, reponame = args.data.split('.')

@@ -10,6 +10,8 @@ import hashlib
 import dreg_client
 import dxf
 
+from .pod_manager import PodManager
+
 l = logging.getLogger(__name__)
 
 __all__ = ('Repository', 'DirectoryRepository', 'DockerRepository', 'BlockingRepository', 'FileRepository', 'FileRepositoryBase', 'AggregateOrRepository', 'AggregateAndRepository', 'AggregateRepositoryInfo', 'YamlMetadataRepository', 'LiveKubeRepository')
@@ -166,10 +168,9 @@ class DockerRepository(Repository):
 
 class LiveKubeRepository(Repository):
     """
-    A repository where keys translate to `job` labels on running kube pods. Pretty heavily tied to the global PodManager
-    instance.
+    A repository where keys translate to `job` labels on running kube pods.
     """
-    def __init__(self, podman, task):
+    def __init__(self, podman: PodManager, task: str):
         self.task = task
         self.podman = podman
 
@@ -190,8 +191,9 @@ class LiveKubeRepository(Repository):
         return self.podman.query(task=self.task)
 
     def __delitem__(self, key):
-        # uhhhhhhh
-        pass
+        pods = self.podman.query(job=key, task=self.task)
+        for pod in pods:  # there... really should be only one
+            self.podman.delete(pod)
 
 class AggregateAndRepository(Repository):
     """
@@ -222,7 +224,7 @@ class AggregateAndRepository(Repository):
 
 class AggregateOrRepository(Repository):
     """
-    A repository which is said to contain a key if all its children also contain that key
+    A repository which is said to contain a key if any of its children also contain that key
     """
     def __init__(self, **children: Repository):
         assert children

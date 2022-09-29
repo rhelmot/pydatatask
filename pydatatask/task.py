@@ -147,7 +147,7 @@ class KubeTask(Task):
 
     def _build_env(self, env, job):
         return {
-            key: val.info(job) if isinstance(val, Repository) else val
+            key: val.info(job) if isinstance(val, Repository) else val.repo.info(job) if isinstance(val, Link) else val
             for key, val in env.items()
             if not key.startswith('_')
         }
