@@ -28,10 +28,12 @@ class Pipeline:
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
-                attrs = vars(link)
+                attrs = dict(vars(link))
                 repo = attrs.pop('repo')
-                if attrs['is_input']:
+                if attrs['is_input'] or attrs['required_for_start'] or attrs['inhibits_start']:
                     result.add_edge(repo, task, **attrs)
+                    if attrs['is_output'] or attrs['is_status']:
+                        result.add_edge(task, repo, **attrs)
                 else:
                     result.add_edge(task, repo, **attrs)
 

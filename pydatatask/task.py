@@ -32,6 +32,9 @@ class Task:
         self._ready = ready
         self.links: Dict[str, Link] = {}
 
+    def __repr__(self):
+        return f'<{type(self).__name__} {self.name}>'
+
     @property
     def ready(self):
         if self._ready is not None:

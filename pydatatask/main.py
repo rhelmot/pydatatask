@@ -22,7 +22,7 @@ def main(pipeline: Pipeline):
     parser_delete.add_argument("job", type=str, help="Name of job of which to delete data")
 
     parser_ls = subparsers.add_parser("ls", help="List jobs in a repository")
-    parser_ls.add_argument("data", type=str, help="Name of repository [task.repo] from which to list data")
+    parser_ls.add_argument("data", type=str, nargs='+', help="Name of repository [task.repo] from which to list data")
 
     parser_cat = subparsers.add_parser("cat", help="Print data from a repository")
     parser_cat.add_argument("data", type=str, help="Name of repository [task.repo] from which to print data")
@@ -65,17 +65,25 @@ def delete_data(pipeline: Pipeline, args: argparse.Namespace):
             if args.job == '__all__':
                 jobs = list(dependant)
             else:
-                jobs = [args.job]
+                jobs = [args.job] if args.job in dependant else []
             for job in jobs:
                 del dependant[job]
                 print(job, dependant)
 
 def list_data(pipeline: Pipeline, args: argparse.Namespace):
-    taskname, reponame = args.data.split('.')
-    item = pipeline.tasks[taskname].links[reponame].repo
+    input_text = ' '.join(args.data)
+    namespace = {name: TaskNamespace(task) for name, task in pipeline.tasks.items()}
+    result = eval(input_text, {}, namespace)
 
-    for job in item:
+    for job in sorted(result):
         print(job)
+
+class TaskNamespace:
+    def __init__(self, task: Task):
+        self.task = task
+
+    def __getattr__(self, item):
+        return set(self.task.links[item].repo)
 
 def cat_data(pipeline: Pipeline, args: argparse.Namespace):
     taskname, reponame = args.data.split('.')
