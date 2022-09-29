@@ -109,6 +109,9 @@ class DirectoryRepository(FileRepositoryBase):
     """
     A directory repository is like a file repository but its members are directories
     """
+    def __init__(self, *args, discard_empty=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.discard_empty = discard_empty
 
     def mkdir(self, ident):
         self.fullpath(ident).mkdir(exist_ok=True)
@@ -116,6 +119,22 @@ class DirectoryRepository(FileRepositoryBase):
     def __delitem__(self, key):
         if key in self:
             shutil.rmtree(self.fullpath(key))
+
+    def __contains__(self, item):
+        result = super().__contains__(item)
+        if not self.discard_empty:
+            return result
+        if not result:
+            return False
+        return bool(list(self.fullpath(item).iterdir()))
+
+    def _unfiltered_iter(self):
+        for item in super()._unfiltered_iter():
+            if self.discard_empty:
+                if bool(list(self.fullpath(item).iterdir())):
+                    yield item
+            else:
+                yield item
 
 class DockerRepository(Repository):
     """
