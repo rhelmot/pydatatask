@@ -19,7 +19,7 @@ def main(pipeline: Pipeline):
     parser_delete = subparsers.add_parser("rm", help="Delete data from the pipeline")
     parser_delete.add_argument("--recursive", "-r", action="store_true", help="Delete dependant data too")
     parser_delete.add_argument("data", type=str, help="Name of repository [task.repo] or task from which to delete data")
-    parser_delete.add_argument("job", type=str, help="Name of job of which to delete data")
+    parser_delete.add_argument("job", type=str, nargs='+', help="Name of job of which to delete data")
 
     parser_ls = subparsers.add_parser("ls", help="List jobs in a repository")
     parser_ls.add_argument("data", type=str, nargs='+', help="Name of repository [task.repo] from which to list data")
@@ -62,13 +62,16 @@ def delete_data(pipeline: Pipeline, args: argparse.Namespace):
 
     for dependant in pipeline.dependants(item, args.recursive):
         if isinstance(dependant, Repository):
-            if args.job == '__all__':
+            if args.job[0] == '__all__':
                 jobs = list(dependant)
+                check = False
             else:
-                jobs = [args.job] if args.job in dependant else []
+                jobs = args.job
+                check = True
             for job in jobs:
-                del dependant[job]
-                print(job, dependant)
+                if not check or job in dependant:
+                    del dependant[job]
+                    print(job, dependant)
 
 def list_data(pipeline: Pipeline, args: argparse.Namespace):
     input_text = ' '.join(args.data)
