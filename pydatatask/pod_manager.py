@@ -26,6 +26,8 @@ class PodManager:
         self.cpu_usage = 0
         self.mem_usage = 0
 
+        self.warned = set()
+
         for pod in self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app).items:
             for container in pod.spec.containers:
                 self.cpu_usage += parse_quantity(container.resources.requests['cpu'])
@@ -47,10 +49,14 @@ class PodManager:
             mem_request += parse_quantity(container['resources']['requests']['memory'])
 
         if cpu_request + self.cpu_usage > self.cpu_quota:
-            l.info("Cannot launch %s-%s-%s - cpu limit" % (self.app, job, task))
+            if task not in self.warned:
+                self.warned.add(task)
+                l.info("Cannot launch %s - cpu limit", task)
             return False
         if mem_request + self.mem_usage > self.mem_quota:
-            l.info("Cannot launch %s-%s-%s - memory limit" % (self.app, job, task))
+            if task not in self.warned:
+                self.warned.add(task)
+                l.info("Cannot launch %s - memory limit", task)
             return False
 
         manifest['metadata'] = manifest.get('metadata', {})
