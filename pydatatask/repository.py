@@ -1,20 +1,44 @@
+from typing import Union, Callable, Optional
 import shutil
-from typing import Union
 import string
 from pathlib import Path
 import logging
 import yaml
 import os
 import hashlib
+import io
 
 import dreg_client
 import dxf
+import minio
 
 from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
 
-__all__ = ('Repository', 'DirectoryRepository', 'DockerRepository', 'BlockingRepository', 'FileRepository', 'FileRepositoryBase', 'AggregateOrRepository', 'AggregateAndRepository', 'AggregateRepositoryInfo', 'YamlMetadataRepository', 'LiveKubeRepository')
+__all__ = (
+    'Repository',
+    'BlobRepository',
+    'FileRepositoryBase',
+    'FileRepository',
+    'DirectoryRepository',
+    'S3BucketRepository',
+    'S3BucketInfo',
+    'DockerRepository',
+    'LiveKubeRepository',
+    'AggregateOrRepository',
+    'AggregateAndRepository',
+    'AggregateRepositoryInfo',
+    'BlockingRepository',
+    'YamlMetadataRepository',
+    'YamlMetadataFileRepository',
+    'YamlMetadataS3Repository',
+    'RelatedItemRepository',
+)
+
+def job_getter(f):
+    f.is_job_getter = True
+    return f
 
 class Repository:
     """
@@ -47,6 +71,7 @@ class Repository:
     def _unfiltered_iter(self):
         raise NotImplementedError
 
+    @job_getter
     def info(self, ident):
         """
         Returns an arbitrary piece of data related to ident. Notably, this is used during templating.
@@ -55,6 +80,11 @@ class Repository:
         raise NotImplementedError
 
     def __delitem__(self, key):
+        raise NotImplementedError
+
+class BlobRepository(Repository):
+    @job_getter
+    def open(self, ident, mode='r'):
         raise NotImplementedError
 
 class FileRepositoryBase(Repository):
@@ -87,18 +117,21 @@ class FileRepositoryBase(Repository):
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
+    @job_getter
     def fullpath(self, ident):
         return self.basedir / (ident + self.extension)
 
+    @job_getter
     def info(self, job):
         return str(self.fullpath(job))
 
-class FileRepository(FileRepositoryBase):
+class FileRepository(FileRepositoryBase, BlobRepository):
     """
     A file repository is a directory where each key is a filename, optionally suffixed with an extension before hitting
     the filesystem.
     """
 
+    @job_getter
     def open(self, ident, mode='r'):
         return open(self.fullpath(ident), mode)
 
@@ -113,6 +146,7 @@ class DirectoryRepository(FileRepositoryBase):
         super().__init__(*args, **kwargs)
         self.discard_empty = discard_empty
 
+    @job_getter
     def mkdir(self, ident):
         self.fullpath(ident).mkdir(exist_ok=True)
 
@@ -136,6 +170,90 @@ class DirectoryRepository(FileRepositoryBase):
             else:
                 yield item
 
+class S3BucketBinaryWriter(io.BytesIO):
+    def __init__(self, repo: 'S3BucketRepository', job: str):
+        self.repo = repo
+        self.job = job
+        super().__init__()
+
+    def close(self):
+        self.seek(0, io.SEEK_END)
+        size = self.tell()
+        self.seek(0, io.SEEK_SET)
+        self.repo.client.put_object(
+            self.repo.bucket,
+            self.repo.object_name(self.job),
+            self,
+            size,
+            content_type=self.repo.mimetype,
+        )
+
+class S3BucketInfo:
+    def __init__(self, endpoint: str, uri: str):
+        self.endpoint = endpoint
+        self.uri = uri
+
+    def __str__(self):
+        return self.uri
+
+class S3BucketRepository(BlobRepository):
+    def __init__(
+            self,
+            client: minio.Minio,
+            bucket: str,
+            prefix: str='',
+            extension: str='',
+            mimetype: str='application/octet-stream',
+    ):
+        self.client = client
+        self.bucket = bucket
+        self.prefix = prefix
+        self.extension = extension
+        self.mimetype = mimetype
+
+        self.ensure_exists()
+
+    def __contains__(self, item):
+        try:
+            self.client.stat_object(self.bucket, self.object_name(item))
+        except minio.error.S3Error:
+            return False
+        else:
+            return True
+
+    def _unfiltered_iter(self):
+        for obj in self.client.list_objects(self.bucket, self.prefix):
+            if obj.object_name.endswith(self.extension):
+                yield obj.object_name[len(self.prefix):-len(self.extension) if self.extension else None]
+
+    def ensure_exists(self):
+        if not self.client.bucket_exists(self.bucket):
+            self.client.make_bucket(self.bucket)
+
+    @job_getter
+    def object_name(self, ident):
+        return f'{self.prefix}{ident}{self.extension}'
+
+    @job_getter
+    def open(self, ident, mode='r') -> Union[S3BucketBinaryWriter, io.TextIOWrapper]:
+        if mode == 'wb':
+            return S3BucketBinaryWriter(self, ident)
+        elif mode == 'w':
+            return io.TextIOWrapper(S3BucketBinaryWriter(self, ident))
+        elif mode == 'rb':
+            return self.client.get_object(self.bucket, self.object_name(ident))
+        elif mode == 'r':
+            return io.TextIOWrapper(self.client.get_object(self.bucket, self.object_name(ident)))
+        else:
+            raise ValueError(mode)
+
+    @job_getter
+    def info(self, ident):
+        return S3BucketInfo(self.client._base_url, f's3://{self.bucket}/{self.object_name(ident)}')
+
+    def __delitem__(self, key):
+        self.client.remove_object(self.bucket, self.object_name(key))
+
 class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
@@ -158,6 +276,7 @@ class DockerRepository(Repository):
     def __repr__(self):
         return f'<DockerRepository {self.domain}/{self.repository}>'
 
+    @job_getter
     def info(self, job):
         return {
             'withdomain': f'{self.domain}/{self.repository}:{job}',
@@ -202,6 +321,7 @@ class LiveKubeRepository(Repository):
     def __repr__(self):
         return f'<LiveKubeRepository task={self.task}>'
 
+    @job_getter
     def info(self, job):
         # Cannot template with live kube info. Implement this if you have something in mind.
         return None
@@ -234,6 +354,7 @@ class AggregateAndRepository(Repository):
     def __contains__(self, item):
         return all(item in child for child in self.children.values())
 
+    @job_getter
     def info(self, job):
         return AggregateRepositoryInfo(self, job)
 
@@ -261,6 +382,7 @@ class AggregateOrRepository(Repository):
     def __contains__(self, item):
         return any(item in child for child in self.children.values())
 
+    @job_getter
     def info(self, job):
         return AggregateRepositoryInfo(self, job)
 
@@ -290,20 +412,71 @@ class BlockingRepository(Repository):
     def __contains__(self, item):
         return item in self.source and not item in self.unless
 
+    @job_getter
     def info(self, job):
         return self.source.info(job)
 
     def __delitem__(self, key):
         del self.source[key]
 
-class YamlMetadataRepository(FileRepository):
+class YamlMetadataRepository(BlobRepository):
     """
     A metadata repository. When info is accessed, it will **load the target file into memory**, parse it as yaml, and
     return the resulting object.
     """
-    def __init__(self, filename, extension='yaml', case_insensitive=False):
-        super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
-
+    @job_getter
     def info(self, job):
         with self.open(job, 'r') as fp:
             return yaml.safe_load(fp)
+
+    @job_getter
+    def dump(self, job, data):
+        with self.open(job, 'w') as fp:
+            yaml.safe_dump(data, fp)
+
+class YamlMetadataFileRepository(FileRepository, YamlMetadataRepository):
+    def __init__(self, filename, extension='.yaml', case_insensitive=False):
+        super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
+
+class YamlMetadataS3Repository(S3BucketRepository, YamlMetadataRepository):
+    def __init__(self, client, bucket, prefix, extension='.yaml', mimetype="text/yaml"):
+        super().__init__(client, bucket, prefix, extension=extension, mimetype=mimetype)
+
+class RelatedItemRepository(Repository):
+    """
+    A repository which returns items from another repository based on following a related-item lookup.
+    """
+
+    def __init__(self, base_repository: Repository, translator: Callable[[str], Optional[str]], allow_deletes=False):
+        self.base_repository = base_repository
+        self.translator = translator
+        self.allow_deletes = allow_deletes
+
+    def __contains__(self, item):
+        basename = self.translator(item)
+        if basename is None:
+            return False
+        return basename in self.base_repository
+
+    def __delitem__(self, key):
+        if not self.allow_deletes:
+            return
+
+        basename = self.translator(key)
+        if basename is None:
+            return
+
+        del self.base_repository[basename]
+
+    def __getattr__(self, item):
+        v = getattr(self.base_repository, item)
+        if not getattr(v, 'is_job_getter', False):
+            return v
+
+        def inner(job, *args, **kwargs):
+            basename = self.translator(job)
+            if basename is None:
+                raise LookupError(job)
+            return v(basename, *args, **kwargs)
+
+        return inner

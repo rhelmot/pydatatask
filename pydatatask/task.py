@@ -1,4 +1,5 @@
-from typing import Optional, Dict, Any, Union, Iterable
+import traceback
+from typing import Optional, Dict, Any, Union, Iterable, Callable
 from datetime import timedelta, datetime, timezone
 import os
 from pathlib import Path
@@ -9,12 +10,13 @@ import yaml
 import jinja2
 from kubernetes.client import V1Pod
 
-from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, AggregateAndRepository
+from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
+    AggregateAndRepository, BlobRepository, YamlMetadataRepository
 from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
 
-__all__ = ('Link', 'Task', 'KubeTask')
+__all__ = ('Link', 'Task', 'KubeTask', 'InProcessSyncTask')
 
 @dataclass
 class Link:
@@ -242,3 +244,40 @@ class LocalProcessTask(Task):
 
     def launch(self, job):
         pass
+
+class InProcessSyncTask(Task):
+    def __init__(
+            self,
+            name: str,
+            done: YamlMetadataRepository=None,
+            ready: Optional[Repository]=None,
+            func: Optional[Callable[['InProcessSyncTask', str], None]]=None,
+    ):
+        super().__init__(name, ready=ready)
+
+        self.done_file = done
+        self.func = func
+        self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
+
+    def __call__(self, f: Callable[['InProcessSyncTask', str], None]) -> 'InProcessSyncTask':
+        self.func = f
+        return self
+
+    def launch(self, job):
+        if self.func is None:
+            l.error("InProcessSyncTask missing a function to call")
+            return
+
+        start_time = datetime.now()
+        l.debug("Launching in-process %s:%s...", self.name, job)
+        try:
+            self.func(self, job)
+        except Exception as e:
+            l.info("In-process task %s:%s failed", self.name, job, exc_info=True)
+            result = {'result': "exception", "exception": repr(e), 'traceback': traceback.format_tb(e.__traceback__)}
+        else:
+            l.debug("...success")
+            result = {'result': "success"}
+        result['start_time'] = start_time
+        result['end_time'] = datetime.now()
+        self.done_file.dump(job, result)

@@ -18,6 +18,7 @@ dependencies = [
     "jinja2",
     "pyyaml",
     "networkx",
+    "minio",
 ]
 
 [optional-dependencies]
