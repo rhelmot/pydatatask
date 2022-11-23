@@ -1,4 +1,6 @@
 from typing import Union, Callable, Optional
+from itertools import islice, cycle
+from collections import Counter
 import shutil
 import string
 from pathlib import Path
@@ -35,6 +37,20 @@ __all__ = (
     'YamlMetadataS3Repository',
     'RelatedItemRepository',
 )
+
+def roundrobin(*iterables):
+    "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
+    # Recipe credited to George Sakkis
+    num_active = len(iterables)
+    nexts = cycle(iter(it).__next__ for it in iterables)
+    while num_active:
+        try:
+            for next in nexts:
+                yield next()
+        except StopIteration:
+            # Remove the iterator we just exhausted from the cycle.
+            num_active -= 1
+            nexts = cycle(islice(nexts, num_active))
 
 def job_getter(f):
     f.is_job_getter = True
@@ -249,7 +265,7 @@ class S3BucketRepository(BlobRepository):
 
     @job_getter
     def info(self, ident):
-        return S3BucketInfo(self.client._base_url, f's3://{self.bucket}/{self.object_name(ident)}')
+        return S3BucketInfo(self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
 
     def __delitem__(self, key):
         self.client.remove_object(self.bucket, self.object_name(key))
@@ -343,13 +359,11 @@ class AggregateAndRepository(Repository):
         self.children = children
 
     def _unfiltered_iter(self):
-        result = None
-        for child in self.children.values():
-            if result is None:
-                result = set(child._unfiltered_iter())
-            else:
-                result &= set(child._unfiltered_iter())
-        return result
+        counting = Counter()
+        for item in roundrobin(*(child._unfiltered_iter() for child in self.children.values())):
+            counting[item] += 1
+            if counting[item] == len(self.children):
+                yield item
 
     def __contains__(self, item):
         return all(item in child for child in self.children.values())
@@ -371,13 +385,13 @@ class AggregateOrRepository(Repository):
         self.children = children
 
     def _unfiltered_iter(self):
-        result = None
+        seen = set()
         for child in self.children.values():
-            if result is None:
-                result = set(child._unfiltered_iter())
-            else:
-                result |= set(child._unfiltered_iter())
-        return result
+            for item in child._unfiltered_iter():
+                if item in seen:
+                    continue
+                seen.add(item)
+                yield item
 
     def __contains__(self, item):
         return any(item in child for child in self.children.values())
@@ -402,12 +416,22 @@ class BlockingRepository(Repository):
     """
     A class that is said to contain a key if `source` contains it and `unless` does not contain it
     """
-    def __init__(self, source: Repository, unless: Repository):
+    def __init__(self, source: Repository, unless: Repository, enumerate_unless=True):
         self.source = source
         self.unless = unless
+        self.enumerate_unless = enumerate_unless
 
     def _unfiltered_iter(self):
-        return set(self.source._unfiltered_iter()) - set(self.unless._unfiltered_iter())
+        if self.enumerate_unless:
+            blocked = set(self.unless._unfiltered_iter())
+        else:
+            blocked = None
+        for item in self.source._unfiltered_iter():
+            if self.enumerate_unless and item in blocked:
+                continue
+            if not self.enumerate_unless and item in self.unless:
+                continue
+            yield item
 
     def __contains__(self, item):
         return item in self.source and not item in self.unless
@@ -426,7 +450,7 @@ class YamlMetadataRepository(BlobRepository):
     """
     @job_getter
     def info(self, job):
-        with self.open(job, 'r') as fp:
+        with self.open(job, 'rb') as fp:
             return yaml.safe_load(fp)
 
     @job_getter
@@ -434,23 +458,40 @@ class YamlMetadataRepository(BlobRepository):
         with self.open(job, 'w') as fp:
             yaml.safe_dump(data, fp)
 
-class YamlMetadataFileRepository(FileRepository, YamlMetadataRepository):
+class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
     def __init__(self, filename, extension='.yaml', case_insensitive=False):
         super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
 
-class YamlMetadataS3Repository(S3BucketRepository, YamlMetadataRepository):
+class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
     def __init__(self, client, bucket, prefix, extension='.yaml', mimetype="text/yaml"):
         super().__init__(client, bucket, prefix, extension=extension, mimetype=mimetype)
+
+    @job_getter
+    def info(self, job):
+        try:
+            return super().info(job)
+        except minio.S3Error as e:
+            if e.code == 'NoSuchKey':
+                return {}
+            else:
+                raise
 
 class RelatedItemRepository(Repository):
     """
     A repository which returns items from another repository based on following a related-item lookup.
     """
 
-    def __init__(self, base_repository: Repository, translator: Callable[[str], Optional[str]], allow_deletes=False):
+    def __init__(
+            self,
+            base_repository: Repository,
+            translator: Callable[[str], Optional[str]],
+            translator_iter: Repository,
+            allow_deletes=False
+    ):
         self.base_repository = base_repository
         self.translator = translator
         self.allow_deletes = allow_deletes
+        self.translator_iter = translator_iter
 
     def __contains__(self, item):
         basename = self.translator(item)
@@ -468,6 +509,14 @@ class RelatedItemRepository(Repository):
 
         del self.base_repository[basename]
 
+    @job_getter
+    def info(self, ident):
+        basename = self.translator(ident)
+        if basename is None:
+            raise LookupError(ident)
+
+        return self.base_repository.info(basename)
+
     def __getattr__(self, item):
         v = getattr(self.base_repository, item)
         if not getattr(v, 'is_job_getter', False):
@@ -480,3 +529,9 @@ class RelatedItemRepository(Repository):
             return v(basename, *args, **kwargs)
 
         return inner
+
+    def _unfiltered_iter(self):
+        for item in self.translator_iter:
+            basename = self.translator(item)
+            if basename is not None and basename in self.base_repository:
+                yield item

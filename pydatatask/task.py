@@ -11,7 +11,7 @@ import jinja2
 from kubernetes.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
-    AggregateAndRepository, BlobRepository, YamlMetadataRepository
+    AggregateAndRepository, BlobRepository, YamlMetadataRepository, RelatedItemRepository
 from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
@@ -72,19 +72,29 @@ class Task:
             required_for_output=required_for_output,
         )
 
-    def plug(self, output: 'Task', output_links: Optional[Iterable[str]]=None):
+    def plug(
+            self,
+            output: 'Task',
+            output_links: Optional[Iterable[str]]=None,
+            meta: bool=True,
+            translator: Optional[Callable[[str], Optional[str]]]=None,
+            translator_iter: Optional[Repository]=None,
+    ):
         for name, link in output.links.items():
             link_attrs = {}
-            if link.inhibits_output:
+            if link.inhibits_output and meta:
                 link_attrs['inhibits_start'] = True
             if link.is_output and (output_links is None or name in output_links):
                 link_attrs['is_input'] = True
-            if link.required_for_output:
+            if link.required_for_output and meta:
                 link_attrs['required_for_start'] = True
             if not link.is_output:
                 name = f'{output.name}_{name}'
             if link_attrs:
-                self.link(name, link.repo, **link_attrs)
+                repo = link.repo
+                if translator is not None and translator_iter is not None:
+                    repo = RelatedItemRepository(repo, translator, translator_iter)
+                self.link(name, repo, **link_attrs)
 
     @property
     def input(self):
@@ -113,6 +123,7 @@ class Task:
     def launch_all(self):
         for job in self.ready:
             try:
+                l.debug("Launching %s:%s", self.name, job)
                 self.launch(job)
             except:
                 l.exception("Failed to launch %s:%s", self, job)
@@ -130,8 +141,8 @@ class KubeTask(Task):
             podman: PodManager,
             name: str,
             template: Union[str, Path],
-            logs: Optional[FileRepository],
-            done: Optional[FileRepository],
+            logs: Optional[BlobRepository],
+            done: Optional[YamlMetadataRepository],
             timeout: Optional[timedelta]=None,
             env: Optional[Dict[str, Any]]=None,
             ready: Optional[Repository]=None,
@@ -185,8 +196,7 @@ class KubeTask(Task):
                 'end_time': datetime.now(timezone.utc),
                 'image': pod.status.container_statuses[0].image,
             }
-            with self.done_file.open(job, 'w') as fp:
-                yaml.dump(data, fp)
+            self.done_file.dump(job, data)
         self.podman.delete(pod)
 
     def update(self):
