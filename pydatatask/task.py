@@ -11,7 +11,7 @@ import jinja2
 from kubernetes.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
-    AggregateAndRepository, BlobRepository, YamlMetadataRepository, RelatedItemRepository
+    AggregateAndRepository, BlobRepository, MetadataRepository, RelatedItemRepository
 from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
@@ -77,8 +77,9 @@ class Task:
             output: 'Task',
             output_links: Optional[Iterable[str]]=None,
             meta: bool=True,
-            translator: Optional[Callable[[str], Optional[str]]]=None,
-            translator_iter: Optional[Repository]=None,
+            translator: Optional[Repository]=None,
+            translate_allow_deletes=False,
+            translate_prefetch_lookup=True,
     ):
         for name, link in output.links.items():
             link_attrs = {}
@@ -92,8 +93,8 @@ class Task:
                 name = f'{output.name}_{name}'
             if link_attrs:
                 repo = link.repo
-                if translator is not None and translator_iter is not None:
-                    repo = RelatedItemRepository(repo, translator, translator_iter)
+                if translator is not None:
+                    repo = RelatedItemRepository(repo, translator, allow_deletes=translate_allow_deletes, prefetch_lookup=translate_prefetch_lookup)
                 self.link(name, repo, **link_attrs)
 
     @property
@@ -134,6 +135,29 @@ class Task:
     def update(self):
         pass
 
+nobody = object()
+class RepositoryInfoTemplate:
+    def __init__(self, repo: Repository, job: str):
+        self._repo = repo
+        self._job = job
+        self._cached = nobody
+
+    @property
+    def _resolved(self):
+        if self._cached is not nobody:
+            return self._cached
+        self._cached = self._repo.info(self._job)
+        return self._cached
+
+    def __getattr__(self, item):
+        return getattr(self._resolved, item)
+
+    def __getitem__(self, item):
+        return self._resolved[item]
+
+    def __str__(self):
+        return str(self._resolved)
+
 
 class KubeTask(Task):
     def __init__(
@@ -142,7 +166,7 @@ class KubeTask(Task):
             name: str,
             template: Union[str, Path],
             logs: Optional[BlobRepository],
-            done: Optional[YamlMetadataRepository],
+            done: Optional[MetadataRepository],
             timeout: Optional[timedelta]=None,
             env: Optional[Dict[str, Any]]=None,
             ready: Optional[Repository]=None,
@@ -164,7 +188,7 @@ class KubeTask(Task):
 
     def _build_env(self, env, job):
         return {
-            key: val.info(job) if isinstance(val, Repository) else val.repo.info(job) if isinstance(val, Link) else val
+            key: RepositoryInfoTemplate(val, job) if isinstance(val, Repository) else RepositoryInfoTemplate(val.repo, job) if isinstance(val, Link) else val
             for key, val in env.items()
             if not key.startswith('_')
         }
@@ -206,7 +230,7 @@ class KubeTask(Task):
         for pod in pods:
             try:
                 uptime: timedelta = datetime.now(timezone.utc) - pod.metadata.creation_timestamp
-                total_min = uptime.seconds // 60
+                total_min = uptime.total_seconds() // 60
                 uptime_hours, uptime_min = divmod(total_min, 60)
                 l.debug("Pod %s is alive for %dh%dm", pod.metadata.name, uptime_hours, uptime_min)
                 if pod.status.phase in ('Succeeded', 'Failed'):
@@ -259,7 +283,7 @@ class InProcessSyncTask(Task):
     def __init__(
             self,
             name: str,
-            done: YamlMetadataRepository=None,
+            done: MetadataRepository=None,
             ready: Optional[Repository]=None,
             func: Optional[Callable[['InProcessSyncTask', str], None]]=None,
     ):

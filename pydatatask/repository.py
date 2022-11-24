@@ -1,4 +1,4 @@
-from typing import Union, Callable, Optional
+from typing import Union, Callable, Optional, Dict, Any
 from itertools import islice, cycle
 from collections import Counter
 import shutil
@@ -13,6 +13,7 @@ import io
 import dreg_client
 import dxf
 import minio
+import pymongo
 
 from .pod_manager import PodManager
 
@@ -21,11 +22,13 @@ l = logging.getLogger(__name__)
 __all__ = (
     'Repository',
     'BlobRepository',
+    'MetadataRepository',
     'FileRepositoryBase',
     'FileRepository',
     'DirectoryRepository',
     'S3BucketRepository',
     'S3BucketInfo',
+    'MongoMetadataRepository',
     'DockerRepository',
     'LiveKubeRepository',
     'AggregateOrRepository',
@@ -96,6 +99,46 @@ class Repository:
         raise NotImplementedError
 
     def __delitem__(self, key):
+        raise NotImplementedError
+
+    def info_all(self) -> Dict[str, Any]:
+        return {ident: self.info(ident) for ident in self}
+
+    def map(self, func: Callable, allow_deletes=False) -> 'MapRepository':
+        return MapRepository(self, func, allow_deletes=allow_deletes)
+
+class MapRepository(Repository):
+    def __init__(self, child: Repository, func: Callable, allow_deletes=False):
+        self.child = child
+        self.func = func
+        self.allow_deletes = allow_deletes
+
+    def __contains__(self, item):
+        return item in self.child
+
+    def __delitem__(self, key):
+        if self.allow_deletes:
+            del self.child[key]
+
+    def _unfiltered_iter(self):
+        return self.child._unfiltered_iter()
+
+    def info(self, ident):
+        return self.func(self.child.info(ident))
+
+    def info_all(self) -> Dict[str, Any]:
+        result = self.child.info_all()
+        for k, v in result.items():
+            result[k] = self.func(v)
+        return result
+
+class MetadataRepository(Repository):
+    @job_getter
+    def info(self, job):
+        raise NotImplementedError
+
+    @job_getter
+    def dump(self, job, data):
         raise NotImplementedError
 
 class BlobRepository(Repository):
@@ -270,6 +313,33 @@ class S3BucketRepository(BlobRepository):
     def __delitem__(self, key):
         self.client.remove_object(self.bucket, self.object_name(key))
 
+class MongoMetadataRepository(MetadataRepository):
+    def __init__(self, collection: pymongo.collection.Collection):
+        self.collection = collection
+
+    def __contains__(self, item):
+        return self.collection.count_documents({'_id': item}) != 0
+
+    def __delitem__(self, key):
+        self.collection.delete_one({'_id': key})
+
+    def _unfiltered_iter(self):
+        yield from (x['_id'] for x in self.collection.find({}, projection=[]))
+
+    @job_getter
+    def info(self, job):
+        result = self.collection.find_one({'_id': job})
+        if result is None:
+            result = {}
+        return result
+
+    def info_all(self) -> Dict[str, Any]:
+        return {entry['_id']: entry for entry in self.collection.find({})}
+
+    @job_getter
+    def dump(self, job, data):
+        self.collection.replace_one({'_id': job}, data, upsert=True)
+
 class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
@@ -443,7 +513,7 @@ class BlockingRepository(Repository):
     def __delitem__(self, key):
         del self.source[key]
 
-class YamlMetadataRepository(BlobRepository):
+class YamlMetadataRepository(BlobRepository, MetadataRepository):
     """
     A metadata repository. When info is accessed, it will **load the target file into memory**, parse it as yaml, and
     return the resulting object.
@@ -484,17 +554,26 @@ class RelatedItemRepository(Repository):
     def __init__(
             self,
             base_repository: Repository,
-            translator: Callable[[str], Optional[str]],
-            translator_iter: Repository,
-            allow_deletes=False
+            translator_repository: Repository,
+            allow_deletes=False,
+            prefetch_lookup=True,
     ):
         self.base_repository = base_repository
-        self.translator = translator
+        self.translator_repository = translator_repository
         self.allow_deletes = allow_deletes
-        self.translator_iter = translator_iter
+        self.prefetch_lookup = None
+
+        if prefetch_lookup:
+            self.prefetch_lookup = self.translator_repository.info_all()
+
+    def _lookup(self, item):
+        if self.prefetch_lookup is not None:
+            return self.prefetch_lookup.get(item)
+        else:
+            return self.translator_repository.info(item)
 
     def __contains__(self, item):
-        basename = self.translator(item)
+        basename = self._lookup(item)
         if basename is None:
             return False
         return basename in self.base_repository
@@ -503,7 +582,7 @@ class RelatedItemRepository(Repository):
         if not self.allow_deletes:
             return
 
-        basename = self.translator(key)
+        basename = self._lookup(key)
         if basename is None:
             return
 
@@ -511,7 +590,7 @@ class RelatedItemRepository(Repository):
 
     @job_getter
     def info(self, ident):
-        basename = self.translator(ident)
+        basename = self._lookup(ident)
         if basename is None:
             raise LookupError(ident)
 
@@ -523,7 +602,7 @@ class RelatedItemRepository(Repository):
             return v
 
         def inner(job, *args, **kwargs):
-            basename = self.translator(job)
+            basename = self._lookup(job)
             if basename is None:
                 raise LookupError(job)
             return v(basename, *args, **kwargs)
@@ -531,7 +610,7 @@ class RelatedItemRepository(Repository):
         return inner
 
     def _unfiltered_iter(self):
-        for item in self.translator_iter:
-            basename = self.translator(item)
-            if basename is not None and basename in self.base_repository:
+        for item in self.translator_repository:
+            basename = self._lookup(item)
+            if basename is not None: # and basename in self.base_repository:
                 yield item
