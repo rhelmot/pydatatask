@@ -1,8 +1,9 @@
 import argparse
 import sys
 from typing import Union
+import yaml
 
-from . import FileRepository
+from . import BlobRepository, MetadataRepository
 from .pipeline import Pipeline
 from .repository import Repository
 from .task import Task
@@ -92,9 +93,12 @@ def cat_data(pipeline: Pipeline, args: argparse.Namespace):
     taskname, reponame = args.data.split('.')
     item = pipeline.tasks[taskname].links[reponame].repo
 
-    if not isinstance(item, FileRepository):
-        print("Error: cannot cat a repository which is not a file")
+    if isinstance(item, BlobRepository):
+        with item.open(args.job, 'rb') as fp:
+            sys.stdout.buffer.write(fp.read())
+    elif isinstance(item, MetadataRepository):
+        data = item.info(args.job)
+        yaml.safe_dump(data, sys.stdout)
+    else:
+        print("Error: cannot cat a repository which is not a blob or metadata")
         exit(1)
-
-    with item.open(args.job, 'rb') as fp:
-        sys.stdout.buffer.write(fp.read())
