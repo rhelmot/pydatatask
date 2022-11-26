@@ -17,15 +17,17 @@ class Pipeline:
 
     def update(self):
         l.info("Running update...")
+        result = False
         for task in self.tasks.values():
             l.debug("Running update for %s", task.name)
-            task.update()
+            result |= task.update()
 
         for task in self.tasks.values():
             l.debug("Launching tasks for %s", task.name)
-            task.launch_all()
+            result |= task.launch_all()
 
         l.debug("Completed update")
+        return result
 
     def graph(self):
         result = networkx.DiGraph()

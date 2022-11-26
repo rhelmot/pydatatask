@@ -1,22 +1,24 @@
+from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple
+from asyncio import Future
 import traceback
-from typing import Optional, Dict, Any, Union, Iterable, Callable
 from datetime import timedelta, datetime, timezone
 import os
 from pathlib import Path
 import logging
 from dataclasses import dataclass
+from concurrent.futures import Executor, wait, FIRST_EXCEPTION
 
 import yaml
 import jinja2
 from kubernetes.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
-    AggregateAndRepository, BlobRepository, MetadataRepository, RelatedItemRepository
+    AggregateAndRepository, BlobRepository, MetadataRepository, RelatedItemRepository, ExecutorLiveRepo
 from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
 
-__all__ = ('Link', 'Task', 'KubeTask', 'InProcessSyncTask')
+__all__ = ('Link', 'Task', 'KubeTask', 'InProcessSyncTask', 'ExecutorTask')
 
 @dataclass
 class Link:
@@ -122,18 +124,24 @@ class Task:
         return {name: link.repo for name, link in self.links.items() if link.inhibits_output}
 
     def launch_all(self):
+        result = False
         for job in self.ready:
+            result = True
             try:
                 l.debug("Launching %s:%s", self.name, job)
                 self.launch(job)
             except:
                 l.exception("Failed to launch %s:%s", self, job)
+        return result
 
     def launch(self, job):
         raise NotImplementedError
 
-    def update(self):
-        pass
+    def update(self) -> bool:
+        """
+        Performs any maintenance operations on the set of live tasks. Returns True if literally anything interesting happened.
+        """
+        return False
 
 nobody = object()
 class RepositoryInfoTemplate:
@@ -225,10 +233,11 @@ class KubeTask(Task):
         self.podman.delete(pod)
 
     def update(self):
-        super().update()
+        result = super().update()
 
         pods = self.podman.query(task=self.name)
         for pod in pods:
+            result = True
             try:
                 uptime: timedelta = datetime.now(timezone.utc) - pod.metadata.creation_timestamp
                 total_min = uptime.total_seconds() // 60
@@ -243,6 +252,7 @@ class KubeTask(Task):
                     self._cleanup(pod, 'Timeout')
             except:
                 l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
+        return result
 
     def handle_timeout(self, pod):
         pass
@@ -275,7 +285,7 @@ class LocalProcessTask(Task):
         self.stderr = stderr
 
     def update(self):
-        pass
+        return False
 
     def launch(self, job):
         pass
@@ -316,3 +326,61 @@ class InProcessSyncTask(Task):
         result['start_time'] = start_time
         result['end_time'] = datetime.now()
         self.done_file.dump(job, result)
+
+class ExecutorTask(Task):
+    def __init__(self, name: str, executor: Executor, done: MetadataRepository, ready: Optional[Repository]=None, func: Optional[Callable[['ExecutorTask', str], None]]=None):
+        super().__init__(name, ready)
+
+        self.executor = executor
+        self.func = func
+        self.jobs: Dict[Future, Tuple[str, datetime]] = {}
+        self.rev_jobs: Dict[str, Future] = {}
+        self.live = ExecutorLiveRepo(self)
+        self.done = done
+        self.link("live", self.live, is_status=True, inhibits_output=True, inhibits_start=True)
+        self.link("done", self.done, is_status=True, required_for_output=True, inhibits_start=True)
+
+    def __call__(self, f: Callable[['ExecutorTask', str], None]) -> 'ExecutorTask':
+        self.func = f
+        return self
+
+    def update(self):
+        result = bool(self.jobs)
+        done, _ = wait(self.jobs, 0, FIRST_EXCEPTION)
+        for finished_job in done:
+            job, start_time = self.jobs.pop(finished_job)
+            self.rev_jobs.pop(job)
+            e = finished_job.exception()
+            if e is not None:
+                l.info("Executor task %s:%s failed", self.name, job, exc_info=e)
+                data = {
+                    'result': "exception",
+                    "exception": repr(e),
+                    'traceback': traceback.format_tb(e.__traceback__),
+                    'end_time': datetime.now(),
+                }
+            else:
+                l.debug("...executor task %s:%s success", self.name, job)
+                data = {'result': "success", 'end_time': finished_job.result()}
+            data['start_time'] = start_time
+            self.done.dump(job, data)
+        return result
+
+    def launch(self, job):
+        if self.func is None:
+            raise ValueError("InProcessAsyncTask %s has func None" % self.name)
+        l.debug("Launching %s:%s with %s...", self.name, job, self.executor)
+        running_job = self.executor.submit(self._timestamped_func, self.func, self, job)
+        self.jobs[running_job] = (job, datetime.now())
+        self.rev_jobs[job] = running_job
+
+    def cancel(self, job):
+        future = self.rev_jobs.pop(job)
+        if future is not None:
+            future.cancel()
+            self.jobs.pop(future)
+
+    @staticmethod
+    def _timestamped_func(func, task, job):
+        func(task, job)
+        return datetime.now()

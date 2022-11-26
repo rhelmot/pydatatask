@@ -14,6 +14,9 @@ def main(pipeline: Pipeline):
 
     parser_update = subparsers.add_parser("update", help="Keep the pipeline in motion")
 
+    parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
+    parser_run.add_argument("--forever", action="store_true", help="Run forever")
+
     parser_status = subparsers.add_parser("status", help="View the pipeline status")
     parser_status.add_argument("--all", "-a", action="store_true", help="Show internal repositories")
 
@@ -33,6 +36,8 @@ def main(pipeline: Pipeline):
 
     if args.cmd == "update":
         pipeline.update()
+    elif args.cmd == "run":
+        run(pipeline, args)
     elif args.cmd == "status":
         print_status(pipeline, args)
     elif args.cmd == "rm":
@@ -43,6 +48,10 @@ def main(pipeline: Pipeline):
         cat_data(pipeline, args)
     else:
         assert False, "This should be unreachable"
+
+def run(pipeline: Pipeline, args: argparse.Namespace):
+    while pipeline.update() or args.forever:
+        pass
 
 def print_status(pipeline: Pipeline, args: argparse.Namespace):
     for task in pipeline.tasks.values():

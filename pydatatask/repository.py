@@ -1,4 +1,4 @@
-from typing import Union, Callable, Optional, Dict, Any
+from typing import Union, Callable, Dict, Any, TYPE_CHECKING
 from itertools import islice, cycle
 from collections import Counter
 import shutil
@@ -17,6 +17,9 @@ import pymongo
 
 from .pod_manager import PodManager
 
+if TYPE_CHECKING:
+    from .task import ExecutorTask
+
 l = logging.getLogger(__name__)
 
 __all__ = (
@@ -29,8 +32,10 @@ __all__ = (
     'S3BucketRepository',
     'S3BucketInfo',
     'MongoMetadataRepository',
+    'InProcessMetadataRepository',
     'DockerRepository',
     'LiveKubeRepository',
+    'ExecutorLiveRepo',
     'AggregateOrRepository',
     'AggregateAndRepository',
     'AggregateRepositoryInfo',
@@ -614,3 +619,38 @@ class RelatedItemRepository(Repository):
             basename = self._lookup(item)
             if basename is not None: # and basename in self.base_repository:
                 yield item
+
+class ExecutorLiveRepo(Repository):
+    def __init__(self, task: 'ExecutorTask'):
+        self.task = task
+
+    def _unfiltered_iter(self):
+        return self.task.rev_jobs
+
+    def __contains__(self, item):
+        return item in self.task.rev_jobs
+
+    def __delitem__(self, key):
+        self.task.cancel(key)
+
+    def info(self, ident):
+        return None
+
+class InProcessMetadataRepository(MetadataRepository):
+    def __init__(self, data: Dict[str, Any]):
+        self.data = data
+
+    def info(self, job):
+        return self.data.get(job)
+
+    def dump(self, job, data):
+        self.data[job] = data
+
+    def __contains__(self, item):
+        return item in self.data
+
+    def __delitem__(self, key):
+        del self.data[key]
+
+    def _unfiltered_iter(self):
+        return self.data
