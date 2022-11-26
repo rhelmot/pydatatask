@@ -81,7 +81,7 @@ class Task:
             meta: bool=True,
             translator: Optional[Repository]=None,
             translate_allow_deletes=False,
-            translate_prefetch_lookup=True,
+            translate_prefetch_lookup=None,
     ):
         for name, link in output.links.items():
             link_attrs = {}

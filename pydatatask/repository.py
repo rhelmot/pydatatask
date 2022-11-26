@@ -561,17 +561,20 @@ class RelatedItemRepository(Repository):
             base_repository: Repository,
             translator_repository: Repository,
             allow_deletes=False,
-            prefetch_lookup=True,
+            prefetch_lookup=None,
     ):
         self.base_repository = base_repository
         self.translator_repository = translator_repository
         self.allow_deletes = allow_deletes
+        self.prefetch_lookup_setting = prefetch_lookup
         self.prefetch_lookup = None
 
-        if prefetch_lookup:
+        if prefetch_lookup is True:
             self.prefetch_lookup = self.translator_repository.info_all()
 
     def _lookup(self, item):
+        if self.prefetch_lookup is None and self.prefetch_lookup_setting is None:
+            self.prefetch_lookup = self.translator_repository.info_all()
         if self.prefetch_lookup is not None:
             return self.prefetch_lookup.get(item)
         else:
