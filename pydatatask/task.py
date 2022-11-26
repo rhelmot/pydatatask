@@ -219,6 +219,7 @@ class KubeTask(Task):
                 'start_time': pod.metadata.creation_timestamp,
                 'end_time': datetime.now(timezone.utc),
                 'image': pod.status.container_statuses[0].image,
+                'node': pod.spec.node_name,
             }
             self.done_file.dump(job, data)
         self.podman.delete(pod)
