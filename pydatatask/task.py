@@ -1,4 +1,8 @@
+import sys
+import time
+from enum import Enum, auto
 from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple
+import inspect
 from asyncio import Future
 import traceback
 from datetime import timedelta, datetime, timezone
@@ -18,7 +22,37 @@ from .pod_manager import PodManager
 
 l = logging.getLogger(__name__)
 
-__all__ = ('Link', 'Task', 'KubeTask', 'InProcessSyncTask', 'ExecutorTask')
+__all__ = ('Link', 'Task', 'KubeTask', 'InProcessSyncTask', 'ExecutorTask', 'KubeFunctionTask', 'settings')
+
+class RepoHandlingMode(Enum):
+    LAZY = auto()
+    SMART = auto()
+    EAGER = auto()
+
+def build_env(env, job, mode: RepoHandlingMode):
+    result = {}
+    for key, val in env.items():
+        if isinstance(val, Repository):
+            repo = val
+        elif isinstance(val, Link):
+            repo = val.repo
+        else:
+            result[key] = val
+            continue
+        if mode == RepoHandlingMode.SMART:
+            result[key] = repo
+        elif mode == RepoHandlingMode.LAZY:
+            result[key] = RepositoryInfoTemplate(repo, job)
+        else:
+            result[key] = repo.info(job)
+    return result
+
+SYNCHRONOUS = False
+METADATA = True
+def settings(sync, meta):
+    global SYNCHRONOUS, METADATA
+    SYNCHRONOUS = sync
+    METADATA = meta
 
 @dataclass
 class Link:
@@ -143,6 +177,13 @@ class Task:
         """
         return False
 
+    def validate(self):
+        """
+        Raise an exception if for any reason the task is misconfigured.
+        :return:
+        """
+        pass
+
 nobody = object()
 class RepositoryInfoTemplate:
     def __init__(self, repo: Repository, job: str):
@@ -185,7 +226,7 @@ class KubeTask(Task):
         self.podman = podman
         self.logs = logs
         self.timeout = timeout
-        self.done_file = done
+        self.done = done
         self.env = env
 
         self.link("live", LiveKubeRepository(podman, name), is_status=True, inhibits_start=True, inhibits_output=True)
@@ -194,17 +235,7 @@ class KubeTask(Task):
         if done:
             self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
 
-    def _build_env(self, env, job):
-        return {
-            key: RepositoryInfoTemplate(val, job) if isinstance(val, Repository) else RepositoryInfoTemplate(val.repo, job) if isinstance(val, Link) else val
-            for key, val in env.items()
-            if not key.startswith('_')
-        }
-
-    def launch(self, job):
-        env = self._build_env(vars(self) | self.links | (self.env or {}), job)
-        env['job'] = job
-
+    def render_template(self, env):
         j = jinja2.Environment()
         if os.path.isfile(self.template):
             with open(self.template, 'r') as fp:
@@ -213,15 +244,26 @@ class KubeTask(Task):
             template = self.template
         template = j.from_string(template)
         rendered = template.render(**env)
-        parsed = yaml.safe_load(rendered)
+        return yaml.safe_load(rendered)
+
+    def launch(self, job):
+        env = build_env(vars(self) | self.links | (self.env or {}), job, RepoHandlingMode.LAZY)
+        env['job'] = job
+        env['task'] = self.name
+        env['argv0'] = os.path.basename(sys.argv[0])
+        parsed = self.render_template(env)
+
         self.podman.launch(job, self.name, parsed)
 
     def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels['job']
         if self.logs is not None:
             with self.logs.open(job, 'w') as fp:
-                fp.write(self.podman.logs(pod))
-        if self.done_file is not None:
+                try:
+                    fp.write(self.podman.logs(pod))
+                except TimeoutError:
+                    fp.write('<failed to fetch logs>\n')
+        if self.done is not None:
             data = {
                 'reason': reason,
                 'start_time': pod.metadata.creation_timestamp,
@@ -229,7 +271,7 @@ class KubeTask(Task):
                 'image': pod.status.container_statuses[0].image,
                 'node': pod.spec.node_name,
             }
-            self.done_file.dump(job, data)
+            self.done.dump(job, data)
         self.podman.delete(pod)
 
     def update(self):
@@ -296,27 +338,41 @@ class InProcessSyncTask(Task):
             name: str,
             done: MetadataRepository=None,
             ready: Optional[Repository]=None,
-            func: Optional[Callable[['InProcessSyncTask', str], None]]=None,
+            func: Optional[Callable[[str, ...], None]]=None,
     ):
         super().__init__(name, ready=ready)
 
-        self.done_file = done
+        self.done = done
         self.func = func
         self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
+        self._env = {}
 
-    def __call__(self, f: Callable[['InProcessSyncTask', str], None]) -> 'InProcessSyncTask':
+    def __call__(self, f: Callable[[str, ...], None]) -> 'InProcessSyncTask':
         self.func = f
         return self
 
-    def launch(self, job):
+    def validate(self):
         if self.func is None:
-            l.error("InProcessSyncTask missing a function to call")
-            return
+            raise ValueError("InProcessSyncTask.func is None")
 
+        sig = inspect.signature(self.func, follow_wrapped=True)
+        for name in sig.parameters.keys():
+            if name == 'job':
+                self._env[name] = None
+            elif name in self.links:
+                self._env[name] = self.links[name].repo
+            else:
+                raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+
+    def launch(self, job):
         start_time = datetime.now()
         l.debug("Launching in-process %s:%s...", self.name, job)
+        args = dict(self._env)
+        if 'job' in args:
+            args['job'] = job
+        args = build_env(args, job, RepoHandlingMode.SMART)
         try:
-            self.func(self, job)
+            self.func(**args)
         except Exception as e:
             l.info("In-process task %s:%s failed", self.name, job, exc_info=True)
             result = {'result': "exception", "exception": repr(e), 'traceback': traceback.format_tb(e.__traceback__)}
@@ -325,10 +381,10 @@ class InProcessSyncTask(Task):
             result = {'result': "success"}
         result['start_time'] = start_time
         result['end_time'] = datetime.now()
-        self.done_file.dump(job, result)
+        self.done.dump(job, result)
 
 class ExecutorTask(Task):
-    def __init__(self, name: str, executor: Executor, done: MetadataRepository, ready: Optional[Repository]=None, func: Optional[Callable[['ExecutorTask', str], None]]=None):
+    def __init__(self, name: str, executor: Executor, done: MetadataRepository, ready: Optional[Repository]=None, func: Optional[Callable]=None):
         super().__init__(name, ready)
 
         self.executor = executor
@@ -337,10 +393,11 @@ class ExecutorTask(Task):
         self.rev_jobs: Dict[str, Future] = {}
         self.live = ExecutorLiveRepo(self)
         self.done = done
+        self._env = {}
         self.link("live", self.live, is_status=True, inhibits_output=True, inhibits_start=True)
         self.link("done", self.done, is_status=True, required_for_output=True, inhibits_start=True)
 
-    def __call__(self, f: Callable[['ExecutorTask', str], None]) -> 'ExecutorTask':
+    def __call__(self, f: Callable) -> 'ExecutorTask':
         self.func = f
         return self
 
@@ -350,29 +407,53 @@ class ExecutorTask(Task):
         for finished_job in done:
             job, start_time = self.jobs.pop(finished_job)
             self.rev_jobs.pop(job)
-            e = finished_job.exception()
-            if e is not None:
-                l.info("Executor task %s:%s failed", self.name, job, exc_info=e)
-                data = {
-                    'result': "exception",
-                    "exception": repr(e),
-                    'traceback': traceback.format_tb(e.__traceback__),
-                    'end_time': datetime.now(),
-                }
-            else:
-                l.debug("...executor task %s:%s success", self.name, job)
-                data = {'result': "success", 'end_time': finished_job.result()}
-            data['start_time'] = start_time
-            self.done.dump(job, data)
+            self._cleanup(finished_job, job, start_time)
         return result
 
-    def launch(self, job):
+    def _cleanup(self, job_future, job, start_time):
+        e = job_future.exception()
+        if e is not None:
+            l.info("Executor task %s:%s failed", self.name, job, exc_info=e)
+            data = {
+                'result': "exception",
+                "exception": repr(e),
+                'traceback': traceback.format_tb(e.__traceback__),
+                'end_time': datetime.now(),
+            }
+        else:
+            l.debug("...executor task %s:%s success", self.name, job)
+            data = {'result': "success", 'end_time': job_future.result()}
+        data['start_time'] = start_time
+        self.done.dump(job, data)
+
+    def validate(self):
         if self.func is None:
             raise ValueError("InProcessAsyncTask %s has func None" % self.name)
+
+        sig = inspect.signature(self.func, follow_wrapped=True)
+        for name in sig.parameters.keys():
+            if name == 'job':
+                self._env[name] = None
+            elif name in self.links:
+                self._env[name] = self.links[name].repo
+            else:
+                raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+
+    def launch(self, job):
         l.debug("Launching %s:%s with %s...", self.name, job, self.executor)
-        running_job = self.executor.submit(self._timestamped_func, self.func, self, job)
-        self.jobs[running_job] = (job, datetime.now())
-        self.rev_jobs[job] = running_job
+        args = dict(self._env)
+        if 'job' in args:
+            args['job'] = job
+        args = build_env(args, job, RepoHandlingMode.SMART)
+        start_time = datetime.now()
+        running_job = self.executor.submit(self._timestamped_func, self.func, args)
+        if SYNCHRONOUS:
+            while not running_job.done():
+                time.sleep(0.1)
+            self._cleanup(running_job, job, start_time)
+        else:
+            self.jobs[running_job] = (job, start_time)
+            self.rev_jobs[job] = running_job
 
     def cancel(self, job):
         future = self.rev_jobs.pop(job)
@@ -381,6 +462,65 @@ class ExecutorTask(Task):
             self.jobs.pop(future)
 
     @staticmethod
-    def _timestamped_func(func, task, job):
-        func(task, job)
+    def _timestamped_func(func, args):
+        func(**args)
         return datetime.now()
+
+class KubeFunctionTask(KubeTask):
+    def __init__(
+            self,
+            podman: PodManager,
+            name: str,
+            template: Union[str, Path],
+            logs: Optional[BlobRepository],
+            kube_done: Optional[MetadataRepository],
+            func_done: Optional[MetadataRepository],
+            func: Optional[Callable]=None,
+    ):
+        super().__init__(podman, name, template, logs, kube_done)
+        self.func = func
+        self.func_done = func_done
+        self._env = {}
+
+    def __call__(self, f: Callable) -> 'KubeFunctionTask':
+        self.func = f
+        return self
+
+    def validate(self):
+        if self.func is None:
+            raise ValueError("KubeFunctionTask %s has func None" % self.name)
+
+        sig = inspect.signature(self.func, follow_wrapped=True)
+        for name in sig.parameters.keys():
+            if name == 'job':
+                self._env[name] = None
+            elif name in self.links:
+                self._env[name] = self.links[name].repo
+            else:
+                raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+
+    def launch(self, job):
+        if SYNCHRONOUS:
+            self.launch_sync(job)
+        else:
+            super().launch(job)
+
+    def launch_sync(self, job):
+        start_time = datetime.now()
+        l.debug("Launching --sync %s:%s...", self.name, job)
+        args = dict(self._env)
+        if 'job' in args:
+            args['job'] = job
+        args = build_env(args, job, RepoHandlingMode.SMART)
+        try:
+            self.func(**args)
+        except Exception as e:
+            l.info("--sync task %s:%s failed", self.name, job, exc_info=True)
+            result = {'result': "exception", "exception": repr(e), 'traceback': traceback.format_tb(e.__traceback__)}
+        else:
+            l.debug("...success")
+            result = {'result': "success"}
+        result['start_time'] = start_time
+        result['end_time'] = datetime.now()
+        if METADATA:
+            self.func_done.dump(job, result)

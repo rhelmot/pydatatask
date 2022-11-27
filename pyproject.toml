@@ -20,6 +20,7 @@ dependencies = [
     "networkx",
     "minio",
     "pymongo",
+    "ipython",
 ]
 
 [optional-dependencies]

@@ -109,6 +109,12 @@ class Repository:
     def info_all(self) -> Dict[str, Any]:
         return {ident: self.info(ident) for ident in self}
 
+    def validate(self):
+        """
+        Raise an exception if for any reason the repository is misconfigured.
+        """
+        pass
+
     def map(self, func: Callable, allow_deletes=False) -> 'MapRepository':
         return MapRepository(self, func, allow_deletes=allow_deletes)
 
@@ -157,8 +163,6 @@ class FileRepositoryBase(Repository):
         self.extension = extension
         self.case_insensitive = case_insensitive
 
-        self.ensure_exists()
-
     def __contains__(self, item):
         return (self.basedir / (item + self.extension)).exists()
 
@@ -176,8 +180,8 @@ class FileRepositoryBase(Repository):
             )
         )
 
-    def ensure_exists(self):
-        self.basedir.mkdir(exist_ok=True, parents=True)
+    def validate(self):
+        self.basedir.mkdir(exist_ok=True)
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
@@ -275,8 +279,6 @@ class S3BucketRepository(BlobRepository):
         self.extension = extension
         self.mimetype = mimetype
 
-        self.ensure_exists()
-
     def __contains__(self, item):
         try:
             self.client.stat_object(self.bucket, self.object_name(item))
@@ -290,7 +292,7 @@ class S3BucketRepository(BlobRepository):
             if obj.object_name.endswith(self.extension):
                 yield obj.object_name[len(self.prefix):-len(self.extension) if self.extension else None]
 
-    def ensure_exists(self):
+    def validate(self):
         if not self.client.bucket_exists(self.bucket):
             self.client.make_bucket(self.bucket)
 

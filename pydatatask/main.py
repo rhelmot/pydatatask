@@ -2,11 +2,16 @@ import argparse
 import sys
 from typing import Union
 import yaml
+import logging
+import time
+import IPython
 
 from . import BlobRepository, MetadataRepository
 from .pipeline import Pipeline
 from .repository import Repository
-from .task import Task
+from .task import Task, settings
+
+l = logging.getLogger(__name__)
 
 def main(pipeline: Pipeline):
     parser = argparse.ArgumentParser()
@@ -16,6 +21,7 @@ def main(pipeline: Pipeline):
 
     parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
+    parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
 
     parser_status = subparsers.add_parser("status", help="View the pipeline status")
     parser_status.add_argument("--all", "-a", action="store_true", help="Show internal repositories")
@@ -32,6 +38,15 @@ def main(pipeline: Pipeline):
     parser_cat.add_argument("data", type=str, help="Name of repository [task.repo] from which to print data")
     parser_cat.add_argument("job", type=str, help="Name of job of which to delete data")
 
+    parser_launch = subparsers.add_parser("launch", help="Manually start a task")
+    parser_launch.add_argument("task", type=str, help="Name of task to launch")
+    parser_launch.add_argument("job", type=str, help="Name of job to launch task on")
+    parser_launch.add_argument("--force", "-f", action="store_true", help="Launch even if start is inhibited by data")
+    parser_launch.add_argument("--sync", action="store_true", help="Run the task in-process, if possible")
+    parser_launch.add_argument("--meta", action=argparse.BooleanOptionalAction, default=False, help="Store metadata related to task completion")
+
+    parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
+
     args = parser.parse_args()
 
     if args.cmd == "update":
@@ -46,12 +61,19 @@ def main(pipeline: Pipeline):
         list_data(pipeline, args)
     elif args.cmd == "cat":
         cat_data(pipeline, args)
+    elif args.cmd == "launch":
+        launch(pipeline, args)
+    elif args.cmd == "shell":
+        IPython.embed()
     else:
         assert False, "This should be unreachable"
 
 def run(pipeline: Pipeline, args: argparse.Namespace):
-    while pipeline.update() or args.forever:
-        pass
+    func = pipeline.update
+    while func() or args.forever:
+        if args.launch_once:
+            func = pipeline.update_only_update
+        time.sleep(1)
 
 def print_status(pipeline: Pipeline, args: argparse.Namespace):
     for task in pipeline.tasks.values():
@@ -110,4 +132,15 @@ def cat_data(pipeline: Pipeline, args: argparse.Namespace):
         yaml.safe_dump(data, sys.stdout)
     else:
         print("Error: cannot cat a repository which is not a blob or metadata")
+        exit(1)
+
+def launch(pipeline: Pipeline, args: argparse.Namespace):
+    task = pipeline.tasks[args.task]
+    job = args.job
+    settings(args.sync, args.meta)
+
+    if args.force or job in task.ready:
+        task.launch(job)
+    else:
+        l.warning("Task is not ready to launch - use -f to force")
         exit(1)

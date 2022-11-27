@@ -1,6 +1,7 @@
 from typing import Optional, Union
 import logging
 
+import kubernetes.client.exceptions
 from kubernetes.client import ApiClient, CoreV1Api
 from kubernetes.utils import parse_quantity
 
@@ -28,10 +29,14 @@ class PodManager:
 
         self.warned = set()
 
-        for pod in self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app).items:
-            for container in pod.spec.containers:
-                self.cpu_usage += parse_quantity(container.resources.requests['cpu'])
-                self.mem_usage += parse_quantity(container.resources.requests['memory'])
+        try:
+            for pod in self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app).items:
+                for container in pod.spec.containers:
+                    self.cpu_usage += parse_quantity(container.resources.requests['cpu'])
+                    self.mem_usage += parse_quantity(container.resources.requests['memory'])
+        except kubernetes.client.exceptions.ApiException as e:
+            if e.reason != "Forbidden":
+                raise
 
     @property
     def v1(self):
@@ -90,5 +95,5 @@ class PodManager:
             self.cpu_usage -= parse_quantity(container.resources.requests['cpu'])
             self.mem_usage -= parse_quantity(container.resources.requests['memory'])
 
-    def logs(self, pod):
-        return self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace)
+    def logs(self, pod, timeout=10):
+        return self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)
