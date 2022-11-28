@@ -12,7 +12,7 @@ description = "Library for constructing data-centric processing pipelines"
 requires-python = ">=3.10"
 
 dependencies = [
-    "kubernetes",
+    "kubernetes_asyncio",
     "dreg-client",
     "python-dxf",
     "jinja2",

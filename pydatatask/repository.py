@@ -1,7 +1,8 @@
-from typing import Union, Callable, Dict, Any, TYPE_CHECKING
-from itertools import islice, cycle
+import inspect
+from typing import Union, Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List
+import base64
 from collections import Counter
-import shutil
+import codecs
 import string
 from pathlib import Path
 import logging
@@ -9,11 +10,14 @@ import yaml
 import os
 import hashlib
 import io
+import asyncio
 
-import dreg_client
+import aiofiles.os
 import dxf
-import minio
-import pymongo
+import miniopy_async
+import motor.motor_asyncio
+import docker_registry_client_async
+import aioshutil
 
 from .pod_manager import PodManager
 
@@ -44,23 +48,62 @@ __all__ = (
     'YamlMetadataFileRepository',
     'YamlMetadataS3Repository',
     'RelatedItemRepository',
+    'AReadStream',
+    'AWriteStream',
 )
 
-def roundrobin(*iterables):
+class AReadStream(Protocol):
+    async def read(self, n: Optional[int]=None) -> bytes:
+        ...
+
+class AWriteStream(Protocol):
+    async def write(self, data: bytes):
+        ...
+
+class AReadText:
+    def __init__(self, base: AReadStream, encoding: str='utf-8', errors='strict', chunksize=4096):
+        self.base = base
+        self.decoder = codecs.lookup(encoding).incrementaldecoder(errors)
+        self.buffer = ""
+        self.chunksize = chunksize
+
+    async def read(self, n: Optional[int]) -> str:
+        while n is not None and len(self.buffer) < n:
+            data = await self.base.read(self.chunksize)
+            self.buffer += self.decoder.decode(data, final=not bool(data))
+            if not data:
+                break
+
+        if n is not None:
+            result, self.buffer = self.buffer[:n], self.buffer[:n]
+        else:
+            result, self.buffer = self.buffer, ""
+        return result
+
+class AWriteText:
+    def __init__(self, base: AWriteStream, encoding='utf-8', errors='strict'):
+        self.base = base
+        self.encoding = encoding
+        self.errors = errors
+
+    async def write(self, data: str):
+        await self.base.write(data.encode(self.encoding, self.errors))
+
+async def roundrobin(iterables: List):
     "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
-    # Recipe credited to George Sakkis
-    num_active = len(iterables)
-    nexts = cycle(iter(it).__next__ for it in iterables)
-    while num_active:
+    i = 0
+    while iterables:
         try:
-            for next in nexts:
-                yield next()
+            yield await anext(iterables[i])
         except StopIteration:
-            # Remove the iterator we just exhausted from the cycle.
-            num_active -= 1
-            nexts = cycle(islice(nexts, num_active))
+            iterables.pop(i)
+        else:
+            i += 1
+        i %= len(iterables)
 
 def job_getter(f):
+    if not inspect.iscoroutinefunction(f):
+        raise TypeError("only async functions can be job_getters")
     f.is_job_getter = True
     return f
 
@@ -79,37 +122,37 @@ class Repository:
                ident[0] in cls.CHARSET_START_END and \
                ident[-1] in cls.CHARSET_START_END
 
-    def filter_jobs(self, iterator):
-        for ident in iterator:
+    async def filter_jobs(self, iterator: AsyncIterable[str]):
+        async for ident in iterator:
             if self.is_valid_job_id(ident):
                 yield ident
             else:
                 l.warning("Skipping %s %s - not a valid job id", self, ident)
 
-    def __contains__(self, item):
-        return any(item == x for x in self)
+    async def contains(self, item):
+        return any(item == x async for x in self)
 
-    def __iter__(self):
+    def __aiter__(self):
         return self.filter_jobs(self._unfiltered_iter())
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self) -> AsyncGenerator[str]:
         raise NotImplementedError
 
     @job_getter
-    def info(self, ident):
+    async def info(self, ident):
         """
         Returns an arbitrary piece of data related to ident. Notably, this is used during templating.
         This should do something meaningful even if the repository does not contain ident.
         """
         raise NotImplementedError
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         raise NotImplementedError
 
-    def info_all(self) -> Dict[str, Any]:
-        return {ident: self.info(ident) for ident in self}
+    async def info_all(self) -> Dict[str, Any]:
+        return {ident: await self.info(ident) async for ident in self}
 
-    def validate(self):
+    async def validate(self):
         """
         Raise an exception if for any reason the repository is misconfigured.
         """
@@ -124,37 +167,38 @@ class MapRepository(Repository):
         self.func = func
         self.allow_deletes = allow_deletes
 
-    def __contains__(self, item):
-        return item in self.child
+    async def contains(self, item):
+        return await self.child.contains(item)
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         if self.allow_deletes:
-            del self.child[key]
+            await self.child.delete(key)
 
-    def _unfiltered_iter(self):
-        return self.child._unfiltered_iter()
+    async def _unfiltered_iter(self):
+        async for item in self.child._unfiltered_iter():
+            yield item
 
-    def info(self, ident):
-        return self.func(self.child.info(ident))
+    async def info(self, ident):
+        return self.func(await self.child.info(ident))
 
-    def info_all(self) -> Dict[str, Any]:
-        result = self.child.info_all()
+    async def info_all(self) -> Dict[str, Any]:
+        result = await self.child.info_all()
         for k, v in result.items():
             result[k] = self.func(v)
         return result
 
 class MetadataRepository(Repository):
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         raise NotImplementedError
 
     @job_getter
-    def dump(self, job, data):
+    async def dump(self, job, data):
         raise NotImplementedError
 
 class BlobRepository(Repository):
     @job_getter
-    def open(self, ident, mode='r'):
+    async def open(self, ident, mode: Literal['r', 'rb', 'w', 'wb']='r') -> AReadStream | AWriteStream | AReadText | AWriteText:
         raise NotImplementedError
 
 class FileRepositoryBase(Repository):
@@ -163,34 +207,31 @@ class FileRepositoryBase(Repository):
         self.extension = extension
         self.case_insensitive = case_insensitive
 
-    def __contains__(self, item):
-        return (self.basedir / (item + self.extension)).exists()
+    async def contains(self, item):
+        return await aiofiles.os.path.exists(self.basedir / (item + self.extension))
 
     def __repr__(self):
         return f'<{type(self).__name__} {self.basedir / ("*" + self.extension)}>'
 
-    def _unfiltered_iter(self):
-        return (
-            path.name[:-len(self.extension) if self.extension else None]
-            for path in self.basedir.iterdir()
-            if (
-                path.name.lower().endswith(self.extension.lower())
-                if self.case_insensitive
-                else path.name.endswith(self.extension)
-            )
-        )
+    async def _unfiltered_iter(self):
+        for name in await aiofiles.os.listdir(self.basedir):
+            if self.case_insensitive:
+                cond = name.lower().endswith(self.extension.lower())
+            else:
+                cond = name.endswith(self.extension)
+            if cond:
+                yield name[:-len(self.extension) if self.extension else None]
 
     def validate(self):
         self.basedir.mkdir(exist_ok=True, parents=True)
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
-    @job_getter
     def fullpath(self, ident):
         return self.basedir / (ident + self.extension)
 
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         return str(self.fullpath(job))
 
 class FileRepository(FileRepositoryBase, BlobRepository):
@@ -200,11 +241,14 @@ class FileRepository(FileRepositoryBase, BlobRepository):
     """
 
     @job_getter
-    def open(self, ident, mode='r'):
-        return open(self.fullpath(ident), mode)
+    async def open(self, ident, mode='r'):
+        return aiofiles.open(self.fullpath(ident), mode)
 
-    def __delitem__(self, key):
-        self.fullpath(key).unlink(missing_ok=True)
+    async def delete(self, key):
+        try:
+            await aiofiles.os.unlink(self.fullpath(key))
+        except FileNotFoundError:
+            pass
 
 class DirectoryRepository(FileRepositoryBase):
     """
@@ -215,46 +259,59 @@ class DirectoryRepository(FileRepositoryBase):
         self.discard_empty = discard_empty
 
     @job_getter
-    def mkdir(self, ident):
-        self.fullpath(ident).mkdir(exist_ok=True)
+    async def mkdir(self, ident):
+        try:
+            await aiofiles.os.mkdir(self.fullpath(ident))
+        except FileExistsError:
+            pass
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         if key in self:
-            shutil.rmtree(self.fullpath(key))
+            await aioshutil.rmtree(self.fullpath(key))
 
-    def __contains__(self, item):
-        result = super().__contains__(item)
+    async def contains(self, item):
+        result = await super().contains(item)
         if not self.discard_empty:
             return result
         if not result:
             return False
-        return bool(list(self.fullpath(item).iterdir()))
+        return bool(list(await aiofiles.os.listdir(self.fullpath(item))))
 
-    def _unfiltered_iter(self):
-        for item in super()._unfiltered_iter():
+    async def _unfiltered_iter(self):
+        async for item in super()._unfiltered_iter():
             if self.discard_empty:
-                if bool(list(self.fullpath(item).iterdir())):
+                if bool(list(await aiofiles.os.listdir(self.fullpath(item)))):
                     yield item
             else:
                 yield item
 
-class S3BucketBinaryWriter(io.BytesIO):
+class S3BucketBinaryWriter:
     def __init__(self, repo: 'S3BucketRepository', job: str):
         self.repo = repo
         self.job = job
+        self.buffer = io.BytesIO()
         super().__init__()
 
-    def close(self):
-        self.seek(0, io.SEEK_END)
-        size = self.tell()
-        self.seek(0, io.SEEK_SET)
-        self.repo.client.put_object(
+    async def __aenter__(self):
+        return self
+
+    def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    async def close(self):
+        self.buffer.seek(0, io.SEEK_END)
+        size = self.buffer.tell()
+        self.buffer.seek(0, io.SEEK_SET)
+        await self.repo.client.put_object(
             self.repo.bucket,
             self.repo.object_name(self.job),
-            self,
+            self.buffer,
             size,
             content_type=self.repo.mimetype,
         )
+
+    async def write(self, data: bytes):
+        self.buffer.write(data)
 
 class S3BucketInfo:
     def __init__(self, endpoint: str, uri: str):
@@ -264,10 +321,11 @@ class S3BucketInfo:
     def __str__(self):
         return self.uri
 
+
 class S3BucketRepository(BlobRepository):
     def __init__(
             self,
-            client: minio.Minio,
+            client: miniopy_async.Minio,
             bucket: str,
             prefix: str='',
             extension: str='',
@@ -279,90 +337,92 @@ class S3BucketRepository(BlobRepository):
         self.extension = extension
         self.mimetype = mimetype
 
-    def __contains__(self, item):
+    async def contains(self, item):
         try:
-            self.client.stat_object(self.bucket, self.object_name(item))
-        except minio.error.S3Error:
+            await self.client.stat_object(self.bucket, self.object_name(item))
+        except miniopy_async.S3Error:
             return False
         else:
             return True
 
     def _unfiltered_iter(self):
-        for obj in self.client.list_objects(self.bucket, self.prefix):
+        for obj in await self.client.list_objects(self.bucket, self.prefix):
             if obj.object_name.endswith(self.extension):
                 yield obj.object_name[len(self.prefix):-len(self.extension) if self.extension else None]
 
-    def validate(self):
-        if not self.client.bucket_exists(self.bucket):
-            self.client.make_bucket(self.bucket)
+    async def validate(self):
+        if not await self.client.bucket_exists(self.bucket):
+            await self.client.make_bucket(self.bucket)
 
-    @job_getter
     def object_name(self, ident):
         return f'{self.prefix}{ident}{self.extension}'
 
     @job_getter
-    def open(self, ident, mode='r') -> Union[S3BucketBinaryWriter, io.TextIOWrapper]:
+    async def open(self, ident, mode='r'):
         if mode == 'wb':
             return S3BucketBinaryWriter(self, ident)
         elif mode == 'w':
-            return io.TextIOWrapper(S3BucketBinaryWriter(self, ident))
+            return AWriteText(S3BucketBinaryWriter(self, ident))
         elif mode == 'rb':
-            return self.client.get_object(self.bucket, self.object_name(ident))
+            return await self.client.get_object(self.bucket, self.object_name(ident))
         elif mode == 'r':
-            return io.TextIOWrapper(self.client.get_object(self.bucket, self.object_name(ident)))
+            return AReadText(await self.client.get_object(self.bucket, self.object_name(ident)))
         else:
             raise ValueError(mode)
 
     @job_getter
-    def info(self, ident):
+    async def info(self, ident):
         return S3BucketInfo(self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
 
-    def __delitem__(self, key):
-        self.client.remove_object(self.bucket, self.object_name(key))
+    async def delete(self, key):
+        await self.client.remove_object(self.bucket, self.object_name(key))
 
 class MongoMetadataRepository(MetadataRepository):
-    def __init__(self, collection: pymongo.collection.Collection):
+    def __init__(self, collection: motor.motor_asyncio.AsyncIOMotorCollection):
         self.collection = collection
 
-    def __contains__(self, item):
-        return self.collection.count_documents({'_id': item}) != 0
+    async def contains(self, item):
+        return await self.collection.count_documents({'_id': item}) != 0
 
-    def __delitem__(self, key):
-        self.collection.delete_one({'_id': key})
+    async def delete(self, key):
+        await self.collection.delete_one({'_id': key})
 
-    def _unfiltered_iter(self):
-        yield from (x['_id'] for x in self.collection.find({}, projection=[]))
+    async def _unfiltered_iter(self):
+        async for x in self.collection.find({}, projection=[]):
+            yield x['_id']
 
     @job_getter
-    def info(self, job):
-        result = self.collection.find_one({'_id': job})
+    async def info(self, job):
+        result = await self.collection.find_one({'_id': job})
         if result is None:
             result = {}
         return result
 
-    def info_all(self) -> Dict[str, Any]:
-        return {entry['_id']: entry for entry in self.collection.find({})}
+    async def info_all(self) -> Dict[str, Any]:
+        return {entry['_id']: entry for entry in await self.collection.find({})}
 
     @job_getter
-    def dump(self, job, data):
-        self.collection.replace_one({'_id': job}, data, upsert=True)
+    async def dump(self, job, data):
+        await self.collection.replace_one({'_id': job}, data, upsert=True)
 
 class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
     """
-    def __init__(self, registry: dreg_client.Registry, domain: str, repository: str):
+    def __init__(self, registry: docker_registry_client_async.DockerRegistryClientAsync, domain: str, repository: str):
         self.registry = registry
         self.domain = domain
         self.repository = repository
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self):
         try:
-            return self.registry.repository(self.repository).tags()
+            image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
+            for tag in (await self.registry.get_tags(image)).tags:
+                yield tag
         except Exception as e:
             if '404' in str(e):
-                return []
+                return
             else:
                 raise
 
@@ -370,7 +430,7 @@ class DockerRepository(Repository):
         return f'<DockerRepository {self.domain}/{self.repository}>'
 
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         return {
             'withdomain': f'{self.domain}/{self.repository}:{job}',
             'withoutdomain': f'{self.repository}:{job}',
@@ -378,13 +438,22 @@ class DockerRepository(Repository):
 
     def _dxf_auth(self, dxf_obj, response):
         # what a fucking hack
-        username, password = self.registry._client._session.auth
+        for pattern, credentials in self.registry.credentials.items():
+            if pattern.fullmatch(self.domain):
+                result = credentials
+                break
+        else:
+            raise PermissionError("Missing credentials for %s" % self.domain)
+        username, password = base64.b64decode(result).decode().split(':')
         dxf_obj.authenticate(username, password, response)
 
-    def __delitem__(self, key):
-        if key not in self:
+    async def delete(self, key):
+        if not await self.contains(key):
             return
 
+        await asyncio.get_event_loop().run_in_executor(None, self._delete_inner, key)
+
+    def _delete_inner(self, key):
         random_data = os.urandom(16)
         random_digest = 'sha256:' + hashlib.sha256(random_data).hexdigest()
 
@@ -405,11 +474,11 @@ class LiveKubeRepository(Repository):
         self.task = task
         self.podman = podman
 
-    def _unfiltered_iter(self):
-        return (pod.metadata.labels['job'] for pod in self.pods())
+    async def _unfiltered_iter(self):
+        return (pod.metadata.labels['job'] for pod in await self.pods())
 
-    def __contains__(self, item):
-        return bool(self.podman.query(task=self.task, job=item))
+    async def contains(self, item):
+        return bool(await self.podman.query(task=self.task, job=item))
 
     def __repr__(self):
         return f'<LiveKubeRepository task={self.task}>'
@@ -419,13 +488,13 @@ class LiveKubeRepository(Repository):
         # Cannot template with live kube info. Implement this if you have something in mind.
         return None
 
-    def pods(self):
-        return self.podman.query(task=self.task)
+    async def pods(self):
+        return await self.podman.query(task=self.task)
 
-    def __delitem__(self, key):
-        pods = self.podman.query(job=key, task=self.task)
+    async def delete(self, key):
+        pods = await self.podman.query(job=key, task=self.task)
         for pod in pods:  # there... really should be only one
-            self.podman.delete(pod)
+            await self.podman.delete(pod)
 
 class AggregateAndRepository(Repository):
     """
@@ -435,23 +504,25 @@ class AggregateAndRepository(Repository):
         assert children
         self.children = children
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self):
         counting = Counter()
-        for item in roundrobin(*(child._unfiltered_iter() for child in self.children.values())):
+        async for item in roundrobin([child._unfiltered_iter() for child in self.children.values()]):
             counting[item] += 1
             if counting[item] == len(self.children):
                 yield item
 
-    def __contains__(self, item):
-        return all(item in child for child in self.children.values())
+    async def contains(self, item):
+        return all(await child.contains(item) for child in self.children.values())
 
     @job_getter
-    def info(self, job):
-        return AggregateRepositoryInfo(self, job)
+    async def info(self, job):
+        return {
+            name: await child.info(job) for name, child in self.children.items()
+        }
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         for child in self.children.values():
-            del child[key]
+            await child.delete(key)
 
 class AggregateOrRepository(Repository):
     """
@@ -461,33 +532,27 @@ class AggregateOrRepository(Repository):
         assert children
         self.children = children
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self):
         seen = set()
         for child in self.children.values():
-            for item in child._unfiltered_iter():
+            async for item in child._unfiltered_iter():
                 if item in seen:
                     continue
                 seen.add(item)
                 yield item
 
-    def __contains__(self, item):
-        return any(item in child for child in self.children.values())
+    async def contains(self, item):
+        return any(await child.contains(item) for child in self.children.values())
 
     @job_getter
-    def info(self, job):
-        return AggregateRepositoryInfo(self, job)
+    async def info(self, job):
+        return {
+            name: await child.info(job) for name, child in self.children.items()
+        }
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         for child in self.children.values():
-            del child[key]
-
-class AggregateRepositoryInfo:
-    def __init__(self, repo: Union[AggregateAndRepository, AggregateOrRepository], job):
-        self.repo = repo
-        self.job = job
-
-    def __getattr__(self, item):
-        return self.repo.children[item].info(self.job)
+            await child.delete(key)
 
 class BlockingRepository(Repository):
     """
@@ -498,27 +563,29 @@ class BlockingRepository(Repository):
         self.unless = unless
         self.enumerate_unless = enumerate_unless
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self):
         if self.enumerate_unless:
-            blocked = set(self.unless._unfiltered_iter())
+            blocked = set()
+            async for x in self.unless._unfiltered_iter():
+                blocked.add(x)
         else:
             blocked = None
-        for item in self.source._unfiltered_iter():
+        async for item in self.source._unfiltered_iter():
             if self.enumerate_unless and item in blocked:
                 continue
-            if not self.enumerate_unless and item in self.unless:
+            if not self.enumerate_unless and self.unless.contains(item):
                 continue
             yield item
 
-    def __contains__(self, item):
-        return item in self.source and not item in self.unless
+    async def contains(self, item):
+        return await self.source.contains(item) and not self.unless.contains(item)
 
     @job_getter
-    def info(self, job):
-        return self.source.info(job)
+    async def info(self, job):
+        return await self.source.info(job)
 
-    def __delitem__(self, key):
-        del self.source[key]
+    async def delete(self, key):
+        await self.source.delete(key)
 
 class YamlMetadataRepository(BlobRepository, MetadataRepository):
     """
@@ -526,14 +593,16 @@ class YamlMetadataRepository(BlobRepository, MetadataRepository):
     return the resulting object.
     """
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         with self.open(job, 'rb') as fp:
-            return yaml.safe_load(fp)
+            s = await fp.read()
+        return yaml.safe_load(s)
 
     @job_getter
-    def dump(self, job, data):
+    async def dump(self, job, data):
+        s = yaml.safe_dump(data, None)
         with self.open(job, 'w') as fp:
-            yaml.safe_dump(data, fp)
+            await fp.write(s)
 
 class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
     def __init__(self, filename, extension='.yaml', case_insensitive=False):
@@ -544,10 +613,10 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
         super().__init__(client, bucket, prefix, extension=extension, mimetype=mimetype)
 
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         try:
-            return super().info(job)
-        except minio.S3Error as e:
+            return await super().info(job)
+        except miniopy_async.S3Error as e:
             if e.code == 'NoSuchKey':
                 return {}
             else:
@@ -563,7 +632,7 @@ class RelatedItemRepository(Repository):
             base_repository: Repository,
             translator_repository: Repository,
             allow_deletes=False,
-            prefetch_lookup=None,
+            prefetch_lookup=True,
     ):
         self.base_repository = base_repository
         self.translator_repository = translator_repository
@@ -571,57 +640,54 @@ class RelatedItemRepository(Repository):
         self.prefetch_lookup_setting = prefetch_lookup
         self.prefetch_lookup = None
 
-        if prefetch_lookup is True:
-            self.prefetch_lookup = self.translator_repository.info_all()
-
-    def _lookup(self, item):
-        if self.prefetch_lookup is None and self.prefetch_lookup_setting is None:
-            self.prefetch_lookup = self.translator_repository.info_all()
-        if self.prefetch_lookup is not None:
+    async def _lookup(self, item):
+        if self.prefetch_lookup is None and self.prefetch_lookup_setting:
+            self.prefetch_lookup = await self.translator_repository.info_all()
+        if self.prefetch_lookup:
             return self.prefetch_lookup.get(item)
         else:
-            return self.translator_repository.info(item)
+            return await self.translator_repository.info(item)
 
-    def __contains__(self, item):
-        basename = self._lookup(item)
+    async def contains(self, item):
+        basename = await self._lookup(item)
         if basename is None:
             return False
-        return basename in self.base_repository
+        return await self.base_repository.contains(item)
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         if not self.allow_deletes:
             return
 
-        basename = self._lookup(key)
+        basename = await self._lookup(key)
         if basename is None:
             return
 
-        del self.base_repository[basename]
+        await self.base_repository.delete(key)
 
     @job_getter
-    def info(self, ident):
-        basename = self._lookup(ident)
+    async def info(self, ident):
+        basename = await self._lookup(ident)
         if basename is None:
             raise LookupError(ident)
 
-        return self.base_repository.info(basename)
+        return await self.base_repository.info(basename)
 
     def __getattr__(self, item):
         v = getattr(self.base_repository, item)
         if not getattr(v, 'is_job_getter', False):
             return v
 
-        def inner(job, *args, **kwargs):
-            basename = self._lookup(job)
+        async def inner(job, *args, **kwargs):
+            basename = await self._lookup(job)
             if basename is None:
                 raise LookupError(job)
-            return v(basename, *args, **kwargs)
+            return await v(basename, *args, **kwargs)
 
         return inner
 
-    def _unfiltered_iter(self):
-        for item in self.translator_repository:
-            basename = self._lookup(item)
+    async def _unfiltered_iter(self):
+        async for item in self.translator_repository:
+            basename = await self._lookup(item)
             if basename is not None: # and basename in self.base_repository:
                 yield item
 
@@ -629,33 +695,35 @@ class ExecutorLiveRepo(Repository):
     def __init__(self, task: 'ExecutorTask'):
         self.task = task
 
-    def _unfiltered_iter(self):
-        return self.task.rev_jobs
+    async def _unfiltered_iter(self):
+        for job in self.task.rev_jobs:
+            yield job
 
-    def __contains__(self, item):
+    async def contains(self, item):
         return item in self.task.rev_jobs
 
-    def __delitem__(self, key):
-        self.task.cancel(key)
+    async def delete(self, key):
+        await self.task.cancel(key)
 
-    def info(self, ident):
+    async def info(self, ident):
         return None
 
 class InProcessMetadataRepository(MetadataRepository):
     def __init__(self, data: Dict[str, Any]):
         self.data = data
 
-    def info(self, job):
+    async def info(self, job):
         return self.data.get(job)
 
-    def dump(self, job, data):
+    async def dump(self, job, data):
         self.data[job] = data
 
-    def __contains__(self, item):
+    async def contains(self, item):
         return item in self.data
 
-    def __delitem__(self, key):
+    async def delete(self, key):
         del self.data[key]
 
-    def _unfiltered_iter(self):
-        return self.data
+    async def _unfiltered_iter(self):
+        for key in self.data:
+            yield key

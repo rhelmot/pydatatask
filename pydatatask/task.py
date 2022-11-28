@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import time
 from enum import Enum, auto
@@ -12,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from concurrent.futures import Executor, wait, FIRST_EXCEPTION
 
+import aiofiles.os.path
 import yaml
 import jinja2
 from kubernetes.client import V1Pod
@@ -29,7 +31,7 @@ class RepoHandlingMode(Enum):
     SMART = auto()
     EAGER = auto()
 
-def build_env(env, job, mode: RepoHandlingMode):
+async def build_env(env, job, mode: RepoHandlingMode):
     result = {}
     for key, val in env.items():
         if isinstance(val, Repository):
@@ -44,7 +46,7 @@ def build_env(env, job, mode: RepoHandlingMode):
         elif mode == RepoHandlingMode.LAZY:
             result[key] = RepositoryInfoTemplate(repo, job)
         else:
-            result[key] = repo.info(job)
+            result[key] = await repo.info(job)
     return result
 
 SYNCHRONOUS = False
@@ -115,7 +117,7 @@ class Task:
             meta: bool=True,
             translator: Optional[Repository]=None,
             translate_allow_deletes=False,
-            translate_prefetch_lookup=None,
+            translate_prefetch_lookup=True,
     ):
         for name, link in output.links.items():
             link_attrs = {}
@@ -157,27 +159,28 @@ class Task:
     def inhibits_output(self):
         return {name: link.repo for name, link in self.links.items() if link.inhibits_output}
 
-    def launch_all(self):
-        result = False
-        for job in self.ready:
-            result = True
-            try:
-                l.debug("Launching %s:%s", self.name, job)
-                self.launch(job)
-            except:
-                l.exception("Failed to launch %s:%s", self, job)
-        return result
+    async def launch_all(self):
+        launchers = [self._launch(job) async for job in self.ready]
+        await asyncio.gather(*launchers)
+        return bool(launchers)
 
-    def launch(self, job):
+    async def _launch(self, job):
+        try:
+            l.debug("Launching %s:%s", self.name, job)
+            await self.launch(job)
+        except:
+            l.exception("Failed to launch %s:%s", self, job)
+
+    async def launch(self, job):
         raise NotImplementedError
 
-    def update(self) -> bool:
+    async def update(self) -> bool:
         """
         Performs any maintenance operations on the set of live tasks. Returns True if literally anything interesting happened.
         """
         return False
 
-    def validate(self):
+    async def validate(self):
         """
         Raise an exception if for any reason the task is misconfigured.
         :return:
@@ -191,11 +194,10 @@ class RepositoryInfoTemplate:
         self._job = job
         self._cached = nobody
 
-    @property
-    def _resolved(self):
+    async def _resolve(self):
         if self._cached is not nobody:
             return self._cached
-        self._cached = self._repo.info(self._job)
+        self._cached = await self._repo.info(self._job)
         return self._cached
 
     def __getattr__(self, item):
@@ -235,19 +237,19 @@ class KubeTask(Task):
         if done:
             self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
 
-    def render_template(self, env):
-        j = jinja2.Environment()
-        if os.path.isfile(self.template):
-            with open(self.template, 'r') as fp:
-                template = fp.read()
+    async def render_template(self, env):
+        j = jinja2.Environment(enable_async=True)
+        if await aiofiles.os.path.isfile(self.template):
+            async with aiofiles.open(self.template, 'r') as fp:
+                template = await fp.read()
         else:
             template = self.template
         template = j.from_string(template)
-        rendered = template.render(**env)
+        rendered = await template.render_async(**env)
         return yaml.safe_load(rendered)
 
-    def launch(self, job):
-        env = build_env(vars(self) | self.links | (self.env or {}), job, RepoHandlingMode.LAZY)
+    async def launch(self, job):
+        env = await build_env(vars(self) | self.links | (self.env or {}), job, RepoHandlingMode.LAZY)
         env['job'] = job
         env['task'] = self.name
         env['argv0'] = os.path.basename(sys.argv[0])
