@@ -227,7 +227,7 @@ class KubeTask(Task):
         self.logs = logs
         self.timeout = timeout
         self.done = done
-        self.env = env
+        self.env = env if env is not None else {}
 
         self.link("live", LiveKubeRepository(podman, name), is_status=True, inhibits_start=True, inhibits_output=True)
         if logs:

@@ -1,6 +1,7 @@
+from argparse import _SubParsersAction, ArgumentParser
+from typing import Union, Callable, Optional, Any
 import argparse
 import sys
-from typing import Union
 import yaml
 import logging
 import time
@@ -13,30 +14,41 @@ from .task import Task, settings
 
 l = logging.getLogger(__name__)
 
-def main(pipeline: Pipeline):
+def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsersAction], None]]=None):
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
     parser_update = subparsers.add_parser("update", help="Keep the pipeline in motion")
+    parser_update.set_defaults(func=update)
 
     parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
+    parser_run.set_defaults(func=run)
 
     parser_status = subparsers.add_parser("status", help="View the pipeline status")
     parser_status.add_argument("--all", "-a", action="store_true", help="Show internal repositories")
+    parser_status.set_defaults(func=print_status)
 
     parser_delete = subparsers.add_parser("rm", help="Delete data from the pipeline")
     parser_delete.add_argument("--recursive", "-r", action="store_true", help="Delete dependant data too")
     parser_delete.add_argument("data", type=str, help="Name of repository [task.repo] or task from which to delete data")
     parser_delete.add_argument("job", type=str, nargs='+', help="Name of job of which to delete data")
+    parser_delete.set_defaults(func=delete_data)
 
     parser_ls = subparsers.add_parser("ls", help="List jobs in a repository")
     parser_ls.add_argument("data", type=str, nargs='+', help="Name of repository [task.repo] from which to list data")
+    parser_ls.set_defaults(func=list_data)
 
     parser_cat = subparsers.add_parser("cat", help="Print data from a repository")
     parser_cat.add_argument("data", type=str, help="Name of repository [task.repo] from which to print data")
     parser_cat.add_argument("job", type=str, help="Name of job of which to delete data")
+    parser_cat.set_defaults(func=cat_data)
+
+    parser_inject = subparsers.add_parser("inject", help="Dump data into a repository")
+    parser_inject.add_argument("data", type=str, help="Name of repository [task.repo] to which to inject data")
+    parser_inject.add_argument("job", type=str, help="Name of job of which to inject data")
+    parser_inject.set_defaults(func=inject_data)
 
     parser_launch = subparsers.add_parser("launch", help="Manually start a task")
     parser_launch.add_argument("task", type=str, help="Name of task to launch")
@@ -44,29 +56,22 @@ def main(pipeline: Pipeline):
     parser_launch.add_argument("--force", "-f", action="store_true", help="Launch even if start is inhibited by data")
     parser_launch.add_argument("--sync", action="store_true", help="Run the task in-process, if possible")
     parser_launch.add_argument("--meta", action=argparse.BooleanOptionalAction, default=False, help="Store metadata related to task completion")
+    parser_launch.set_defaults(func=launch)
 
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
+    parser_shell.set_defaults(func=shell)
+
+    if instrument is not None:
+        instrument(subparsers)
 
     args = parser.parse_args()
+    return args.func(pipeline, args)
 
-    if args.cmd == "update":
-        pipeline.update()
-    elif args.cmd == "run":
-        run(pipeline, args)
-    elif args.cmd == "status":
-        print_status(pipeline, args)
-    elif args.cmd == "rm":
-        delete_data(pipeline, args)
-    elif args.cmd == "ls":
-        list_data(pipeline, args)
-    elif args.cmd == "cat":
-        cat_data(pipeline, args)
-    elif args.cmd == "launch":
-        launch(pipeline, args)
-    elif args.cmd == "shell":
-        IPython.embed()
-    else:
-        assert False, "This should be unreachable"
+def shell(pipeline: Pipeline, args: argparse.Namespace):
+    IPython.embed()
+
+def update(pipeline: Pipeline, args: argparse.Namespace):
+    pipeline.update()
 
 def run(pipeline: Pipeline, args: argparse.Namespace):
     func = pipeline.update
@@ -132,7 +137,25 @@ def cat_data(pipeline: Pipeline, args: argparse.Namespace):
         yaml.safe_dump(data, sys.stdout)
     else:
         print("Error: cannot cat a repository which is not a blob or metadata")
-        exit(1)
+        return 1
+
+def inject_data(pipeline: Pipeline, args: argparse.Namespace):
+    taskname, reponame = args.data.split('.')
+    item = pipeline.tasks[taskname].links[reponame].repo
+
+    if isinstance(item, BlobRepository):
+        with item.open(args.job, 'wb') as fp:
+            fp.write(sys.stdin.buffer.read())
+    elif isinstance(item, MetadataRepository):
+        try:
+            data = yaml.safe_load(sys.stdin)
+        except yaml.YAMLError:
+            print("Error: could not parse stdin as yaml")
+            return 1
+        item.dump(args.job, data)
+    else:
+        print("Error: cannot inject data into a repository which is not a blob or metadata")
+        return 1
 
 def launch(pipeline: Pipeline, args: argparse.Namespace):
     task = pipeline.tasks[args.task]
@@ -143,4 +166,4 @@ def launch(pipeline: Pipeline, args: argparse.Namespace):
         task.launch(job)
     else:
         l.warning("Task is not ready to launch - use -f to force")
-        exit(1)
+        return 1

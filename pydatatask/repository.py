@@ -181,7 +181,7 @@ class FileRepositoryBase(Repository):
         )
 
     def validate(self):
-        self.basedir.mkdir(exist_ok=True)
+        self.basedir.mkdir(exist_ok=True, parents=True)
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
