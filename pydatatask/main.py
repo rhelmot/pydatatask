@@ -1,22 +1,28 @@
-from argparse import _SubParsersAction, ArgumentParser
-from typing import Union, Callable, Optional, Any
+from typing import Union, Callable, Optional, List
+import asyncio
 import argparse
 import sys
+
+import aiofiles.os
 import yaml
 import logging
-import time
 import IPython
 
 from . import BlobRepository, MetadataRepository
 from .pipeline import Pipeline
 from .repository import Repository
 from .task import Task, settings
+import pydatatask
 
 l = logging.getLogger(__name__)
 
+__all__ = ('main', 'update', 'cat_data', 'list_data', 'delete_data', 'inject_data', 'print_status', 'launch', 'shell', 'run')
+
 def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsersAction], None]]=None):
+    asyncio.run(pipeline.validate())
+
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="cmd", required=True)
+    subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 
     parser_update = subparsers.add_parser("update", help="Keep the pipeline in motion")
     parser_update.set_defaults(func=update)
@@ -27,7 +33,7 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     parser_run.set_defaults(func=run)
 
     parser_status = subparsers.add_parser("status", help="View the pipeline status")
-    parser_status.add_argument("--all", "-a", action="store_true", help="Show internal repositories")
+    parser_status.add_argument("--all", "-a", dest='all_repos', action="store_true", help="Show internal repositories")
     parser_status.set_defaults(func=print_status)
 
     parser_delete = subparsers.add_parser("rm", help="Delete data from the pipeline")
@@ -65,53 +71,61 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
         instrument(subparsers)
 
     args = parser.parse_args()
-    return args.func(pipeline, args)
+    ns = vars(args)
+    func = ns.pop('func')
+    result_or_coro = func(pipeline, **ns)
+    if asyncio.iscoroutine(result_or_coro):
+        return asyncio.run(result_or_coro)
+    else:
+        return result_or_coro
 
-def shell(pipeline: Pipeline, args: argparse.Namespace):
+def shell(pipeline: Pipeline):
+    assert pipeline
+    assert pydatatask
     IPython.embed()
 
-def update(pipeline: Pipeline, args: argparse.Namespace):
-    pipeline.update()
+async def update(pipeline: Pipeline):
+    await pipeline.update()
 
-def run(pipeline: Pipeline, args: argparse.Namespace):
+async def run(pipeline: Pipeline, forever: bool, launch_once: bool):
     func = pipeline.update
-    while func() or args.forever:
-        if args.launch_once:
+    while await func() or forever:
+        if launch_once:
             func = pipeline.update_only_update
-        time.sleep(1)
+        await asyncio.sleep(1)
 
-def print_status(pipeline: Pipeline, args: argparse.Namespace):
-    for task in pipeline.tasks.values():
+async def print_status(pipeline: Pipeline, all_repos: bool):
+    for task in pipeline.tasks.values():  # TODO parallelize - waiting on repos to be a top-level abstraction
         print(task.name)
         for link_name, link in sorted(task.links.items(), key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2):
-            if not args.all and not link.is_status and not link.is_input and not link.is_output:
+            if not all_repos and not link.is_status and not link.is_input and not link.is_output:
                 continue
-            print(f'{task.name}.{link_name} {sum(1 for _ in link.repo)}')
+            print(f'{task.name}.{link_name} {sum(1 async for _ in link.repo)}')
         print()
 
-def delete_data(pipeline: Pipeline, args: argparse.Namespace):
+async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
     item: Union[Task | Repository]
-    if '.' in args.data:
-        taskname, reponame = args.data.split('.')
+    if '.' in data:
+        taskname, reponame = data.split('.')
         item = pipeline.tasks[taskname].links[reponame].repo
     else:
-        item = pipeline.tasks[args.data]
+        item = pipeline.tasks[data]
 
-    for dependant in pipeline.dependants(item, args.recursive):
+    for dependant in pipeline.dependants(item, recursive):
         if isinstance(dependant, Repository):
-            if args.job[0] == '__all__':
-                jobs = list(dependant)
+            if job[0] == '__all__':
+                jobs = list(x async for x in dependant)
                 check = False
             else:
-                jobs = args.job
+                jobs = job
                 check = True
-            for job in jobs:
-                if not check or job in dependant:
-                    del dependant[job]
-                    print(job, dependant)
+            async def del_job(j):
+                await dependant.delete(j)
+                print(j, dependant)
+            await asyncio.gather(*(del_job(j) for j in jobs if not check or await dependant.contains(j)))
 
-def list_data(pipeline: Pipeline, args: argparse.Namespace):
-    input_text = ' '.join(args.data)
+def list_data(pipeline: Pipeline, data: List[str]):
+    input_text = ' '.join(data)
     namespace = {name: TaskNamespace(task) for name, task in pipeline.tasks.items()}
     result = eval(input_text, {}, namespace)
 
@@ -123,23 +137,32 @@ class TaskNamespace:
         self.task = task
 
     def __getattr__(self, item):
-        return set(self.task.links[item].repo)
+        return asyncio.run(self._consume(self.task.links[item].repo))
 
-def cat_data(pipeline: Pipeline, args: argparse.Namespace):
-    taskname, reponame = args.data.split('.')
+    async def _consume(self, repo: Repository):
+        return set(x async for x in repo)
+
+async def cat_data(pipeline: Pipeline, data: str, job: str):
+    taskname, reponame = data.split('.')
     item = pipeline.tasks[taskname].links[reponame].repo
 
     if isinstance(item, BlobRepository):
-        with item.open(args.job, 'rb') as fp:
-            sys.stdout.buffer.write(fp.read())
+        async with item.open(job, 'rb') as fp:
+            print_bytes = aiofiles.os.wrap(sys.stdout.buffer.write)
+            while True:
+                data = await fp.read(4096)
+                if not data:
+                    break
+                await print_bytes(data)
     elif isinstance(item, MetadataRepository):
-        data = item.info(args.job)
-        yaml.safe_dump(data, sys.stdout)
+        data = await item.info(job)
+        data_str = yaml.safe_dump(data, None)
+        await aiofiles.os.wrap(sys.stdout.write)(data_str)
     else:
         print("Error: cannot cat a repository which is not a blob or metadata")
         return 1
 
-def inject_data(pipeline: Pipeline, args: argparse.Namespace):
+async def inject_data(pipeline: Pipeline, args: argparse.Namespace):
     taskname, reponame = args.data.split('.')
     item = pipeline.tasks[taskname].links[reponame].repo
 
@@ -152,18 +175,18 @@ def inject_data(pipeline: Pipeline, args: argparse.Namespace):
         except yaml.YAMLError:
             print("Error: could not parse stdin as yaml")
             return 1
-        item.dump(args.job, data)
+        await item.dump(args.job, data)
     else:
         print("Error: cannot inject data into a repository which is not a blob or metadata")
         return 1
 
-def launch(pipeline: Pipeline, args: argparse.Namespace):
-    task = pipeline.tasks[args.task]
-    job = args.job
-    settings(args.sync, args.meta)
+async def launch(pipeline: Pipeline, task: str, job: str, sync: bool, meta: bool, force: bool):
+    task = pipeline.tasks[task]
+    job = job
+    settings(sync, meta)
 
-    if args.force or job in task.ready:
-        task.launch(job)
+    if force or job in task.ready:
+        await task.launch(job)
     else:
         l.warning("Task is not ready to launch - use -f to force")
         return 1

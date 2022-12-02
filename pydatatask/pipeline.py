@@ -15,33 +15,34 @@ class Pipeline:
     def __init__(self, tasks: Iterable[Task]):
         self.tasks = {task.name: task for task in tasks}
 
+    async def validate(self):
         seen_repos = set()
-        for task in tasks:
-            task.validate()
+        for task in self.tasks.values():
+            await task.validate()
             for link in task.links.values():
                 repo = link.repo
                 if repo not in seen_repos:
                     seen_repos.add(repo)
-                    repo.validate()
+                    await repo.validate()
 
-    def update(self):
+    async def update(self):
         l.info("Running update...")
-        result = self.update_only_update() | self.update_only_launch()
+        result = await self.update_only_update() | await self.update_only_launch()
         l.debug("Completed update")
         return result
 
-    def update_only_update(self):
+    async def update_only_update(self):
         result = False
         for task in self.tasks.values():
             l.debug("Running update for %s", task.name)
-            result |= task.update()
+            result |= await task.update()
         return result
 
-    def update_only_launch(self):
+    async def update_only_launch(self):
         result = False
         for task in self.tasks.values():
             l.debug("Launching tasks for %s", task.name)
-            result |= task.launch_all()
+            result |= await task.launch_all()
         return result
 
     def graph(self):

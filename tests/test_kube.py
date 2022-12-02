@@ -1,0 +1,117 @@
+import base64
+import unittest
+import asyncio
+import os
+import warnings
+
+import kubernetes_asyncio
+import random
+import string
+import shutil
+
+import pydatatask
+
+
+def rid(n=6):
+    return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
+
+class TestKube(unittest.IsolatedAsyncioTestCase):
+    def __init__(self, method):
+        super().__init__(method)
+
+        self.minikube_profile = None
+        self.minikube_path = shutil.which('minikube')
+        self.kube_context = os.getenv("PYDATATASK_TEST_KUBE_CONTEXT")
+        self.kube_namespace = os.getenv("PYDATATASK_TEST_KUBE_NAMESPACE", "default")
+        self.test_id = rid()
+
+    async def asyncSetUp(self):
+        if self.kube_context is None:
+            if self.minikube_path is None:
+                raise unittest.SkipTest("No kube context specified and minikube is not installed")
+            self.minikube_profile = f'pydatatask-test-{self.test_id}'
+            p = await asyncio.create_subprocess_exec(
+                self.minikube_path,
+                'start',
+                '--profile',
+                self.minikube_profile,
+                '--interactive=false',
+                '--keep-context',
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await p.communicate()
+            code = await p.wait()
+            if code != 0:
+                raise unittest.SkipTest(f"No kube context specified and minikube failed to start. Logs below:\n\n{stdout.decode()}")
+            self.kube_context = self.minikube_profile
+
+    async def test_kube(self):
+        await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
+
+        repo0 = pydatatask.InProcessMetadataRepository({str(i): f"weh-{i}" for i in range(100)})
+        repoDone = pydatatask.InProcessMetadataRepository()
+        repoLogs = pydatatask.InProcessBlobRepository()
+
+        podman = pydatatask.PodManager(f'test-{self.test_id}', self.kube_namespace, cpu_quota='1', mem_quota='1Gi')
+
+        task = pydatatask.KubeTask(
+            podman,
+            'task',
+            r"""
+            apiVersion: v1
+            kind: Pod
+            spec:
+              containers:
+              - name: container
+                image: busybox
+                command:
+                - "sh"
+                - "-c"
+                - |-
+                    echo 'Hello world!'
+                    echo "The message of the day is $(base64 <<<{{ repo0 }}). That's great\!"
+                    echo 'Goodbye world!'
+                resources:                  
+                  requests:                    
+                    cpu: 10m
+                    memory: 100Mi
+            """,
+            logs=repoLogs,
+            done=repoDone,
+        )
+        task.link("repo0", repo0, is_input=True)
+
+        pipeline = pydatatask.Pipeline([task])
+
+        await pipeline.validate()
+        await pydatatask.run(pipeline, forever=False, launch_once=True)
+
+        for job, weh in repo0.data.items():
+            assert 'node' in repoDone.data[job]
+            logs = await (await repoLogs.open(job, 'r')).read()
+            assert logs == f"""\
+Hello world!
+The message of the day is {base64.b64encode(weh)}. That's great!
+Goodbye world!
+"""
+
+    async def asyncTearDown(self):
+        if self.minikube_profile is not None:
+            p = await asyncio.create_subprocess_exec(
+                self.minikube_path,
+                'delete',
+                '--profile',
+                self.minikube_profile,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await p.communicate()
+            code = await p.wait()
+            if code != 0:
+                warnings.warn(f"minikube failed to delete {self.minikube_profile}. Logs below:\n\n{stdout.decode()}")
+
+if __name__ == '__main__':
+    unittest.main()

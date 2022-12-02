@@ -1,5 +1,5 @@
+from typing import Union, Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager
 import inspect
-from typing import Union, Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List
 import base64
 from collections import Counter
 import codecs
@@ -37,12 +37,13 @@ __all__ = (
     'S3BucketInfo',
     'MongoMetadataRepository',
     'InProcessMetadataRepository',
+    'InProcessBlobStream',
+    'InProcessBlobRepository',
     'DockerRepository',
     'LiveKubeRepository',
     'ExecutorLiveRepo',
     'AggregateOrRepository',
     'AggregateAndRepository',
-    'AggregateRepositoryInfo',
     'BlockingRepository',
     'YamlMetadataRepository',
     'YamlMetadataFileRepository',
@@ -50,14 +51,22 @@ __all__ = (
     'RelatedItemRepository',
     'AReadStream',
     'AWriteStream',
+    'AReadText',
+    'AWriteText',
 )
 
-class AReadStream(Protocol):
+class AReadStream(Protocol, AsyncContextManager):
     async def read(self, n: Optional[int]=None) -> bytes:
         ...
 
-class AWriteStream(Protocol):
+    async def close(self) -> None:
+        ...
+
+class AWriteStream(Protocol, AsyncContextManager):
     async def write(self, data: bytes):
+        ...
+
+    async def close(self) -> None:
         ...
 
 class AReadText:
@@ -93,13 +102,13 @@ async def roundrobin(iterables: List):
     "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
     i = 0
     while iterables:
+        i %= len(iterables)
         try:
             yield await anext(iterables[i])
-        except StopIteration:
+        except StopAsyncIteration:
             iterables.pop(i)
         else:
             i += 1
-        i %= len(iterables)
 
 def job_getter(f):
     if not inspect.iscoroutinefunction(f):
@@ -135,8 +144,10 @@ class Repository:
     def __aiter__(self):
         return self.filter_jobs(self._unfiltered_iter())
 
-    async def _unfiltered_iter(self) -> AsyncGenerator[str]:
+    async def _unfiltered_iter(self) -> AsyncGenerator[str, None]:
         raise NotImplementedError
+        # noinspection PyUnreachableCode
+        yield None
 
     @job_getter
     async def info(self, ident):
@@ -222,7 +233,7 @@ class FileRepositoryBase(Repository):
             if cond:
                 yield name[:-len(self.extension) if self.extension else None]
 
-    def validate(self):
+    async def validate(self):
         self.basedir.mkdir(exist_ok=True, parents=True)
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
@@ -295,7 +306,7 @@ class S3BucketBinaryWriter:
     async def __aenter__(self):
         return self
 
-    def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
     async def close(self):
@@ -345,7 +356,7 @@ class S3BucketRepository(BlobRepository):
         else:
             return True
 
-    def _unfiltered_iter(self):
+    async def _unfiltered_iter(self):
         for obj in await self.client.list_objects(self.bucket, self.prefix):
             if obj.object_name.endswith(self.extension):
                 yield obj.object_name[len(self.prefix):-len(self.extension) if self.extension else None]
@@ -475,7 +486,8 @@ class LiveKubeRepository(Repository):
         self.podman = podman
 
     async def _unfiltered_iter(self):
-        return (pod.metadata.labels['job'] for pod in await self.pods())
+        for pod in await self.pods():
+            yield pod.metadata.labels['job']
 
     async def contains(self, item):
         return bool(await self.podman.query(task=self.task, job=item))
@@ -484,7 +496,7 @@ class LiveKubeRepository(Repository):
         return f'<LiveKubeRepository task={self.task}>'
 
     @job_getter
-    def info(self, job):
+    async def info(self, job):
         # Cannot template with live kube info. Implement this if you have something in mind.
         return None
 
@@ -709,8 +721,8 @@ class ExecutorLiveRepo(Repository):
         return None
 
 class InProcessMetadataRepository(MetadataRepository):
-    def __init__(self, data: Dict[str, Any]):
-        self.data = data
+    def __init__(self, data: Optional[Dict[str, Any]]=None):
+        self.data: Dict[str, Any] = data if data is not None else {}
 
     async def info(self, job):
         return self.data.get(job)
@@ -727,3 +739,51 @@ class InProcessMetadataRepository(MetadataRepository):
     async def _unfiltered_iter(self):
         for key in self.data:
             yield key
+
+class InProcessBlobStream:
+    def __init__(self, repo: 'InProcessBlobRepository', job: str):
+        self.repo = repo
+        self.job = job
+        self.data = io.BytesIO(repo.data.get(job, b''))
+
+    async def read(self, n: Optional[int]) -> bytes:
+        return self.data.read(n)
+
+    async def write(self, data: bytes):
+        self.data.write(data)
+
+    async def close(self):
+        self.repo.data[self.job] = self.data.getvalue()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+class InProcessBlobRepository(BlobRepository):
+    def __init__(self, data: Optional[Dict[str, bytes]]=None):
+        self.data = data if data is not None else {}
+
+    async def info(self, job):
+        # not... sure what to put here
+        return None
+
+    async def open(self, ident, mode='r'):
+        stream = InProcessBlobStream(self, ident)
+        if mode == 'r':
+            return AReadText(stream)
+        elif mode == 'w':
+            return AWriteText(stream)
+        else:
+            return stream
+
+    async def _unfiltered_iter(self):
+        for item in self.data:
+            yield item
+
+    async def contains(self, item):
+        return item in self.data
+
+    async def delete(self, key):
+        del self.data[key]

@@ -1,8 +1,8 @@
+from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple, Coroutine
 import asyncio
 import sys
 import time
 from enum import Enum, auto
-from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple
 import inspect
 from asyncio import Future
 import traceback
@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass
 from concurrent.futures import Executor, wait, FIRST_EXCEPTION
 
-import aiofiles.os.path
+import aiofiles.os
 import yaml
 import jinja2
 from kubernetes.client import V1Pod
@@ -253,18 +253,18 @@ class KubeTask(Task):
         env['job'] = job
         env['task'] = self.name
         env['argv0'] = os.path.basename(sys.argv[0])
-        parsed = self.render_template(env)
+        parsed = await self.render_template(env)
 
-        self.podman.launch(job, self.name, parsed)
+        await self.podman.launch(job, self.name, parsed)
 
-    def _cleanup(self, pod: V1Pod, reason: str):
+    async def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels['job']
         if self.logs is not None:
-            with self.logs.open(job, 'w') as fp:
+            async with self.logs.open(job, 'w') as fp:
                 try:
-                    fp.write(self.podman.logs(pod))
+                    await fp.write(self.podman.logs(pod))
                 except TimeoutError:
-                    fp.write('<failed to fetch logs>\n')
+                    await fp.write('<failed to fetch logs>\n')
         if self.done is not None:
             data = {
                 'reason': reason,
@@ -273,13 +273,13 @@ class KubeTask(Task):
                 'image': pod.status.container_statuses[0].image,
                 'node': pod.spec.node_name,
             }
-            self.done.dump(job, data)
-        self.podman.delete(pod)
+            await self.done.dump(job, data)
+        await self.podman.delete(pod)
 
-    def update(self):
-        result = super().update()
+    async def update(self):
+        result = await super().update()
 
-        pods = self.podman.query(task=self.name)
+        pods = await self.podman.query(task=self.name)
         for pod in pods:
             result = True
             try:
@@ -289,16 +289,16 @@ class KubeTask(Task):
                 l.debug("Pod %s is alive for %dh%dm", pod.metadata.name, uptime_hours, uptime_min)
                 if pod.status.phase in ('Succeeded', 'Failed'):
                     l.debug("...finished: %s", pod.status.phase)
-                    self._cleanup(pod, pod.status.phase)
+                    await self._cleanup(pod, pod.status.phase)
                 elif self.timeout is not None and uptime > self.timeout:
                     l.debug("...timed out")
-                    self.handle_timeout(pod)
-                    self._cleanup(pod, 'Timeout')
+                    await self.handle_timeout(pod)
+                    await self._cleanup(pod, 'Timeout')
             except:
                 l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
         return result
 
-    def handle_timeout(self, pod):
+    async def handle_timeout(self, pod):
         pass
 
 class StderrIsStdout:
@@ -340,7 +340,7 @@ class InProcessSyncTask(Task):
             name: str,
             done: MetadataRepository=None,
             ready: Optional[Repository]=None,
-            func: Optional[Callable[[str, ...], None]]=None,
+            func: Optional[Callable[[str, ...], Coroutine]]=None,
     ):
         super().__init__(name, ready=ready)
 
@@ -353,7 +353,7 @@ class InProcessSyncTask(Task):
         self.func = f
         return self
 
-    def validate(self):
+    async def validate(self):
         if self.func is None:
             raise ValueError("InProcessSyncTask.func is None")
 
@@ -366,15 +366,15 @@ class InProcessSyncTask(Task):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
-    def launch(self, job):
+    async def launch(self, job):
         start_time = datetime.now()
         l.debug("Launching in-process %s:%s...", self.name, job)
         args = dict(self._env)
         if 'job' in args:
             args['job'] = job
-        args = build_env(args, job, RepoHandlingMode.SMART)
+        args = await build_env(args, job, RepoHandlingMode.SMART)
         try:
-            self.func(**args)
+            await self.func(**args)
         except Exception as e:
             l.info("In-process task %s:%s failed", self.name, job, exc_info=True)
             result = {'result': "exception", "exception": repr(e), 'traceback': traceback.format_tb(e.__traceback__)}
@@ -383,7 +383,8 @@ class InProcessSyncTask(Task):
             result = {'result': "success"}
         result['start_time'] = start_time
         result['end_time'] = datetime.now()
-        self.done.dump(job, result)
+        if METADATA:
+            await self.done.dump(job, result)
 
 class ExecutorTask(Task):
     def __init__(self, name: str, executor: Executor, done: MetadataRepository, ready: Optional[Repository]=None, func: Optional[Callable]=None):
@@ -428,7 +429,7 @@ class ExecutorTask(Task):
         data['start_time'] = start_time
         self.done.dump(job, data)
 
-    def validate(self):
+    async def validate(self):
         if self.func is None:
             raise ValueError("InProcessAsyncTask %s has func None" % self.name)
 
@@ -488,7 +489,7 @@ class KubeFunctionTask(KubeTask):
         self.func = f
         return self
 
-    def validate(self):
+    async def validate(self):
         if self.func is None:
             raise ValueError("KubeFunctionTask %s has func None" % self.name)
 
