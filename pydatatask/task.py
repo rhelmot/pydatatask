@@ -15,7 +15,8 @@ from concurrent.futures import Executor, wait, FIRST_EXCEPTION
 
 import aiofiles.os
 import yaml
-import jinja2
+import jinja2.compiler
+import jinja2.async_utils
 from kubernetes.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
@@ -44,7 +45,7 @@ async def build_env(env, job, mode: RepoHandlingMode):
         if mode == RepoHandlingMode.SMART:
             result[key] = repo
         elif mode == RepoHandlingMode.LAZY:
-            result[key] = RepositoryInfoTemplate(repo, job)
+            result[key] = repo.info(job)
         else:
             result[key] = await repo.info(job)
     return result
@@ -187,27 +188,31 @@ class Task:
         """
         pass
 
-nobody = object()
-class RepositoryInfoTemplate:
-    def __init__(self, repo: Repository, job: str):
-        self._repo = repo
-        self._job = job
-        self._cached = nobody
+class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
+    def write_commons(self):
+        self.writeline("from jinja2.async_utils import _common_primitives")
+        self.writeline("import inspect")
+        self.writeline("seen = {}")
+        self.writeline("async def auto_await2(value):")
+        self.writeline("    if type(value) in _common_primitives:")
+        self.writeline("        return value")
+        self.writeline("    if inspect.isawaitable(value):")
+        self.writeline("        cached = seen.get(value)")
+        self.writeline("        if cached is None:")
+        self.writeline("            cached = await value")
+        self.writeline("            seen[value] = cached")
+        self.writeline("        return cached")
+        self.writeline("    return value")
+        super().write_commons()
 
-    async def _resolve(self):
-        if self._cached is not nobody:
-            return self._cached
-        self._cached = await self._repo.info(self._job)
-        return self._cached
+    def visit_Name(self, node, frame):
+        if self.environment.is_async:
+            self.write("(await auto_await2(")
 
-    def __getattr__(self, item):
-        return getattr(self._resolved, item)
+        super().visit_Name(node, frame)
 
-    def __getitem__(self, item):
-        return self._resolved[item]
-
-    def __str__(self):
-        return str(self._resolved)
+        if self.environment.is_async:
+            self.write("))")
 
 
 class KubeTask(Task):
@@ -239,6 +244,7 @@ class KubeTask(Task):
 
     async def render_template(self, env):
         j = jinja2.Environment(enable_async=True)
+        j.code_generator_class = ParanoidAsyncGenerator
         if await aiofiles.os.path.isfile(self.template):
             async with aiofiles.open(self.template, 'r') as fp:
                 template = await fp.read()
@@ -254,15 +260,18 @@ class KubeTask(Task):
         env['task'] = self.name
         env['argv0'] = os.path.basename(sys.argv[0])
         parsed = await self.render_template(env)
+        for item in env.values():
+            if asyncio.iscoroutine(item):
+                item.close()
 
         await self.podman.launch(job, self.name, parsed)
 
     async def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels['job']
         if self.logs is not None:
-            async with self.logs.open(job, 'w') as fp:
+            async with await self.logs.open(job, 'w') as fp:
                 try:
-                    await fp.write(self.podman.logs(pod))
+                    await fp.write(await self.podman.logs(pod))
                 except TimeoutError:
                     await fp.write('<failed to fetch logs>\n')
         if self.done is not None:

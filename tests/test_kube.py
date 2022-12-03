@@ -50,11 +50,20 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
     async def test_kube(self):
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
 
-        repo0 = pydatatask.InProcessMetadataRepository({str(i): f"weh-{i}" for i in range(100)})
+        repo0 = pydatatask.InProcessMetadataRepository({str(i): f"weh-{i}" for i in range(50)})
         repoDone = pydatatask.InProcessMetadataRepository()
         repoLogs = pydatatask.InProcessBlobRepository()
 
         podman = pydatatask.PodManager(f'test-{self.test_id}', self.kube_namespace, cpu_quota='1', mem_quota='1Gi')
+
+        if self.minikube_profile is not None:
+            # wait for boot I guess
+            for i in range(200):
+                if (await podman.v1.list_namespaced_service_account(self.kube_namespace)).items:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise Exception("Minikube failed to give us anything interesting within 20 seconds")
 
         task = pydatatask.KubeTask(
             podman,
@@ -71,8 +80,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 - "-c"
                 - |-
                     echo 'Hello world!'
-                    echo "The message of the day is $(base64 <<<{{ repo0 }}). That's great\!"
+                    echo "The message of the day is $(echo -n {{ repo0 }} | base64). That's great!"
                     echo 'Goodbye world!'
+                    # lol {{ repo0 }}
                 resources:                  
                   requests:                    
                     cpu: 10m
@@ -86,14 +96,15 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         pipeline = pydatatask.Pipeline([task])
 
         await pipeline.validate()
-        await pydatatask.run(pipeline, forever=False, launch_once=True)
+        await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
+        await podman.close()
 
         for job, weh in repo0.data.items():
             assert 'node' in repoDone.data[job]
             logs = await (await repoLogs.open(job, 'r')).read()
             assert logs == f"""\
 Hello world!
-The message of the day is {base64.b64encode(weh)}. That's great!
+The message of the day is {base64.b64encode(weh.encode()).decode()}. That's great!
 Goodbye world!
 """
 

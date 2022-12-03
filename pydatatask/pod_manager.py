@@ -22,12 +22,16 @@ class PodManager:
         self.namespace = namespace
         self.cpu_quota = parse_quantity(cpu_quota)
         self.mem_quota = parse_quantity(mem_quota)
-        self.api = api_client
+        self.api = api_client if api_client is not None else ApiClient()
 
         self._cpu_usage = None
         self._mem_usage = None
 
         self.warned = set()
+        self.v1 = CoreV1Api(self.api)
+
+    async def close(self):
+        await self.api.close()
 
     async def cpu_usage(self):
         if self._cpu_usage is None:
@@ -43,7 +47,7 @@ class PodManager:
         cpu_usage = mem_usage = 0
 
         try:
-            for pod in await self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app).items:
+            for pod in (await self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app)).items:
                 for container in pod.spec.containers:
                     self._cpu_usage += parse_quantity(container.resources.requests['cpu'])
                     self._mem_usage += parse_quantity(container.resources.requests['memory'])
@@ -53,10 +57,6 @@ class PodManager:
         finally:
             self._cpu_usage = cpu_usage
             self._mem_usage = mem_usage
-
-    @property
-    def v1(self):
-        return CoreV1Api(self.api)
 
     async def launch(self, job, task, manifest):
         assert manifest['kind'] == 'Pod'

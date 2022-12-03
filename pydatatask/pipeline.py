@@ -1,3 +1,4 @@
+import asyncio
 from typing import Iterable, Union
 import logging
 
@@ -32,18 +33,14 @@ class Pipeline:
         return result
 
     async def update_only_update(self):
-        result = False
-        for task in self.tasks.values():
-            l.debug("Running update for %s", task.name)
-            result |= await task.update()
-        return result
+        to_gather = [task.update() for task in self.tasks.values()]
+        gathered = await asyncio.gather(*to_gather, return_exceptions=False)
+        return any(gathered)
 
     async def update_only_launch(self):
-        result = False
-        for task in self.tasks.values():
-            l.debug("Launching tasks for %s", task.name)
-            result |= await task.launch_all()
-        return result
+        to_gather = [task.launch_all() for task in self.tasks.values()]
+        gathered = await asyncio.gather(*to_gather, return_exceptions=False)
+        return any(gathered)
 
     def graph(self):
         result = networkx.DiGraph()

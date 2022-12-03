@@ -87,12 +87,15 @@ def shell(pipeline: Pipeline):
 async def update(pipeline: Pipeline):
     await pipeline.update()
 
-async def run(pipeline: Pipeline, forever: bool, launch_once: bool):
+async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float]):
     func = pipeline.update
+    start = asyncio.get_running_loop().time()
     while await func() or forever:
         if launch_once:
             func = pipeline.update_only_update
         await asyncio.sleep(1)
+        if timeout is not None and asyncio.get_running_loop().time() - start > timeout:
+            raise TimeoutError("Pipeline run timeout")
 
 async def print_status(pipeline: Pipeline, all_repos: bool):
     for task in pipeline.tasks.values():  # TODO parallelize - waiting on repos to be a top-level abstraction
@@ -147,7 +150,7 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
     item = pipeline.tasks[taskname].links[reponame].repo
 
     if isinstance(item, BlobRepository):
-        async with item.open(job, 'rb') as fp:
+        async with await item.open(job, 'rb') as fp:
             print_bytes = aiofiles.os.wrap(sys.stdout.buffer.write)
             while True:
                 data = await fp.read(4096)

@@ -76,8 +76,8 @@ class AReadText:
         self.buffer = ""
         self.chunksize = chunksize
 
-    async def read(self, n: Optional[int]) -> str:
-        while n is not None and len(self.buffer) < n:
+    async def read(self, n: Optional[int]=None) -> str:
+        while n is None or len(self.buffer) < n:
             data = await self.base.read(self.chunksize)
             self.buffer += self.decoder.decode(data, final=not bool(data))
             if not data:
@@ -89,6 +89,15 @@ class AReadText:
             result, self.buffer = self.buffer, ""
         return result
 
+    async def close(self):
+        await self.base.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
 class AWriteText:
     def __init__(self, base: AWriteStream, encoding='utf-8', errors='strict'):
         self.base = base
@@ -97,6 +106,15 @@ class AWriteText:
 
     async def write(self, data: str):
         await self.base.write(data.encode(self.encoding, self.errors))
+
+    async def close(self):
+        await self.base.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
 async def roundrobin(iterables: List):
     "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
@@ -724,9 +742,11 @@ class InProcessMetadataRepository(MetadataRepository):
     def __init__(self, data: Optional[Dict[str, Any]]=None):
         self.data: Dict[str, Any] = data if data is not None else {}
 
+    @job_getter
     async def info(self, job):
         return self.data.get(job)
 
+    @job_getter
     async def dump(self, job, data):
         self.data[job] = data
 
@@ -765,10 +785,12 @@ class InProcessBlobRepository(BlobRepository):
     def __init__(self, data: Optional[Dict[str, bytes]]=None):
         self.data = data if data is not None else {}
 
+    @job_getter
     async def info(self, job):
         # not... sure what to put here
         return None
 
+    @job_getter
     async def open(self, ident, mode='r'):
         stream = InProcessBlobStream(self, ident)
         if mode == 'r':
