@@ -1,5 +1,5 @@
+from typing import Iterable, Union, Dict
 import asyncio
-from typing import Iterable, Union
 import logging
 
 import networkx
@@ -14,7 +14,7 @@ __all__ = ('Pipeline',)
 
 class Pipeline:
     def __init__(self, tasks: Iterable[Task]):
-        self.tasks = {task.name: task for task in tasks}
+        self.tasks: Dict[str, Task] = {task.name: task for task in tasks}
 
     async def validate(self):
         seen_repos = set()

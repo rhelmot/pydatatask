@@ -359,12 +359,17 @@ class S3BucketRepository(BlobRepository):
             prefix: str='',
             extension: str='',
             mimetype: str='application/octet-stream',
+            incluster_endpoint: Optional[str]=None,
     ):
         self.client = client
         self.bucket = bucket
         self.prefix = prefix
         self.extension = extension
         self.mimetype = mimetype
+        self.incluster_endpoint = incluster_endpoint
+
+    def __repr__(self):
+        return f'<{type(self).__name__} {self.bucket}/{self.prefix}*{self.extension}>'
 
     async def contains(self, item):
         try:
@@ -401,7 +406,7 @@ class S3BucketRepository(BlobRepository):
 
     @job_getter
     async def info(self, ident):
-        return S3BucketInfo(self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
+        return S3BucketInfo(self.incluster_endpoint or self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
 
     async def delete(self, key):
         await self.client.remove_object(self.bucket, self.object_name(key))
@@ -456,7 +461,7 @@ class DockerRepository(Repository):
                 raise
 
     def __repr__(self):
-        return f'<DockerRepository {self.domain}/{self.repository}>'
+        return f'<DockerRepository {self.domain}/{self.repository}:*>'
 
     @job_getter
     async def info(self, job):
@@ -480,7 +485,7 @@ class DockerRepository(Repository):
         if not await self.contains(key):
             return
 
-        await asyncio.get_event_loop().run_in_executor(None, self._delete_inner, key)
+        self._delete_inner(key)  # blocking! epic fail
 
     def _delete_inner(self, key):
         random_data = os.urandom(16)
@@ -670,6 +675,9 @@ class RelatedItemRepository(Repository):
         self.prefetch_lookup_setting = prefetch_lookup
         self.prefetch_lookup = None
 
+    def __repr__(self):
+        return f'<{type(self).__name__} {self.base_repository} by {self.translator_repository}>'
+
     async def _lookup(self, item):
         if self.prefetch_lookup is None and self.prefetch_lookup_setting:
             self.prefetch_lookup = await self.translator_repository.info_all()
@@ -725,6 +733,9 @@ class ExecutorLiveRepo(Repository):
     def __init__(self, task: 'ExecutorTask'):
         self.task = task
 
+    def __repr__(self):
+        return f'<{type(self).__name__} task={self.task.name}>'
+
     async def _unfiltered_iter(self):
         for job in self.task.rev_jobs:
             yield job
@@ -741,6 +752,9 @@ class ExecutorLiveRepo(Repository):
 class InProcessMetadataRepository(MetadataRepository):
     def __init__(self, data: Optional[Dict[str, Any]]=None):
         self.data: Dict[str, Any] = data if data is not None else {}
+
+    def __repr__(self):
+        return f'<{type(self).__name__}>'
 
     @job_getter
     async def info(self, job):
@@ -784,6 +798,9 @@ class InProcessBlobStream:
 class InProcessBlobRepository(BlobRepository):
     def __init__(self, data: Optional[Dict[str, bytes]]=None):
         self.data = data if data is not None else {}
+
+    def __repr__(self):
+        return f'<{type(self).__name__}>'
 
     @job_getter
     async def info(self, job):
