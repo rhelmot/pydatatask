@@ -22,11 +22,11 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         task.link("repo0", repo0, is_input=True)
         task.link("repo1", repo1, is_output=True)
 
-        self.pipeline = pydatatask.Pipeline([task])
+        self.pipeline = pydatatask.Pipeline([task], pydatatask.Session())
 
     async def test_basic(self):
-        await self.pipeline.validate()
-        await pydatatask.run(self.pipeline, forever=False, launch_once=False)
+        async with self.pipeline:
+            await pydatatask.run(self.pipeline, forever=False, launch_once=False, timeout=None)
 
         repo0 = self.pipeline.tasks['task'].links['repo0'].repo
         repo1 = self.pipeline.tasks['task'].links['repo1'].repo

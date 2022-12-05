@@ -2,6 +2,7 @@ from typing import Union, Callable, Optional, List
 import asyncio
 import argparse
 import sys
+import re
 
 import aiofiles.os
 import yaml
@@ -15,12 +16,11 @@ from .task import Task, settings
 import pydatatask
 
 l = logging.getLogger(__name__)
+token_re = re.compile(r'\w+\.\w+')
 
 __all__ = ('main', 'update', 'cat_data', 'list_data', 'delete_data', 'inject_data', 'print_status', 'launch', 'shell', 'run')
 
 def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsersAction], None]]=None):
-    asyncio.run(pipeline.validate())
-
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 
@@ -75,9 +75,13 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     func = ns.pop('func')
     result_or_coro = func(pipeline, **ns)
     if asyncio.iscoroutine(result_or_coro):
-        return asyncio.run(result_or_coro)
+        return asyncio.run(main_inner(pipeline, result_or_coro))
     else:
         return result_or_coro
+
+async def main_inner(pipeline, coro):
+    async with pipeline:
+        await coro
 
 def shell(pipeline: Pipeline):
     assert pipeline
@@ -103,7 +107,10 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
         for link_name, link in sorted(task.links.items(), key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2):
             if not all_repos and not link.is_status and not link.is_input and not link.is_output:
                 continue
-            print(f'{task.name}.{link_name} {sum(1 async for _ in link.repo)}')
+            the_sum = 0
+            async for _ in link.repo:
+                the_sum += 1
+            print(f'{task.name}.{link_name} {the_sum}')
         print()
 
 async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
@@ -127,9 +134,13 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
                 print(j, dependant)
             await asyncio.gather(*(del_job(j) for j in jobs if not check or await dependant.contains(j)))
 
-def list_data(pipeline: Pipeline, data: List[str]):
+async def list_data(pipeline: Pipeline, data: List[str]):
     input_text = ' '.join(data)
+    tokens = token_re.findall(input_text)
     namespace = {name: TaskNamespace(task) for name, task in pipeline.tasks.items()}
+    for token in tokens:
+        task, repo = token.split('.')
+        await namespace[task].consume(repo)
     result = eval(input_text, {}, namespace)
 
     for job in sorted(result):
@@ -138,12 +149,16 @@ def list_data(pipeline: Pipeline, data: List[str]):
 class TaskNamespace:
     def __init__(self, task: Task):
         self.task = task
+        self.repos = {}
 
     def __getattr__(self, item):
-        return asyncio.run(self._consume(self.task.links[item].repo))
+        return self.repos[item]
 
-    async def _consume(self, repo: Repository):
-        return set(x async for x in repo)
+    async def consume(self, repo: str):
+        result = set()
+        async for x in self.task.links[repo].repo:
+            result.add(x)
+        self.repos[repo] = result
 
 async def cat_data(pipeline: Pipeline, data: str, job: str):
     taskname, reponame = data.split('.')

@@ -1,4 +1,5 @@
 import asyncio
+import subprocess
 from typing import Optional
 import unittest
 import shutil
@@ -29,7 +30,7 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
                 raise unittest.SkipTest("No mongodb endpoint configured and docker is not installed")
             port = random.randrange(0x4000, 0x8000)
             self.mongo_url = f'mongodb://root:root@localhost:{port}'
-            p = await asyncio.create_subprocess_exec(self.docker_path, 'run', '--rm', '--name', self.database, '-d', '-p', f'{port}:27017', '-e', 'MONGO_INITDB_ROOT_USERNAME=root', '-e', 'MONGO_INITDB_ROOT_PASSWORD=root', 'mongo:latest')
+            p = await asyncio.create_subprocess_exec(self.docker_path, 'run', '--rm', '--name', self.database, '-d', '-p', f'{port}:27017', '-e', 'MONGO_INITDB_ROOT_USERNAME=root', '-e', 'MONGO_INITDB_ROOT_PASSWORD=root', 'mongo:latest', stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await p.communicate()
             if await p.wait() != 0:
                 raise unittest.SkipTest("No minio endpoint configured and docker failed to launch mongo:latest")
@@ -38,7 +39,7 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
         self.client = motor.motor_asyncio.AsyncIOMotorClient(self.mongo_url)
 
     async def test_minio(self):
-        repo = pydatatask.MongoMetadataRepository(self.client[self.database].test)
+        repo = pydatatask.MongoMetadataRepository(lambda: self.client[self.database], "test")
         await repo.dump("foo", {"weh": 1})
         assert (await repo.info("foo"))['weh'] == 1
         assert (await self.client[self.database].test.find_one({'_id': 'foo'}))['weh'] == 1
@@ -48,7 +49,7 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
             await self.client.drop_database(self.database)
 
         if self.docker_name is not None:
-            p = await asyncio.create_subprocess_exec(self.docker_path, 'kill', self.docker_name)
+            p = await asyncio.create_subprocess_exec(self.docker_path, 'kill', self.docker_name, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await p.communicate()
 
 if __name__ == '__main__':

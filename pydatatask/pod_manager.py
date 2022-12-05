@@ -22,13 +22,25 @@ class PodManager:
         self.namespace = namespace
         self.cpu_quota = parse_quantity(cpu_quota)
         self.mem_quota = parse_quantity(mem_quota)
-        self.api = api_client if api_client is not None else ApiClient()
+        self._api = api_client
 
         self._cpu_usage = None
         self._mem_usage = None
 
         self.warned = set()
-        self.v1 = CoreV1Api(self.api)
+        self._v1 = None
+
+    @property
+    def api(self):
+        if self._api is None:
+            self._api = ApiClient()
+        return self._api
+
+    @property
+    def v1(self):
+        if self._v1 is None:
+            self._v1 = CoreV1Api(self.api)
+        return self._v1
 
     async def close(self):
         await self.api.close()

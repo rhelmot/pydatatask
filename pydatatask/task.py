@@ -218,7 +218,7 @@ class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
 class KubeTask(Task):
     def __init__(
             self,
-            podman: PodManager,
+            podman: Callable[[], PodManager],
             name: str,
             template: Union[str, Path],
             logs: Optional[BlobRepository],
@@ -230,17 +230,21 @@ class KubeTask(Task):
         super().__init__(name, ready)
 
         self.template = template
-        self.podman = podman
+        self._podman = podman
         self.logs = logs
         self.timeout = timeout
         self.done = done
         self.env = env if env is not None else {}
 
-        self.link("live", LiveKubeRepository(podman, name), is_status=True, inhibits_start=True, inhibits_output=True)
+        self.link("live", LiveKubeRepository(self), is_status=True, inhibits_start=True, inhibits_output=True)
         if logs:
             self.link("logs", logs, is_status=True, inhibits_start=True, required_for_output=True)
         if done:
             self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
+
+    @property
+    def podman(self):
+        return self._podman()
 
     async def render_template(self, env):
         j = jinja2.Environment(enable_async=True)

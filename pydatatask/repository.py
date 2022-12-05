@@ -1,4 +1,4 @@
-from typing import Union, Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager
+from typing import Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager
 import inspect
 import base64
 from collections import Counter
@@ -10,19 +10,17 @@ import yaml
 import os
 import hashlib
 import io
-import asyncio
 
 import aiofiles.os
 import dxf
-import miniopy_async
+import aiobotocore.client
+import botocore.exceptions
 import motor.motor_asyncio
 import docker_registry_client_async
 import aioshutil
 
-from .pod_manager import PodManager
-
 if TYPE_CHECKING:
-    from .task import ExecutorTask
+    from .task import ExecutorTask, KubeTask
 
 l = logging.getLogger(__name__)
 
@@ -187,6 +185,9 @@ class Repository:
         """
         pass
 
+    async def close(self):
+        pass
+
     def map(self, func: Callable, allow_deletes=False) -> 'MapRepository':
         return MapRepository(self, func, allow_deletes=allow_deletes)
 
@@ -332,11 +333,11 @@ class S3BucketBinaryWriter:
         size = self.buffer.tell()
         self.buffer.seek(0, io.SEEK_SET)
         await self.repo.client.put_object(
-            self.repo.bucket,
-            self.repo.object_name(self.job),
-            self.buffer,
-            size,
-            content_type=self.repo.mimetype,
+            Bucket=self.repo.bucket,
+            Key=self.repo.object_name(self.job),
+            Body=self.buffer,
+            ContentLength=size,
+            ContentType=self.repo.mimetype,
         )
 
     async def write(self, data: bytes):
@@ -354,39 +355,55 @@ class S3BucketInfo:
 class S3BucketRepository(BlobRepository):
     def __init__(
             self,
-            client: miniopy_async.Minio,
+            client: Callable[[], "aiobotocore.client.S3"],
             bucket: str,
             prefix: str='',
             extension: str='',
             mimetype: str='application/octet-stream',
             incluster_endpoint: Optional[str]=None,
     ):
-        self.client = client
+        self._client = client
         self.bucket = bucket
         self.prefix = prefix
         self.extension = extension
         self.mimetype = mimetype
         self.incluster_endpoint = incluster_endpoint
 
+    @property
+    def client(self):
+        return self._client()
+
     def __repr__(self):
         return f'<{type(self).__name__} {self.bucket}/{self.prefix}*{self.extension}>'
 
     async def contains(self, item):
         try:
-            await self.client.stat_object(self.bucket, self.object_name(item))
-        except miniopy_async.S3Error:
+            await self.client.head_object(Bucket=self.bucket, Key=self.object_name(item))
+        except botocore.exceptions.ClientError:
             return False
         else:
             return True
 
     async def _unfiltered_iter(self):
-        for obj in await self.client.list_objects(self.bucket, self.prefix):
-            if obj.object_name.endswith(self.extension):
-                yield obj.object_name[len(self.prefix):-len(self.extension) if self.extension else None]
+        paginator = self.client.get_paginator("list_objects")
+        async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
+            for obj in page.get('Contents', []):
+                if obj['Key'].endswith(self.extension):
+                    yield obj['Key'][len(self.prefix):-len(self.extension) if self.extension else None]
 
     async def validate(self):
-        if not await self.client.bucket_exists(self.bucket):
-            await self.client.make_bucket(self.bucket)
+
+        try:
+            await self.client.head_bucket(Bucket=self.bucket)
+        except botocore.exceptions.ClientError as e:
+            if '404' in str(e):
+                await self.client.create_bucket(Bucket=self.bucket)
+            else:
+                raise
+
+    async def close(self):
+        await self.client.close()
+        self.client = None
 
     def object_name(self, ident):
         return f'{self.prefix}{ident}{self.extension}'
@@ -398,9 +415,9 @@ class S3BucketRepository(BlobRepository):
         elif mode == 'w':
             return AWriteText(S3BucketBinaryWriter(self, ident))
         elif mode == 'rb':
-            return await self.client.get_object(self.bucket, self.object_name(ident))
+            return (await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body']
         elif mode == 'r':
-            return AReadText(await self.client.get_object(self.bucket, self.object_name(ident)))
+            return AReadText((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body'])
         else:
             raise ValueError(mode)
 
@@ -409,11 +426,19 @@ class S3BucketRepository(BlobRepository):
         return S3BucketInfo(self.incluster_endpoint or self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
 
     async def delete(self, key):
-        await self.client.remove_object(self.bucket, self.object_name(key))
+        await self.client.remove_object(Bucket=self.bucket, Key=self.object_name(key))
 
 class MongoMetadataRepository(MetadataRepository):
-    def __init__(self, collection: motor.motor_asyncio.AsyncIOMotorCollection):
-        self.collection = collection
+    def __init__(self, collection: Callable[[], motor.motor_asyncio.AsyncIOMotorCollection], subcollection: Optional[str]):
+        self._collection = collection
+        self._subcollection = subcollection
+
+    @property
+    def collection(self):
+        result = self._collection()
+        if self._subcollection is not None:
+            result = result.get_collection(self._subcollection)
+        return result
 
     async def contains(self, item):
         return await self.collection.count_documents({'_id': item}) != 0
@@ -444,10 +469,14 @@ class DockerRepository(Repository):
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
     """
-    def __init__(self, registry: docker_registry_client_async.DockerRegistryClientAsync, domain: str, repository: str):
-        self.registry = registry
+    def __init__(self, registry: Callable[[], docker_registry_client_async.DockerRegistryClientAsync], domain: str, repository: str):
+        self._registry = registry
         self.domain = domain
         self.repository = repository
+
+    @property
+    def registry(self):
+        return self._registry()
 
     async def _unfiltered_iter(self):
         try:
@@ -504,19 +533,18 @@ class LiveKubeRepository(Repository):
     """
     A repository where keys translate to `job` labels on running kube pods.
     """
-    def __init__(self, podman: PodManager, task: str):
+    def __init__(self, task: "KubeTask"):
         self.task = task
-        self.podman = podman
 
     async def _unfiltered_iter(self):
         for pod in await self.pods():
             yield pod.metadata.labels['job']
 
     async def contains(self, item):
-        return bool(await self.podman.query(task=self.task, job=item))
+        return bool(await self.task.podman.query(task=self.task.name, job=item))
 
     def __repr__(self):
-        return f'<LiveKubeRepository task={self.task}>'
+        return f'<LiveKubeRepository task={self.task.name}>'
 
     @job_getter
     async def info(self, job):
@@ -524,12 +552,12 @@ class LiveKubeRepository(Repository):
         return None
 
     async def pods(self):
-        return await self.podman.query(task=self.task)
+        return await self.task.podman.query(task=self.task.name)
 
     async def delete(self, key):
-        pods = await self.podman.query(job=key, task=self.task)
+        pods = await self.task.podman.query(job=key, task=self.task.name)
         for pod in pods:  # there... really should be only one
-            await self.podman.delete(pod)
+            await self.task.podman.delete(pod)
 
 class AggregateAndRepository(Repository):
     """
@@ -651,8 +679,8 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
     async def info(self, job):
         try:
             return await super().info(job)
-        except miniopy_async.S3Error as e:
-            if e.code == 'NoSuchKey':
+        except botocore.exceptions.ClientError as e:
+            if '404' in str(e):
                 return {}
             else:
                 raise

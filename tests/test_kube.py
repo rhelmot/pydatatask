@@ -48,25 +48,33 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             self.kube_context = self.minikube_profile
 
     async def test_kube(self):
+        session = pydatatask.Session()
+
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
+
+        @session.resource
+        async def podman():
+            podman = pydatatask.PodManager(f'test-{self.test_id}', self.kube_namespace, cpu_quota='1', mem_quota='1Gi')
+            yield podman
+            await podman.close()
 
         repo0 = pydatatask.InProcessMetadataRepository({str(i): f"weh-{i}" for i in range(50)})
         repoDone = pydatatask.InProcessMetadataRepository()
         repoLogs = pydatatask.InProcessBlobRepository()
 
-        podman = pydatatask.PodManager(f'test-{self.test_id}', self.kube_namespace, cpu_quota='1', mem_quota='1Gi')
-
         if self.minikube_profile is not None:
             # wait for boot I guess
-            for i in range(200):
-                if (await podman.v1.list_namespaced_service_account(self.kube_namespace)).items:
-                    break
-                await asyncio.sleep(0.1)
-            else:
-                raise Exception("Minikube failed to give us anything interesting within 20 seconds")
+            async with kubernetes_asyncio.client.ApiClient() as api:
+                v1 = kubernetes_asyncio.client.CoreV1Api(api)
+                for i in range(200):
+                    if (await v1.list_namespaced_service_account(self.kube_namespace)).items:
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    raise Exception("Minikube failed to give us anything interesting within 20 seconds")
 
         task = pydatatask.KubeTask(
-            podman,
+           podman,
             'task',
             r"""
             apiVersion: v1
@@ -93,11 +101,10 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         )
         task.link("repo0", repo0, is_input=True)
 
-        pipeline = pydatatask.Pipeline([task])
+        pipeline = pydatatask.Pipeline([task], session)
 
-        await pipeline.validate()
-        await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
-        await podman.close()
+        async with pipeline:
+            await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
 
         for job, weh in repo0.data.items():
             assert 'node' in repoDone.data[job]
