@@ -310,7 +310,7 @@ class DirectoryRepository(FileRepositoryBase):
             pass
 
     async def delete(self, key):
-        if key in self:
+        if await self.contains(key):
             await aioshutil.rmtree(self.fullpath(key))
 
     async def contains(self, item):
