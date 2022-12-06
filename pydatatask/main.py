@@ -36,6 +36,11 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     parser_status.add_argument("--all", "-a", dest='all_repos', action="store_true", help="Show internal repositories")
     parser_status.set_defaults(func=print_status)
 
+    parser_trace = subparsers.add_parser("trace", help="Track a job's progress through the pipeline")
+    parser_trace.add_argument("--all", "-a", dest="all_repos", action="store_true", help="Show internal repositories")
+    parser_trace.add_argument("job", nargs="+", help="Name of job to trace")
+    parser_trace.set_defaults(func=print_trace)
+
     parser_delete = subparsers.add_parser("rm", help="Delete data from the pipeline")
     parser_delete.add_argument("--recursive", "-r", action="store_true", help="Delete dependant data too")
     parser_delete.add_argument("data", type=str, help="Name of repository [task.repo] or task from which to delete data")
@@ -61,7 +66,7 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     parser_launch.add_argument("job", type=str, help="Name of job to launch task on")
     parser_launch.add_argument("--force", "-f", action="store_true", help="Launch even if start is inhibited by data")
     parser_launch.add_argument("--sync", action="store_true", help="Run the task in-process, if possible")
-    parser_launch.add_argument("--meta", action=argparse.BooleanOptionalAction, default=False, help="Store metadata related to task completion")
+    parser_launch.add_argument("--meta", action=argparse.BooleanOptionalAction, default=True, help="Store metadata related to task completion")
     parser_launch.set_defaults(func=launch)
 
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
@@ -113,6 +118,16 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
             print(f'{task.name}.{link_name} {the_sum}')
         print()
 
+async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
+    for task in pipeline.tasks.values():  # TODO parallelize - waiting on repos to be a top-level abstraction
+        print(task.name)
+        for link_name, link in sorted(task.links.items(), key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2):
+            if not all_repos and not link.is_status and not link.is_input and not link.is_output:
+                continue
+            jobs = [j for j in job if await link.repo.contains(j)]
+            print(f'{task.name}.{link_name} {" ".join(jobs)}')
+        print()
+
 async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
     item: Union[Task | Repository]
     if '.' in data:
@@ -137,7 +152,7 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
 async def list_data(pipeline: Pipeline, data: List[str]):
     input_text = ' '.join(data)
     tokens = token_re.findall(input_text)
-    namespace = {name: TaskNamespace(task) for name, task in pipeline.tasks.items()}
+    namespace = {name.replace('-', '_'): TaskNamespace(task) for name, task in pipeline.tasks.items()}
     for token in tokens:
         task, repo = token.split('.')
         await namespace[task].consume(repo)
@@ -180,12 +195,12 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
         print("Error: cannot cat a repository which is not a blob or metadata")
         return 1
 
-async def inject_data(pipeline: Pipeline, args: argparse.Namespace):
-    taskname, reponame = args.data.split('.')
+async def inject_data(pipeline: Pipeline, data: str, job: str):
+    taskname, reponame = data.split('.')
     item = pipeline.tasks[taskname].links[reponame].repo
 
     if isinstance(item, BlobRepository):
-        with item.open(args.job, 'wb') as fp:
+        with item.open(job, 'wb') as fp:
             fp.write(sys.stdin.buffer.read())
     elif isinstance(item, MetadataRepository):
         try:
@@ -193,7 +208,7 @@ async def inject_data(pipeline: Pipeline, args: argparse.Namespace):
         except yaml.YAMLError:
             print("Error: could not parse stdin as yaml")
             return 1
-        await item.dump(args.job, data)
+        await item.dump(job, data)
     else:
         print("Error: cannot inject data into a repository which is not a blob or metadata")
         return 1
@@ -203,7 +218,7 @@ async def launch(pipeline: Pipeline, task: str, job: str, sync: bool, meta: bool
     job = job
     settings(sync, meta)
 
-    if force or job in task.ready:
+    if force or await task.ready.contains(job):
         await task.launch(job)
     else:
         l.warning("Task is not ready to launch - use -f to force")

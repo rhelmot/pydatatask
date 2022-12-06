@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager
+from typing import Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager, Coroutine
 import inspect
 import base64
 from collections import Counter
@@ -191,17 +191,26 @@ class Repository:
     async def close(self):
         pass
 
-    def map(self, func: Callable, allow_deletes=False) -> 'MapRepository':
-        return MapRepository(self, func, allow_deletes=allow_deletes)
+    def map(self, func: Callable, filter: Optional[Callable]=None, allow_deletes=False) -> 'MapRepository':
+        return MapRepository(self, func, filter, allow_deletes=allow_deletes)
 
 class MapRepository(Repository):
-    def __init__(self, child: Repository, func: Callable, allow_deletes=False):
+    def __init__(
+            self,
+            child: Repository,
+            func: Callable[[Any], Coroutine[None, None, Any]],
+            filter: Optional[Callable[[str], Coroutine[None, None, bool]]]=None,
+            allow_deletes=False
+    ):
         self.child = child
         self.func = func
+        self.filter = filter
         self.allow_deletes = allow_deletes
 
     async def contains(self, item):
-        return await self.child.contains(item)
+        if self.filter is None or await self.filter(item):
+            return await self.child.contains(item)
+        return False
 
     async def delete(self, key):
         if self.allow_deletes:
@@ -209,15 +218,17 @@ class MapRepository(Repository):
 
     async def _unfiltered_iter(self):
         async for item in self.child._unfiltered_iter():
-            yield item
+            if self.filter is None or await self.filter(item):
+                yield item
 
     async def info(self, ident):
-        return self.func(await self.child.info(ident))
+        return await self.func(await self.child.info(ident))
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.child.info_all()
         for k, v in result.items():
-            result[k] = self.func(v)
+            if self.filter is None or await self.filter(k):
+                result[k] = await self.func(v)
         return result
 
 class MetadataRepository(Repository):
@@ -448,6 +459,9 @@ class MongoMetadataRepository(MetadataRepository):
         self._collection = collection
         self._subcollection = subcollection
 
+    def __repr__(self):
+        return f'<{type(self).__name__} {self._subcollection}>'
+
     @property
     def collection(self):
         result = self._collection()
@@ -590,7 +604,10 @@ class AggregateAndRepository(Repository):
                 yield item
 
     async def contains(self, item):
-        return all(await child.contains(item) for child in self.children.values())
+        for child in self.children.values():
+            if not await child.contains(item):
+                return False
+        return True
 
     @job_getter
     async def info(self, job):
@@ -620,7 +637,10 @@ class AggregateOrRepository(Repository):
                 yield item
 
     async def contains(self, item):
-        return any(await child.contains(item) for child in self.children.values())
+        for child in self.children.values():
+            if await child.contains(item):
+                return True
+        return False
 
     @job_getter
     async def info(self, job):
@@ -656,7 +676,7 @@ class BlockingRepository(Repository):
             yield item
 
     async def contains(self, item):
-        return await self.source.contains(item) and not self.unless.contains(item)
+        return await self.source.contains(item) and not await self.unless.contains(item)
 
     @job_getter
     async def info(self, job):

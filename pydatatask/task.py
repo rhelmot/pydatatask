@@ -485,7 +485,7 @@ class ExecutorTask(Task):
 class KubeFunctionTask(KubeTask):
     def __init__(
             self,
-            podman: PodManager,
+            podman: Callable[[], PodManager],
             name: str,
             template: Union[str, Path],
             logs: Optional[BlobRepository],
@@ -496,6 +496,8 @@ class KubeFunctionTask(KubeTask):
         super().__init__(podman, name, template, logs, kube_done)
         self.func = func
         self.func_done = func_done
+        if func_done is not None:
+            self.link("func_done", func_done, required_for_output=True, is_status=True, inhibits_start=True)
         self._env = {}
 
     def __call__(self, f: Callable) -> 'KubeFunctionTask':
@@ -515,21 +517,21 @@ class KubeFunctionTask(KubeTask):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
-    def launch(self, job):
+    async def launch(self, job):
         if SYNCHRONOUS:
-            self.launch_sync(job)
+            await self.launch_sync(job)
         else:
-            super().launch(job)
+            await super().launch(job)
 
-    def launch_sync(self, job):
+    async def launch_sync(self, job):
         start_time = datetime.now()
         l.debug("Launching --sync %s:%s...", self.name, job)
         args = dict(self._env)
         if 'job' in args:
             args['job'] = job
-        args = build_env(args, job, RepoHandlingMode.SMART)
+        args = await build_env(args, job, RepoHandlingMode.SMART)
         try:
-            self.func(**args)
+            await self.func(**args)
         except Exception as e:
             l.info("--sync task %s:%s failed", self.name, job, exc_info=True)
             result = {'result': "exception", "exception": repr(e), 'traceback': traceback.format_tb(e.__traceback__)}
@@ -539,4 +541,4 @@ class KubeFunctionTask(KubeTask):
         result['start_time'] = start_time
         result['end_time'] = datetime.now()
         if METADATA:
-            self.func_done.dump(job, result)
+            await self.func_done.dump(job, result)
