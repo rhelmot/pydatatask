@@ -86,7 +86,7 @@ async def main_inner(pipeline, coro):
 def shell(pipeline: Pipeline):
     assert pipeline
     assert pydatatask
-    IPython.embed()
+    IPython.embed(using='asyncio')
 
 async def update(pipeline: Pipeline):
     await pipeline.update()
@@ -124,7 +124,7 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
     for dependant in pipeline.dependants(item, recursive):
         if isinstance(dependant, Repository):
             if job[0] == '__all__':
-                jobs = list(x async for x in dependant)
+                jobs = [x async for x in dependant]
                 check = False
             else:
                 jobs = job
@@ -132,7 +132,7 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
             async def del_job(j):
                 await dependant.delete(j)
                 print(j, dependant)
-            await asyncio.gather(*(del_job(j) for j in jobs if not check or await dependant.contains(j)))
+            await asyncio.gather(*[del_job(j) for j in jobs if not check or await dependant.contains(j)])
 
 async def list_data(pipeline: Pipeline, data: List[str]):
     input_text = ' '.join(data)

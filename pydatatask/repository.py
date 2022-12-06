@@ -155,7 +155,10 @@ class Repository:
                 l.warning("Skipping %s %s - not a valid job id", self, ident)
 
     async def contains(self, item):
-        return any(item == x async for x in self)
+        async for x in self:
+            if x == item:
+                return True
+        return False
 
     def __aiter__(self):
         return self.filter_jobs(self._unfiltered_iter())
@@ -343,6 +346,23 @@ class S3BucketBinaryWriter:
     async def write(self, data: bytes):
         self.buffer.write(data)
 
+class S3BucketReader:
+    def __init__(self, body):
+        self.body = body
+
+    async def close(self):
+        await self.body.close()
+
+    async def read(self, n=None):
+        return await self.body.read()
+
+    async def __aenter__(self):
+        await self.body.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.body.__aexit__(exc_type, exc_val, exc_tb)
+
 class S3BucketInfo:
     def __init__(self, endpoint: str, uri: str):
         self.endpoint = endpoint
@@ -392,7 +412,6 @@ class S3BucketRepository(BlobRepository):
                     yield obj['Key'][len(self.prefix):-len(self.extension) if self.extension else None]
 
     async def validate(self):
-
         try:
             await self.client.head_bucket(Bucket=self.bucket)
         except botocore.exceptions.ClientError as e:
@@ -400,10 +419,6 @@ class S3BucketRepository(BlobRepository):
                 await self.client.create_bucket(Bucket=self.bucket)
             else:
                 raise
-
-    async def close(self):
-        await self.client.close()
-        self.client = None
 
     def object_name(self, ident):
         return f'{self.prefix}{ident}{self.extension}'
@@ -415,9 +430,9 @@ class S3BucketRepository(BlobRepository):
         elif mode == 'w':
             return AWriteText(S3BucketBinaryWriter(self, ident))
         elif mode == 'rb':
-            return (await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body']
+            return S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body'])
         elif mode == 'r':
-            return AReadText((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body'])
+            return AReadText(S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body']))
         else:
             raise ValueError(mode)
 
@@ -426,7 +441,7 @@ class S3BucketRepository(BlobRepository):
         return S3BucketInfo(self.incluster_endpoint or self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
 
     async def delete(self, key):
-        await self.client.remove_object(Bucket=self.bucket, Key=self.object_name(key))
+        await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(key))
 
 class MongoMetadataRepository(MetadataRepository):
     def __init__(self, collection: Callable[[], motor.motor_asyncio.AsyncIOMotorCollection], subcollection: Optional[str]):
@@ -437,7 +452,7 @@ class MongoMetadataRepository(MetadataRepository):
     def collection(self):
         result = self._collection()
         if self._subcollection is not None:
-            result = result.get_collection(self._subcollection)
+            result = result[self._subcollection]
         return result
 
     async def contains(self, item):
@@ -458,7 +473,7 @@ class MongoMetadataRepository(MetadataRepository):
         return result
 
     async def info_all(self) -> Dict[str, Any]:
-        return {entry['_id']: entry for entry in await self.collection.find({})}
+        return {entry['_id']: entry async for entry in self.collection.find({})}
 
     @job_getter
     async def dump(self, job, data):
@@ -481,7 +496,7 @@ class DockerRepository(Repository):
     async def _unfiltered_iter(self):
         try:
             image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
-            for tag in (await self.registry.get_tags(image)).tags:
+            for tag in (await self.registry.get_tags(image)).tags['tags']:
                 yield tag
         except Exception as e:
             if '404' in str(e):
@@ -657,14 +672,14 @@ class YamlMetadataRepository(BlobRepository, MetadataRepository):
     """
     @job_getter
     async def info(self, job):
-        with self.open(job, 'rb') as fp:
+        async with await self.open(job, 'rb') as fp:
             s = await fp.read()
         return yaml.safe_load(s)
 
     @job_getter
     async def dump(self, job, data):
         s = yaml.safe_dump(data, None)
-        with self.open(job, 'w') as fp:
+        async with await self.open(job, 'w') as fp:
             await fp.write(s)
 
 class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
@@ -752,9 +767,10 @@ class RelatedItemRepository(Repository):
         return inner
 
     async def _unfiltered_iter(self):
+        base_contents = {x async for x in self.base_repository}
         async for item in self.translator_repository:
             basename = await self._lookup(item)
-            if basename is not None: # and basename in self.base_repository:
+            if basename is not None and basename in base_contents:
                 yield item
 
 class ExecutorLiveRepo(Repository):

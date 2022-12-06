@@ -1,8 +1,8 @@
 from typing import Optional, Union
 import logging
-import asyncio
 
 from kubernetes_asyncio.client import ApiClient, CoreV1Api, ApiException
+from kubernetes_asyncio.stream import WsApiClient
 from kubernetes.utils import parse_quantity
 
 l = logging.getLogger(__name__)
@@ -14,7 +14,6 @@ class PodManager:
             self,
             app: str,
             namespace: str,
-            api_client: Optional[ApiClient]=None,
             cpu_quota: Union[str, int]='1',
             mem_quota: Union[str, int]='1Gi'
     ):
@@ -22,13 +21,15 @@ class PodManager:
         self.namespace = namespace
         self.cpu_quota = parse_quantity(cpu_quota)
         self.mem_quota = parse_quantity(mem_quota)
-        self._api = api_client
+        self._api: Optional[ApiClient] = None
+        self._api_ws: Optional[WsApiClient] = None
 
         self._cpu_usage = None
         self._mem_usage = None
 
         self.warned = set()
         self._v1 = None
+        self._v1_ws = None
 
     @property
     def api(self):
@@ -37,13 +38,30 @@ class PodManager:
         return self._api
 
     @property
+    def api_ws(self):
+        if self._api_ws is None:
+            self._api_ws = WsApiClient()
+        return self._api_ws
+
+    @property
     def v1(self):
         if self._v1 is None:
             self._v1 = CoreV1Api(self.api)
         return self._v1
 
+    @property
+    def v1_ws(self):
+        if self._v1_ws is None:
+            self._v1_ws = CoreV1Api(self.api_ws)
+        return self._v1_ws
+
     async def close(self):
-        await self.api.close()
+        if self._api is not None:
+            await self._api.close()
+            self._api = None
+        if self._api_ws is not None:
+            await self._api_ws.close()
+            self._api_ws = None
 
     async def cpu_usage(self):
         if self._cpu_usage is None:
@@ -61,8 +79,8 @@ class PodManager:
         try:
             for pod in (await self.v1.list_namespaced_pod(self.namespace, label_selector='app=' + self.app)).items:
                 for container in pod.spec.containers:
-                    self._cpu_usage += parse_quantity(container.resources.requests['cpu'])
-                    self._mem_usage += parse_quantity(container.resources.requests['memory'])
+                    cpu_usage += parse_quantity(container.resources.requests['cpu'])
+                    mem_usage += parse_quantity(container.resources.requests['memory'])
         except ApiException as e:
             if e.reason != "Forbidden":
                 raise
