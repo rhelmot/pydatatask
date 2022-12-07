@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Library for constructing data-centric processing pipelines with few invariants"
 requires-python = ">=3.8"
-keywords = ["pipeline", "processing", "async", "kubernetes", "s3", "mongodb", "docker"]
+keywords = ["pipeline", "data", "task", "repository", "processing", "async", "kubernetes", "s3", "mongodb", "docker"]
 
 dependencies = [
     "kubernetes",
@@ -48,3 +48,16 @@ file = "LICENSE"
 [tool.setuptools]
 zip-safe = false
 package-data = { pydatatask = ["py.typed"] }
+
+# https://github.com/tomplus/kubernetes_asyncio/issues/230
+[[tool.mypy.overrides]]
+module = "kubernetes_asyncio.*"
+ignore_missing_imports = true
+
+# https://jira.mongodb.org/projects/MOTOR/issues/MOTOR-331
+[[tool.mypy.overrides]]
+module = "motor.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
