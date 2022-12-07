@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Set
 import logging
 
 from kubernetes_asyncio.client import ApiClient, CoreV1Api, ApiException
@@ -27,7 +27,7 @@ class PodManager:
         self._cpu_usage = None
         self._mem_usage = None
 
-        self.warned = set()
+        self.warned: Set[str] = set()
         self._v1 = None
         self._v1_ws = None
 

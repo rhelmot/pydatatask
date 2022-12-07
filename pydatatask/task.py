@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple, Coroutine
+from typing import Optional, Dict, Any, Union, Iterable, Callable, Tuple, Protocol
 import asyncio
 import sys
 import time
@@ -17,7 +17,7 @@ import aiofiles.os
 import yaml
 import jinja2.compiler
 import jinja2.async_utils
-from kubernetes.client import V1Pod
+from kubernetes_asyncio.client import V1Pod
 
 from .repository import Repository, FileRepository, BlockingRepository, AggregateOrRepository, LiveKubeRepository, \
     AggregateAndRepository, BlobRepository, MetadataRepository, RelatedItemRepository, ExecutorLiveRepo
@@ -347,22 +347,26 @@ class LocalProcessTask(Task):
     def launch(self, job):
         pass
 
+class FunctionTaskProtocol(Protocol):
+    def __call__(self, job: str, **kwargs):
+        ...
+
 class InProcessSyncTask(Task):
     def __init__(
             self,
             name: str,
-            done: MetadataRepository=None,
+            done: MetadataRepository,
             ready: Optional[Repository]=None,
-            func: Optional[Callable[[str, ...], Coroutine]]=None,
+            func: Optional[FunctionTaskProtocol]=None,
     ):
         super().__init__(name, ready=ready)
 
         self.done = done
         self.func = func
         self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
-        self._env = {}
+        self._env: Dict[str, Any] = {}
 
-    def __call__(self, f: Callable[[str, ...], None]) -> 'InProcessSyncTask':
+    def __call__(self, f: FunctionTaskProtocol) -> 'InProcessSyncTask':
         self.func = f
         return self
 
@@ -409,7 +413,7 @@ class ExecutorTask(Task):
         self.rev_jobs: Dict[str, Future] = {}
         self.live = ExecutorLiveRepo(self)
         self.done = done
-        self._env = {}
+        self._env: Dict[str, Any] = {}
         self.link("live", self.live, is_status=True, inhibits_output=True, inhibits_start=True)
         self.link("done", self.done, is_status=True, required_for_output=True, inhibits_start=True)
 
@@ -498,7 +502,7 @@ class KubeFunctionTask(KubeTask):
         self.func_done = func_done
         if func_done is not None:
             self.link("func_done", func_done, required_for_output=True, is_status=True, inhibits_start=True)
-        self._env = {}
+        self._env: Dict[str, Any] = {}
 
     def __call__(self, f: Callable) -> 'KubeFunctionTask':
         self.func = f

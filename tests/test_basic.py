@@ -6,6 +6,8 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
 
+    async def test_basic(self):
+        session = pydatatask.Session()
         repo0 = pydatatask.InProcessMetadataRepository()
         repo1 = pydatatask.InProcessMetadataRepository()
         done = pydatatask.InProcessMetadataRepository()
@@ -22,14 +24,10 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         task.link("repo0", repo0, is_input=True)
         task.link("repo1", repo1, is_output=True)
 
-        self.pipeline = pydatatask.Pipeline([task], pydatatask.Session())
+        pipeline = pydatatask.Pipeline([task], session)
+        async with pipeline:
+            await pydatatask.run(pipeline, forever=False, launch_once=False, timeout=None)
 
-    async def test_basic(self):
-        async with self.pipeline:
-            await pydatatask.run(self.pipeline, forever=False, launch_once=False, timeout=None)
-
-        repo0 = self.pipeline.tasks['task'].links['repo0'].repo
-        repo1 = self.pipeline.tasks['task'].links['repo1'].repo
         assert len(repo0.data) == len(repo1.data)
         for job, i in repo0.data.items():
             assert len(repo1.data[job]) == i

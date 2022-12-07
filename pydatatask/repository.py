@@ -13,7 +13,7 @@ import io
 
 import aiofiles.os
 import dxf
-import aiobotocore.client
+from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 import motor.motor_asyncio
 import docker_registry_client_async
@@ -386,7 +386,7 @@ class S3BucketInfo:
 class S3BucketRepository(BlobRepository):
     def __init__(
             self,
-            client: Callable[[], "aiobotocore.client.S3"],
+            client: Callable[[], S3Client],
             bucket: str,
             prefix: str='',
             extension: str='',

@@ -8,10 +8,12 @@ version = "0.0.1"
 authors = [
     { name = "Audrey Dutcher", email = "audrey@rhelmot.io" },
 ]
-description = "Library for constructing data-centric processing pipelines"
-requires-python = ">=3.10"
+description = "Library for constructing data-centric processing pipelines with few invariants"
+requires-python = ">=3.8"
+keywords = ["pipeline", "processing", "async", "kubernetes", "s3", "mongodb", "docker"]
 
 dependencies = [
+    "kubernetes",
     "kubernetes_asyncio",
     "docker-registry-client-async",
     "python-dxf",
@@ -30,7 +32,18 @@ dev = [
     "kubernetes-typed",
     "types-pyyaml",
     "networkx-stubs",
+    "types-aiobotocore[essential]",
 ]
+
+[urls]
+repository = "https://github.com/rhelmot/pydatatask"
+
+[readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[license]
+file = "LICENSE"
 
 [tool.setuptools]
 zip-safe = false

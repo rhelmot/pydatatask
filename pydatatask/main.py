@@ -1,10 +1,9 @@
-from typing import Union, Callable, Optional, List
+from typing import Union, Callable, Optional, List, Dict, Set
 import asyncio
 import argparse
 import sys
 import re
 
-import aiofiles.os
 import yaml
 import logging
 import IPython
@@ -31,6 +30,7 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
     parser_run.set_defaults(func=run)
+    parser_run.set_defaults(timeout=None)
 
     parser_status = subparsers.add_parser("status", help="View the pipeline status")
     parser_status.add_argument("--all", "-a", dest='all_repos', action="store_true", help="Show internal repositories")
@@ -62,7 +62,7 @@ def main(pipeline: Pipeline, instrument: Optional[Callable[[argparse._SubParsers
     parser_inject.set_defaults(func=inject_data)
 
     parser_launch = subparsers.add_parser("launch", help="Manually start a task")
-    parser_launch.add_argument("task", type=str, help="Name of task to launch")
+    parser_launch.add_argument(dest='task_name', type=str, help="Name of task to launch")
     parser_launch.add_argument("job", type=str, help="Name of job to launch task on")
     parser_launch.add_argument("--force", "-f", action="store_true", help="Launch even if start is inhibited by data")
     parser_launch.add_argument("--sync", action="store_true", help="Run the task in-process, if possible")
@@ -164,7 +164,7 @@ async def list_data(pipeline: Pipeline, data: List[str]):
 class TaskNamespace:
     def __init__(self, task: Task):
         self.task = task
-        self.repos = {}
+        self.repos: Dict[str, Set[str]] = {}
 
     def __getattr__(self, item):
         return self.repos[item]
@@ -181,16 +181,15 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
 
     if isinstance(item, BlobRepository):
         async with await item.open(job, 'rb') as fp:
-            print_bytes = aiofiles.os.wrap(sys.stdout.buffer.write)
             while True:
-                data = await fp.read(4096)
-                if not data:
+                data_bytes = await fp.read(4096)
+                if not data_bytes:
                     break
-                await print_bytes(data)
+                await asyncio.get_running_loop().run_in_executor(None, sys.stdout.buffer.write, data_bytes)
     elif isinstance(item, MetadataRepository):
-        data = await item.info(job)
-        data_str = yaml.safe_dump(data, None)
-        await aiofiles.os.wrap(sys.stdout.write)(data_str)
+        data_bytes = await item.info(job)
+        data_str = yaml.safe_dump(data_bytes, None)
+        await asyncio.get_running_loop().run_in_executor(None, sys.stdout.write, data_str)
     else:
         print("Error: cannot cat a repository which is not a blob or metadata")
         return 1
@@ -201,20 +200,24 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
 
     if isinstance(item, BlobRepository):
         with item.open(job, 'wb') as fp:
-            fp.write(sys.stdin.buffer.read())
+            while True:
+                data_bytes = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.buffer.read, 1024 * 1024)
+                if not data:
+                    break
+                await fp.write(data_bytes)
     elif isinstance(item, MetadataRepository):
         try:
-            data = yaml.safe_load(sys.stdin)
+            data_obj = yaml.safe_load(sys.stdin)
         except yaml.YAMLError:
             print("Error: could not parse stdin as yaml")
             return 1
-        await item.dump(job, data)
+        await item.dump(job, data_obj)
     else:
         print("Error: cannot inject data into a repository which is not a blob or metadata")
         return 1
 
-async def launch(pipeline: Pipeline, task: str, job: str, sync: bool, meta: bool, force: bool):
-    task = pipeline.tasks[task]
+async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool):
+    task = pipeline.tasks[task_name]
     job = job
     settings(sync, meta)
 

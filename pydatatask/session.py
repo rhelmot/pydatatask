@@ -8,7 +8,7 @@ class Session:
         self.resources = {}
 
     def resource(self, manager: Union[str, Callable[[], Coroutine]]) -> Callable[[], Any]:
-        if type(manager) is str:
+        if isinstance(manager, str):
             assert manager in self._resource_defs
             def inner():
                 if manager not in self.resources:
