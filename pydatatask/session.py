@@ -1,6 +1,7 @@
 from typing import Callable, Coroutine, Union, Any
 
-__all__ = ('Session',)
+__all__ = ("Session",)
+
 
 class Session:
     def __init__(self):
@@ -10,10 +11,12 @@ class Session:
     def resource(self, manager: Union[str, Callable[[], Coroutine]]) -> Callable[[], Any]:
         if isinstance(manager, str):
             assert manager in self._resource_defs
+
             def inner():
                 if manager not in self.resources:
                     raise Exception("Session is not open")
                 return self.resources[manager]
+
             return inner
         else:
             self._resource_defs[manager.__name__] = manager()

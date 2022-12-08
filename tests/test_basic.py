@@ -2,6 +2,7 @@ import unittest
 import pydatatask
 import aiofiles.os
 
+
 class TestBasic(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
@@ -16,7 +17,11 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
             repo0.data[str(i)] = i
 
         @pydatatask.InProcessSyncTask("task", done)
-        async def task(job, repo0: pydatatask.MetadataRepository, repo1: pydatatask.MetadataRepository):
+        async def task(
+            job,
+            repo0: pydatatask.MetadataRepository,
+            repo1: pydatatask.MetadataRepository,
+        ):
             async with aiofiles.open("/dev/urandom", "rb") as fp:
                 data = await fp.read(await repo0.info(job))
             await repo1.dump(job, data)
@@ -32,5 +37,6 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         for job, i in repo0.data.items():
             assert len(repo1.data[job]) == i
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "tox>=4.0.0"
+    "tox>=4.0.0",
+    "black",
 ]
 type = [
     "mypy",
@@ -79,3 +80,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.black]
+line-length = 120

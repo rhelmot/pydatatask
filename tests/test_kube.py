@@ -13,14 +13,15 @@ import pydatatask
 
 
 def rid(n=6):
-    return ''.join(random.choice(string.ascii_lowercase) for _ in range(n))
+    return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
+
 
 class TestKube(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
 
         self.minikube_profile = None
-        self.minikube_path = shutil.which('minikube')
+        self.minikube_path = shutil.which("minikube")
         self.kube_context = os.getenv("PYDATATASK_TEST_KUBE_CONTEXT")
         self.kube_namespace = os.getenv("PYDATATASK_TEST_KUBE_NAMESPACE", "default")
         self.test_id = rid()
@@ -29,14 +30,14 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         if self.kube_context is None:
             if self.minikube_path is None:
                 raise unittest.SkipTest("No kube context specified and minikube is not installed")
-            self.minikube_profile = f'pydatatask-test-{self.test_id}'
+            self.minikube_profile = f"pydatatask-test-{self.test_id}"
             p = await asyncio.create_subprocess_exec(
                 self.minikube_path,
-                'start',
-                '--profile',
+                "start",
+                "--profile",
                 self.minikube_profile,
-                '--interactive=false',
-                '--keep-context',
+                "--interactive=false",
+                "--keep-context",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
@@ -44,7 +45,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             stdout, _ = await p.communicate()
             code = await p.wait()
             if code != 0:
-                raise unittest.SkipTest(f"No kube context specified and minikube failed to start. Logs below:\n\n{stdout.decode()}")
+                raise unittest.SkipTest(
+                    f"No kube context specified and minikube failed to start. Logs below:\n\n{stdout.decode()}"
+                )
             self.kube_context = self.minikube_profile
 
     async def test_kube(self):
@@ -54,7 +57,12 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         @session.resource
         async def podman():
-            podman = pydatatask.PodManager(f'test-{self.test_id}', self.kube_namespace, cpu_quota='1', mem_quota='1Gi')
+            podman = pydatatask.PodManager(
+                f"test-{self.test_id}",
+                self.kube_namespace,
+                cpu_quota="1",
+                mem_quota="1Gi",
+            )
             yield podman
             await podman.close()
 
@@ -74,8 +82,8 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                     raise Exception("Minikube failed to give us anything interesting within 20 seconds")
 
         task = pydatatask.KubeTask(
-           podman,
-            'task',
+            podman,
+            "task",
             r"""
             apiVersion: v1
             kind: Pod
@@ -107,20 +115,23 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
 
         for job, weh in repo0.data.items():
-            assert 'node' in repoDone.data[job]
-            logs = await (await repoLogs.open(job, 'r')).read()
-            assert logs == f"""\
+            assert "node" in repoDone.data[job]
+            logs = await (await repoLogs.open(job, "r")).read()
+            assert (
+                logs
+                == f"""\
 Hello world!
 The message of the day is {base64.b64encode(weh.encode()).decode()}. That's great!
 Goodbye world!
 """
+            )
 
     async def asyncTearDown(self):
         if self.minikube_profile is not None:
             p = await asyncio.create_subprocess_exec(
                 self.minikube_path,
-                'delete',
-                '--profile',
+                "delete",
+                "--profile",
                 self.minikube_profile,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
@@ -131,5 +142,6 @@ Goodbye world!
             if code != 0:
                 warnings.warn(f"minikube failed to delete {self.minikube_profile}. Logs below:\n\n{stdout.decode()}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

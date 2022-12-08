@@ -1,4 +1,17 @@
-from typing import Callable, Dict, Any, TYPE_CHECKING, AsyncIterable, AsyncGenerator, Literal, Protocol, Optional, List, AsyncContextManager, Coroutine
+from typing import (
+    Callable,
+    Dict,
+    Any,
+    TYPE_CHECKING,
+    AsyncIterable,
+    AsyncGenerator,
+    Literal,
+    Protocol,
+    Optional,
+    List,
+    AsyncContextManager,
+    Coroutine,
+)
 import inspect
 import base64
 from collections import Counter
@@ -25,40 +38,42 @@ if TYPE_CHECKING:
 l = logging.getLogger(__name__)
 
 __all__ = (
-    'Repository',
-    'BlobRepository',
-    'MetadataRepository',
-    'FileRepositoryBase',
-    'FileRepository',
-    'DirectoryRepository',
-    'S3BucketRepository',
-    'S3BucketInfo',
-    'MongoMetadataRepository',
-    'InProcessMetadataRepository',
-    'InProcessBlobStream',
-    'InProcessBlobRepository',
-    'DockerRepository',
-    'LiveKubeRepository',
-    'ExecutorLiveRepo',
-    'AggregateOrRepository',
-    'AggregateAndRepository',
-    'BlockingRepository',
-    'YamlMetadataRepository',
-    'YamlMetadataFileRepository',
-    'YamlMetadataS3Repository',
-    'RelatedItemRepository',
-    'AReadStream',
-    'AWriteStream',
-    'AReadText',
-    'AWriteText',
+    "Repository",
+    "BlobRepository",
+    "MetadataRepository",
+    "FileRepositoryBase",
+    "FileRepository",
+    "DirectoryRepository",
+    "S3BucketRepository",
+    "S3BucketInfo",
+    "MongoMetadataRepository",
+    "InProcessMetadataRepository",
+    "InProcessBlobStream",
+    "InProcessBlobRepository",
+    "DockerRepository",
+    "LiveKubeRepository",
+    "ExecutorLiveRepo",
+    "AggregateOrRepository",
+    "AggregateAndRepository",
+    "BlockingRepository",
+    "YamlMetadataRepository",
+    "YamlMetadataFileRepository",
+    "YamlMetadataS3Repository",
+    "RelatedItemRepository",
+    "AReadStream",
+    "AWriteStream",
+    "AReadText",
+    "AWriteText",
 )
 
+
 class AReadStream(Protocol, AsyncContextManager):
-    async def read(self, n: Optional[int]=None) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         ...
 
     async def close(self) -> None:
         ...
+
 
 class AWriteStream(Protocol, AsyncContextManager):
     async def write(self, data: bytes):
@@ -67,14 +82,21 @@ class AWriteStream(Protocol, AsyncContextManager):
     async def close(self) -> None:
         ...
 
+
 class AReadText:
-    def __init__(self, base: AReadStream, encoding: str='utf-8', errors='strict', chunksize=4096):
+    def __init__(
+        self,
+        base: AReadStream,
+        encoding: str = "utf-8",
+        errors="strict",
+        chunksize=4096,
+    ):
         self.base = base
         self.decoder = codecs.lookup(encoding).incrementaldecoder(errors)
         self.buffer = ""
         self.chunksize = chunksize
 
-    async def read(self, n: Optional[int]=None) -> str:
+    async def read(self, n: Optional[int] = None) -> str:
         while n is None or len(self.buffer) < n:
             data = await self.base.read(self.chunksize)
             self.buffer += self.decoder.decode(data, final=not bool(data))
@@ -96,8 +118,9 @@ class AReadText:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+
 class AWriteText:
-    def __init__(self, base: AWriteStream, encoding='utf-8', errors='strict'):
+    def __init__(self, base: AWriteStream, encoding="utf-8", errors="strict"):
         self.base = base
         self.encoding = encoding
         self.errors = errors
@@ -114,6 +137,7 @@ class AWriteText:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+
 async def roundrobin(iterables: List):
     "roundrobin('ABC', 'D', 'EF') --> A D E B F C"
     i = 0
@@ -126,11 +150,13 @@ async def roundrobin(iterables: List):
         else:
             i += 1
 
+
 def job_getter(f):
     if not inspect.iscoroutinefunction(f):
         raise TypeError("only async functions can be job_getters")
     f.is_job_getter = True
     return f
+
 
 class Repository:
     """
@@ -138,14 +164,17 @@ class Repository:
     only operations you can do on a generic repository are query for keys.
     """
 
-    CHARSET = string.ascii_letters + string.digits + '_-.'
+    CHARSET = string.ascii_letters + string.digits + "_-."
     CHARSET_START_END = string.ascii_letters + string.digits
+
     @classmethod
     def is_valid_job_id(cls, ident):
-        return 0 < len(ident) < 64 and \
-               all(c in cls.CHARSET for c in ident) and \
-               ident[0] in cls.CHARSET_START_END and \
-               ident[-1] in cls.CHARSET_START_END
+        return (
+            0 < len(ident) < 64
+            and all(c in cls.CHARSET for c in ident)
+            and ident[0] in cls.CHARSET_START_END
+            and ident[-1] in cls.CHARSET_START_END
+        )
 
     async def filter_jobs(self, iterator: AsyncIterable[str]):
         async for ident in iterator:
@@ -191,16 +220,17 @@ class Repository:
     async def close(self):
         pass
 
-    def map(self, func: Callable, filter: Optional[Callable]=None, allow_deletes=False) -> 'MapRepository':
+    def map(self, func: Callable, filter: Optional[Callable] = None, allow_deletes=False) -> "MapRepository":
         return MapRepository(self, func, filter, allow_deletes=allow_deletes)
+
 
 class MapRepository(Repository):
     def __init__(
-            self,
-            child: Repository,
-            func: Callable[[Any], Coroutine[None, None, Any]],
-            filter: Optional[Callable[[str], Coroutine[None, None, bool]]]=None,
-            allow_deletes=False
+        self,
+        child: Repository,
+        func: Callable[[Any], Coroutine[None, None, Any]],
+        filter: Optional[Callable[[str], Coroutine[None, None, bool]]] = None,
+        allow_deletes=False,
     ):
         self.child = child
         self.func = func
@@ -231,6 +261,7 @@ class MapRepository(Repository):
                 result[k] = await self.func(v)
         return result
 
+
 class MetadataRepository(Repository):
     @job_getter
     async def info(self, job):
@@ -240,13 +271,17 @@ class MetadataRepository(Repository):
     async def dump(self, job, data):
         raise NotImplementedError
 
+
 class BlobRepository(Repository):
     @job_getter
-    async def open(self, ident, mode: Literal['r', 'rb', 'w', 'wb']='r') -> AReadStream | AWriteStream | AReadText | AWriteText:
+    async def open(
+        self, ident, mode: Literal["r", "rb", "w", "wb"] = "r"
+    ) -> AReadStream | AWriteStream | AReadText | AWriteText:
         raise NotImplementedError
 
+
 class FileRepositoryBase(Repository):
-    def __init__(self, basedir, extension='', case_insensitive=False):
+    def __init__(self, basedir, extension="", case_insensitive=False):
         self.basedir = Path(basedir)
         self.extension = extension
         self.case_insensitive = case_insensitive
@@ -264,7 +299,7 @@ class FileRepositoryBase(Repository):
             else:
                 cond = name.endswith(self.extension)
             if cond:
-                yield name[:-len(self.extension) if self.extension else None]
+                yield name[: -len(self.extension) if self.extension else None]
 
     async def validate(self):
         self.basedir.mkdir(exist_ok=True, parents=True)
@@ -278,6 +313,7 @@ class FileRepositoryBase(Repository):
     async def info(self, job):
         return str(self.fullpath(job))
 
+
 class FileRepository(FileRepositoryBase, BlobRepository):
     """
     A file repository is a directory where each key is a filename, optionally suffixed with an extension before hitting
@@ -285,7 +321,7 @@ class FileRepository(FileRepositoryBase, BlobRepository):
     """
 
     @job_getter
-    async def open(self, ident, mode='r'):
+    async def open(self, ident, mode="r"):
         return aiofiles.open(self.fullpath(ident), mode)
 
     async def delete(self, key):
@@ -294,10 +330,12 @@ class FileRepository(FileRepositoryBase, BlobRepository):
         except FileNotFoundError:
             pass
 
+
 class DirectoryRepository(FileRepositoryBase):
     """
     A directory repository is like a file repository but its members are directories
     """
+
     def __init__(self, *args, discard_empty=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.discard_empty = discard_empty
@@ -329,8 +367,9 @@ class DirectoryRepository(FileRepositoryBase):
             else:
                 yield item
 
+
 class S3BucketBinaryWriter:
-    def __init__(self, repo: 'S3BucketRepository', job: str):
+    def __init__(self, repo: "S3BucketRepository", job: str):
         self.repo = repo
         self.job = job
         self.buffer = io.BytesIO()
@@ -357,6 +396,7 @@ class S3BucketBinaryWriter:
     async def write(self, data: bytes):
         self.buffer.write(data)
 
+
 class S3BucketReader:
     def __init__(self, body):
         self.body = body
@@ -374,6 +414,7 @@ class S3BucketReader:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.body.__aexit__(exc_type, exc_val, exc_tb)
 
+
 class S3BucketInfo:
     def __init__(self, endpoint: str, uri: str):
         self.endpoint = endpoint
@@ -385,13 +426,13 @@ class S3BucketInfo:
 
 class S3BucketRepository(BlobRepository):
     def __init__(
-            self,
-            client: Callable[[], S3Client],
-            bucket: str,
-            prefix: str='',
-            extension: str='',
-            mimetype: str='application/octet-stream',
-            incluster_endpoint: Optional[str]=None,
+        self,
+        client: Callable[[], S3Client],
+        bucket: str,
+        prefix: str = "",
+        extension: str = "",
+        mimetype: str = "application/octet-stream",
+        incluster_endpoint: Optional[str] = None,
     ):
         self._client = client
         self.bucket = bucket
@@ -405,7 +446,7 @@ class S3BucketRepository(BlobRepository):
         return self._client()
 
     def __repr__(self):
-        return f'<{type(self).__name__} {self.bucket}/{self.prefix}*{self.extension}>'
+        return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.extension}>"
 
     async def contains(self, item):
         try:
@@ -418,49 +459,61 @@ class S3BucketRepository(BlobRepository):
     async def _unfiltered_iter(self):
         paginator = self.client.get_paginator("list_objects")
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
-            for obj in page.get('Contents', []):
-                if obj['Key'].endswith(self.extension):
-                    yield obj['Key'][len(self.prefix):-len(self.extension) if self.extension else None]
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(self.extension):
+                    yield obj["Key"][len(self.prefix) : -len(self.extension) if self.extension else None]
 
     async def validate(self):
         try:
             await self.client.head_bucket(Bucket=self.bucket)
         except botocore.exceptions.ClientError as e:
-            if '404' in str(e):
+            if "404" in str(e):
                 await self.client.create_bucket(Bucket=self.bucket)
             else:
                 raise
 
     def object_name(self, ident):
-        return f'{self.prefix}{ident}{self.extension}'
+        return f"{self.prefix}{ident}{self.extension}"
 
     @job_getter
-    async def open(self, ident, mode='r'):
-        if mode == 'wb':
+    async def open(self, ident, mode="r"):
+        if mode == "wb":
             return S3BucketBinaryWriter(self, ident)
-        elif mode == 'w':
+        elif mode == "w":
             return AWriteText(S3BucketBinaryWriter(self, ident))
-        elif mode == 'rb':
-            return S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body'])
-        elif mode == 'r':
-            return AReadText(S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))['Body']))
+        elif mode == "rb":
+            return S3BucketReader(
+                (await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))["Body"]
+            )
+        elif mode == "r":
+            return AReadText(
+                S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))["Body"])
+            )
         else:
             raise ValueError(mode)
 
     @job_getter
     async def info(self, ident):
-        return S3BucketInfo(self.incluster_endpoint or self.client._base_url._url.geturl(), f's3://{self.bucket}/{self.object_name(ident)}')
+        return S3BucketInfo(
+            self.incluster_endpoint or self.client._base_url._url.geturl(),
+            f"s3://{self.bucket}/{self.object_name(ident)}",
+        )
 
     async def delete(self, key):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(key))
 
+
 class MongoMetadataRepository(MetadataRepository):
-    def __init__(self, collection: Callable[[], motor.motor_asyncio.AsyncIOMotorCollection], subcollection: Optional[str]):
+    def __init__(
+        self,
+        collection: Callable[[], motor.motor_asyncio.AsyncIOMotorCollection],
+        subcollection: Optional[str],
+    ):
         self._collection = collection
         self._subcollection = subcollection
 
     def __repr__(self):
-        return f'<{type(self).__name__} {self._subcollection}>'
+        return f"<{type(self).__name__} {self._subcollection}>"
 
     @property
     def collection(self):
@@ -470,35 +523,42 @@ class MongoMetadataRepository(MetadataRepository):
         return result
 
     async def contains(self, item):
-        return await self.collection.count_documents({'_id': item}) != 0
+        return await self.collection.count_documents({"_id": item}) != 0
 
     async def delete(self, key):
-        await self.collection.delete_one({'_id': key})
+        await self.collection.delete_one({"_id": key})
 
     async def _unfiltered_iter(self):
         async for x in self.collection.find({}, projection=[]):
-            yield x['_id']
+            yield x["_id"]
 
     @job_getter
     async def info(self, job):
-        result = await self.collection.find_one({'_id': job})
+        result = await self.collection.find_one({"_id": job})
         if result is None:
             result = {}
         return result
 
     async def info_all(self) -> Dict[str, Any]:
-        return {entry['_id']: entry async for entry in self.collection.find({})}
+        return {entry["_id"]: entry async for entry in self.collection.find({})}
 
     @job_getter
     async def dump(self, job, data):
-        await self.collection.replace_one({'_id': job}, data, upsert=True)
+        await self.collection.replace_one({"_id": job}, data, upsert=True)
+
 
 class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
     """
-    def __init__(self, registry: Callable[[], docker_registry_client_async.DockerRegistryClientAsync], domain: str, repository: str):
+
+    def __init__(
+        self,
+        registry: Callable[[], docker_registry_client_async.DockerRegistryClientAsync],
+        domain: str,
+        repository: str,
+    ):
         self._registry = registry
         self.domain = domain
         self.repository = repository
@@ -510,22 +570,22 @@ class DockerRepository(Repository):
     async def _unfiltered_iter(self):
         try:
             image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
-            for tag in (await self.registry.get_tags(image)).tags['tags']:
+            for tag in (await self.registry.get_tags(image)).tags["tags"]:
                 yield tag
         except Exception as e:
-            if '404' in str(e):
+            if "404" in str(e):
                 return
             else:
                 raise
 
     def __repr__(self):
-        return f'<DockerRepository {self.domain}/{self.repository}:*>'
+        return f"<DockerRepository {self.domain}/{self.repository}:*>"
 
     @job_getter
     async def info(self, job):
         return {
-            'withdomain': f'{self.domain}/{self.repository}:{job}',
-            'withoutdomain': f'{self.repository}:{job}',
+            "withdomain": f"{self.domain}/{self.repository}:{job}",
+            "withoutdomain": f"{self.repository}:{job}",
         }
 
     def _dxf_auth(self, dxf_obj, response):
@@ -536,7 +596,7 @@ class DockerRepository(Repository):
                 break
         else:
             raise PermissionError("Missing credentials for %s" % self.domain)
-        username, password = base64.b64decode(result).decode().split(':')
+        username, password = base64.b64decode(result).decode().split(":")
         dxf_obj.authenticate(username, password, response)
 
     async def delete(self, key):
@@ -547,7 +607,7 @@ class DockerRepository(Repository):
 
     def _delete_inner(self, key):
         random_data = os.urandom(16)
-        random_digest = 'sha256:' + hashlib.sha256(random_data).hexdigest()
+        random_digest = "sha256:" + hashlib.sha256(random_data).hexdigest()
 
         d = dxf.DXF(
             host=self.domain,
@@ -558,22 +618,24 @@ class DockerRepository(Repository):
         d.set_alias(key, random_digest)
         d.del_alias(key)
 
+
 class LiveKubeRepository(Repository):
     """
     A repository where keys translate to `job` labels on running kube pods.
     """
+
     def __init__(self, task: "KubeTask"):
         self.task = task
 
     async def _unfiltered_iter(self):
         for pod in await self.pods():
-            yield pod.metadata.labels['job']
+            yield pod.metadata.labels["job"]
 
     async def contains(self, item):
         return bool(await self.task.podman.query(task=self.task.name, job=item))
 
     def __repr__(self):
-        return f'<LiveKubeRepository task={self.task.name}>'
+        return f"<LiveKubeRepository task={self.task.name}>"
 
     @job_getter
     async def info(self, job):
@@ -588,10 +650,12 @@ class LiveKubeRepository(Repository):
         for pod in pods:  # there... really should be only one
             await self.task.podman.delete(pod)
 
+
 class AggregateAndRepository(Repository):
     """
     A repository which is said to contain a key if all its children also contain that key
     """
+
     def __init__(self, **children: Repository):
         assert children
         self.children = children
@@ -611,18 +675,18 @@ class AggregateAndRepository(Repository):
 
     @job_getter
     async def info(self, job):
-        return {
-            name: await child.info(job) for name, child in self.children.items()
-        }
+        return {name: await child.info(job) for name, child in self.children.items()}
 
     async def delete(self, key):
         for child in self.children.values():
             await child.delete(key)
 
+
 class AggregateOrRepository(Repository):
     """
     A repository which is said to contain a key if any of its children also contain that key
     """
+
     def __init__(self, **children: Repository):
         assert children
         self.children = children
@@ -644,18 +708,18 @@ class AggregateOrRepository(Repository):
 
     @job_getter
     async def info(self, job):
-        return {
-            name: await child.info(job) for name, child in self.children.items()
-        }
+        return {name: await child.info(job) for name, child in self.children.items()}
 
     async def delete(self, key):
         for child in self.children.values():
             await child.delete(key)
 
+
 class BlockingRepository(Repository):
     """
     A class that is said to contain a key if `source` contains it and `unless` does not contain it
     """
+
     def __init__(self, source: Repository, unless: Repository, enumerate_unless=True):
         self.source = source
         self.unless = unless
@@ -685,29 +749,33 @@ class BlockingRepository(Repository):
     async def delete(self, key):
         await self.source.delete(key)
 
+
 class YamlMetadataRepository(BlobRepository, MetadataRepository):
     """
     A metadata repository. When info is accessed, it will **load the target file into memory**, parse it as yaml, and
     return the resulting object.
     """
+
     @job_getter
     async def info(self, job):
-        async with await self.open(job, 'rb') as fp:
+        async with await self.open(job, "rb") as fp:
             s = await fp.read()
         return yaml.safe_load(s)
 
     @job_getter
     async def dump(self, job, data):
         s = yaml.safe_dump(data, None)
-        async with await self.open(job, 'w') as fp:
+        async with await self.open(job, "w") as fp:
             await fp.write(s)
 
+
 class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
-    def __init__(self, filename, extension='.yaml', case_insensitive=False):
+    def __init__(self, filename, extension=".yaml", case_insensitive=False):
         super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
 
+
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
-    def __init__(self, client, bucket, prefix, extension='.yaml', mimetype="text/yaml"):
+    def __init__(self, client, bucket, prefix, extension=".yaml", mimetype="text/yaml"):
         super().__init__(client, bucket, prefix, extension=extension, mimetype=mimetype)
 
     @job_getter
@@ -715,10 +783,11 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
         try:
             return await super().info(job)
         except botocore.exceptions.ClientError as e:
-            if '404' in str(e):
+            if "404" in str(e):
                 return {}
             else:
                 raise
+
 
 class RelatedItemRepository(Repository):
     """
@@ -726,11 +795,11 @@ class RelatedItemRepository(Repository):
     """
 
     def __init__(
-            self,
-            base_repository: Repository,
-            translator_repository: Repository,
-            allow_deletes=False,
-            prefetch_lookup=True,
+        self,
+        base_repository: Repository,
+        translator_repository: Repository,
+        allow_deletes=False,
+        prefetch_lookup=True,
     ):
         self.base_repository = base_repository
         self.translator_repository = translator_repository
@@ -739,7 +808,7 @@ class RelatedItemRepository(Repository):
         self.prefetch_lookup = None
 
     def __repr__(self):
-        return f'<{type(self).__name__} {self.base_repository} by {self.translator_repository}>'
+        return f"<{type(self).__name__} {self.base_repository} by {self.translator_repository}>"
 
     async def _lookup(self, item):
         if self.prefetch_lookup is None and self.prefetch_lookup_setting:
@@ -775,7 +844,7 @@ class RelatedItemRepository(Repository):
 
     def __getattr__(self, item):
         v = getattr(self.base_repository, item)
-        if not getattr(v, 'is_job_getter', False):
+        if not getattr(v, "is_job_getter", False):
             return v
 
         async def inner(job, *args, **kwargs):
@@ -793,12 +862,13 @@ class RelatedItemRepository(Repository):
             if basename is not None and basename in base_contents:
                 yield item
 
+
 class ExecutorLiveRepo(Repository):
-    def __init__(self, task: 'ExecutorTask'):
+    def __init__(self, task: "ExecutorTask"):
         self.task = task
 
     def __repr__(self):
-        return f'<{type(self).__name__} task={self.task.name}>'
+        return f"<{type(self).__name__} task={self.task.name}>"
 
     async def _unfiltered_iter(self):
         for job in self.task.rev_jobs:
@@ -813,12 +883,13 @@ class ExecutorLiveRepo(Repository):
     async def info(self, ident):
         return None
 
+
 class InProcessMetadataRepository(MetadataRepository):
-    def __init__(self, data: Optional[Dict[str, Any]]=None):
+    def __init__(self, data: Optional[Dict[str, Any]] = None):
         self.data: Dict[str, Any] = data if data is not None else {}
 
     def __repr__(self):
-        return f'<{type(self).__name__}>'
+        return f"<{type(self).__name__}>"
 
     @job_getter
     async def info(self, job):
@@ -838,11 +909,12 @@ class InProcessMetadataRepository(MetadataRepository):
         for key in self.data:
             yield key
 
+
 class InProcessBlobStream:
-    def __init__(self, repo: 'InProcessBlobRepository', job: str):
+    def __init__(self, repo: "InProcessBlobRepository", job: str):
         self.repo = repo
         self.job = job
-        self.data = io.BytesIO(repo.data.get(job, b''))
+        self.data = io.BytesIO(repo.data.get(job, b""))
 
     async def read(self, n: Optional[int]) -> bytes:
         return self.data.read(n)
@@ -859,12 +931,13 @@ class InProcessBlobStream:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+
 class InProcessBlobRepository(BlobRepository):
-    def __init__(self, data: Optional[Dict[str, bytes]]=None):
+    def __init__(self, data: Optional[Dict[str, bytes]] = None):
         self.data = data if data is not None else {}
 
     def __repr__(self):
-        return f'<{type(self).__name__}>'
+        return f"<{type(self).__name__}>"
 
     @job_getter
     async def info(self, job):
@@ -872,11 +945,11 @@ class InProcessBlobRepository(BlobRepository):
         return None
 
     @job_getter
-    async def open(self, ident, mode='r'):
+    async def open(self, ident, mode="r"):
         stream = InProcessBlobStream(self, ident)
-        if mode == 'r':
+        if mode == "r":
             return AReadText(stream)
-        elif mode == 'w':
+        elif mode == "w":
             return AWriteText(stream)
         else:
             return stream
