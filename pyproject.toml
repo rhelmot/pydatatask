@@ -32,6 +32,7 @@ dependencies = [
 dev = [
     "tox>=4.0.0",
     "black",
+    "isort",
 ]
 type = [
     "mypy",
@@ -83,3 +84,8 @@ testpaths = ["tests"]
 
 [tool.black]
 line-length = 120
+
+[tool.isort]
+profile = "black"
+force_to_top = ["typing"]
+from_first = true

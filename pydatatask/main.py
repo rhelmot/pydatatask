@@ -1,18 +1,19 @@
-from typing import Union, Callable, Optional, List, Dict, Set
-import asyncio
+from typing import Callable, Dict, List, Optional, Set, Union
 import argparse
-import sys
-import re
-
-import yaml
+import asyncio
 import logging
+import re
+import sys
+
 import IPython
+import yaml
+
+import pydatatask
 
 from . import BlobRepository, MetadataRepository
 from .pipeline import Pipeline
 from .repository import Repository
 from .task import Task, settings
-import pydatatask
 
 l = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")

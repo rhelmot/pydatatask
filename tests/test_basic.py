@@ -1,6 +1,8 @@
 import unittest
-import pydatatask
+
 import aiofiles.os
+
+import pydatatask
 
 
 class TestBasic(unittest.IsolatedAsyncioTestCase):

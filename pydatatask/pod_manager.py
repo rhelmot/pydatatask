@@ -1,9 +1,9 @@
-from typing import Optional, Union, Set
+from typing import Optional, Set, Union
 import logging
 
-from kubernetes_asyncio.client import ApiClient, CoreV1Api, ApiException
-from kubernetes_asyncio.stream import WsApiClient
 from kubernetes.utils import parse_quantity
+from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
+from kubernetes_asyncio.stream import WsApiClient
 
 l = logging.getLogger(__name__)
 

@@ -1,36 +1,36 @@
 from typing import (
-    Callable,
-    Dict,
-    Any,
     TYPE_CHECKING,
-    AsyncIterable,
-    AsyncGenerator,
-    Literal,
-    Protocol,
-    Optional,
-    List,
+    Any,
     AsyncContextManager,
+    AsyncGenerator,
+    AsyncIterable,
+    Callable,
     Coroutine,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Protocol,
 )
-import inspect
-import base64
 from collections import Counter
-import codecs
-import string
 from pathlib import Path
-import logging
-import yaml
-import os
+import base64
+import codecs
 import hashlib
+import inspect
 import io
+import logging
+import os
+import string
 
-import aiofiles.os
-import dxf
 from types_aiobotocore_s3.client import S3Client
-import botocore.exceptions
-import motor.motor_asyncio
-import docker_registry_client_async
+import aiofiles.os
 import aioshutil
+import botocore.exceptions
+import docker_registry_client_async
+import dxf
+import motor.motor_asyncio
+import yaml
 
 if TYPE_CHECKING:
     from .task import ExecutorTask, KubeTask

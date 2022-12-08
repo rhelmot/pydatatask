@@ -1,13 +1,13 @@
-from typing import Iterable, Union, Dict
+from typing import Dict, Iterable, Union
 import asyncio
 import logging
 
 import networkx
 import networkx.algorithms.traversal.depth_first_search
 
-from .task import Task
 from .repository import Repository
 from .session import Session
+from .task import Task
 
 l = logging.getLogger(__name__)
 

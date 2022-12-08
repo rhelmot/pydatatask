@@ -1,4 +1,4 @@
-from typing import Callable, Coroutine, Union, Any
+from typing import Any, Callable, Coroutine, Union
 
 __all__ = ("Session",)
 
