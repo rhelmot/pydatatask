@@ -2,3 +2,6 @@
 /dist
 *.egg-info
 *.pyc
+.tox
+.kube
+.minikube

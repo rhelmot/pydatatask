@@ -21,18 +21,26 @@ dependencies = [
     "pyyaml",
     "networkx",
     "aiobotocore",
+    "types-aiobotocore[essential]",
     "motor",
     "ipython",
     "aiofiles",
     "aioshutil",
 ]
 
-[optional-dependencies]
+[project.optional-dependencies]
 dev = [
+    "tox>=4.0.0"
+]
+type = [
+    "mypy",
     "kubernetes-typed",
     "types-pyyaml",
     "networkx-stubs",
-    "types-aiobotocore[essential]",
+    "types-aiofiles",
+]
+test = [
+    "pytest",
 ]
 
 [urls]
@@ -57,6 +65,16 @@ ignore_missing_imports = true
 # https://jira.mongodb.org/projects/MOTOR/issues/MOTOR-331
 [[tool.mypy.overrides]]
 module = "motor.*"
+ignore_missing_imports = true
+
+# https://github.com/davedoesdev/dxf/pull/43
+[[tool.mypy.overrides]]
+module = "dxf.*"
+ignore_missing_imports = true
+
+# https://github.com/ipython/ipython/pull/13858
+[[tool.mypy.overrides]]
+module = "IPython.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
