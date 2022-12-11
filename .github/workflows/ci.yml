@@ -17,7 +17,7 @@ jobs:
             env: 'py310'
           - version: '3.11'
             env: 'py311'
-          - version: '3.12-alpha'
+          - version: '3.12-dev'
             env: 'py312'
     runs-on: ubuntu-latest
     env:
