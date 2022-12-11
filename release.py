@@ -80,7 +80,7 @@ def main():
     write_version_number(release_file, release_re, release_str)
     write_version_number(version_file, version_re, version_str)
     subprocess.check_call(["git", "commit", "-am", f"Release {release_str}"])
-    subprocess.check_call(["git", "tag", "-f", "v" + release_str])
+    subprocess.check_call(["git", "tag", "-afm", f"Release {release_str}", "v" + release_str])
     subprocess.check_call(["git", "push", "--follow-tags"])
     return 0
 
