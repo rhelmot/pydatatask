@@ -14,6 +14,7 @@ from typing import (
 )
 from collections import Counter
 from pathlib import Path
+import asyncio
 import base64
 import codecs
 import hashlib
@@ -181,7 +182,7 @@ class Repository:
             if self.is_valid_job_id(ident):
                 yield ident
             else:
-                l.warning("Skipping %s %s - not a valid job id", self, ident)
+                l.warning("Skipping %s %s - not a valid job id", self, repr(ident))
 
     async def contains(self, item):
         async for x in self:
@@ -217,10 +218,9 @@ class Repository:
         """
         pass
 
-    async def close(self):
-        pass
-
-    def map(self, func: Callable, filter: Optional[Callable] = None, allow_deletes=False) -> "MapRepository":
+    def map(
+        self, func: Callable, filter: Optional[Callable[[Any], Coroutine[None, None, Any]]] = None, allow_deletes=False
+    ) -> "MapRepository":
         return MapRepository(self, func, filter, allow_deletes=allow_deletes)
 
 
@@ -256,9 +256,14 @@ class MapRepository(Repository):
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.child.info_all()
+        to_remove = []
         for k, v in result.items():
             if self.filter is None or await self.filter(k):
                 result[k] = await self.func(v)
+            else:
+                to_remove.append(k)
+        for k in to_remove:
+            result.pop(k)
         return result
 
 
@@ -402,7 +407,7 @@ class S3BucketReader:
         self.body = body
 
     async def close(self):
-        await self.body.close()
+        self.body.close()
 
     async def read(self, n=None):
         return await self.body.read()
@@ -495,7 +500,7 @@ class S3BucketRepository(BlobRepository):
     @job_getter
     async def info(self, ident):
         return S3BucketInfo(
-            self.incluster_endpoint or self.client._base_url._url.geturl(),
+            self.incluster_endpoint or self.client._endpoint.host,
             f"s3://{self.bucket}/{self.object_name(ident)}",
         )
 
@@ -570,7 +575,10 @@ class DockerRepository(Repository):
     async def _unfiltered_iter(self):
         try:
             image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
-            for tag in (await self.registry.get_tags(image)).tags["tags"]:
+            tags = (await self.registry.get_tags(image)).tags["tags"]
+            if tags is None:
+                return
+            for tag in tags:
                 yield tag
         except Exception as e:
             if "404" in str(e):
@@ -596,8 +604,11 @@ class DockerRepository(Repository):
                 break
         else:
             raise PermissionError("Missing credentials for %s" % self.domain)
-        username, password = base64.b64decode(result).decode().split(":")
-        dxf_obj.authenticate(username, password, response)
+        if self.registry.ssl:
+            username, password = base64.b64decode(result).decode().split(":")
+            dxf_obj.authenticate(username, password, response)
+        else:
+            dxf_obj._headers = {"Authorization": "Basic " + result}
 
     async def delete(self, key):
         if not await self.contains(key):
@@ -613,6 +624,7 @@ class DockerRepository(Repository):
             host=self.domain,
             repo=self.repository,
             auth=self._dxf_auth,
+            insecure=not self.registry.ssl,
         )
         d.push_blob(data=random_data, digest=random_digest)
         d.set_alias(key, random_digest)
@@ -649,6 +661,8 @@ class LiveKubeRepository(Repository):
         pods = await self.task.podman.query(job=key, task=self.task.name)
         for pod in pods:  # there... really should be only one
             await self.task.podman.delete(pod)
+        # while await self.task.podman.query(job=key, task=self.task.name):
+        #    await asyncio.sleep(0.2)
 
 
 class AggregateAndRepository(Repository):
@@ -783,7 +797,7 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
         try:
             return await super().info(job)
         except botocore.exceptions.ClientError as e:
-            if "404" in str(e):
+            if "NoSuchKey" in str(e):
                 return {}
             else:
                 raise
@@ -822,7 +836,7 @@ class RelatedItemRepository(Repository):
         basename = await self._lookup(item)
         if basename is None:
             return False
-        return await self.base_repository.contains(item)
+        return await self.base_repository.contains(basename)
 
     async def delete(self, key):
         if not self.allow_deletes:
@@ -832,7 +846,7 @@ class RelatedItemRepository(Repository):
         if basename is None:
             return
 
-        await self.base_repository.delete(key)
+        await self.base_repository.delete(basename)
 
     @job_getter
     async def info(self, ident):
@@ -916,7 +930,7 @@ class InProcessBlobStream:
         self.job = job
         self.data = io.BytesIO(repo.data.get(job, b""))
 
-    async def read(self, n: Optional[int]) -> bytes:
+    async def read(self, n: Optional[int] = None) -> bytes:
         return self.data.read(n)
 
     async def write(self, data: bytes):

@@ -18,13 +18,57 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
 
     async def test_filesystem(self):
         repo = pydatatask.FileRepository(self.dir, extension=".txt")
+        assert repr(repo)
+        await repo.validate()
 
         async with await repo.open("foo", "w") as fp:
             await fp.write("hello world")
+        async with aiofiles.open(self.dir + "/foo.yaml", "w") as fp:
+            await fp.write("# lol\n")
         async with aiofiles.open(self.dir + "/foo.txt", "rb") as fp:
             assert await fp.read() == b"hello world"
         async with await repo.open("foo", "rb") as fp:
             assert await fp.read() == b"hello world"
+        assert [x async for x in repo] == ["foo"]
+        assert await repo.info("bar") == self.dir + "/bar.txt"
+        await repo.delete("foo")
+        await repo.delete("bar")
+        assert [x async for x in repo] == []
+
+    async def test_case_insensitivity(self):
+        repo = pydatatask.FileRepository(self.dir, extension=".txt", case_insensitive=True)
+        await repo.validate()
+
+        async with aiofiles.open(self.dir + "/foo.txt", "w") as fp:
+            await fp.write("# lol\n")
+        async with aiofiles.open(self.dir + "/bar.TXT", "w") as fp:
+            await fp.write("# lol\n")
+        assert {x async for x in repo} == {"foo", "bar"}
+
+    async def test_directory(self):
+        repo = pydatatask.DirectoryRepository(self.dir, discard_empty=False)
+        repo_noempty = pydatatask.DirectoryRepository(self.dir, discard_empty=True)
+
+        await repo.mkdir("foo")
+        await repo.mkdir("foo")
+        assert [x async for x in repo] == ["foo"]
+        assert [x async for x in repo_noempty] == []
+        assert await repo.contains("foo")
+        assert not await repo.contains("bar")
+        assert not await repo_noempty.contains("foo")
+        assert not await repo_noempty.contains("bar")
+        await aiofiles.os.mkdir(repo_noempty.fullpath("foo") / "weh")
+        assert await repo_noempty.contains("foo")
+        assert [x async for x in repo_noempty] == ["foo"]
+
+        await repo.delete("foo")
+        assert [x async for x in repo] == []
+
+    async def test_yaml(self):
+        repo = pydatatask.YamlMetadataFileRepository(self.dir)
+
+        await repo.dump("foo", {"weh": 1})
+        assert await repo.info("foo") == {"weh": 1}
 
     async def asyncTearDown(self):
         if self.dir is not None:

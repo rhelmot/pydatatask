@@ -112,11 +112,25 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         pipeline = pydatatask.Pipeline([task], session)
 
         async with pipeline:
-            await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
+            await pydatatask.update(pipeline)
+            live = task.links["live"].repo
+            launched = [x async for x in live]
+            assert launched
+            assert await live.contains(launched[0])
+            await pydatatask.delete_data(pipeline, "task", False, [launched[0]])
+            while await live.contains(launched[0]):
+                await asyncio.sleep(1)
+            await pydatatask.launch(pipeline, "task", launched[0], False, True, True)
+            assert await live.contains(launched[0])
 
+            await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
+            assert not await live.contains(launched[0])
+
+        assert len(repo0.data) == 50
         for job, weh in repo0.data.items():
             assert "node" in repoDone.data[job]
-            logs = await (await repoLogs.open(job, "r")).read()
+            async with await repoLogs.open(job, "r") as fp:
+                logs = await fp.read()
             assert (
                 logs
                 == f"""\

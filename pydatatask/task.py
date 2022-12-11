@@ -502,16 +502,17 @@ class ExecutorTask(Task):
         self.func = f
         return self
 
-    def update(self):
+    async def update(self):
         result = bool(self.jobs)
         done, _ = wait(self.jobs, 0, FIRST_EXCEPTION)
         for finished_job in done:
             job, start_time = self.jobs.pop(finished_job)
+            # noinspection PyAsyncCall
             self.rev_jobs.pop(job)
-            self._cleanup(finished_job, job, start_time)
+            await self._cleanup(finished_job, job, start_time)
         return result
 
-    def _cleanup(self, job_future, job, start_time):
+    async def _cleanup(self, job_future, job, start_time):
         e = job_future.exception()
         if e is not None:
             l.info("Executor task %s:%s failed", self.name, job, exc_info=e)
@@ -525,7 +526,7 @@ class ExecutorTask(Task):
             l.debug("...executor task %s:%s success", self.name, job)
             data = {"result": "success", "end_time": job_future.result()}
         data["start_time"] = start_time
-        self.done.dump(job, data)
+        await self.done.dump(job, data)
 
     async def validate(self):
         if self.func is None:
@@ -540,18 +541,18 @@ class ExecutorTask(Task):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
-    def launch(self, job):
+    async def launch(self, job):
         l.debug("Launching %s:%s with %s...", self.name, job, self.executor)
         args = dict(self._env)
         if "job" in args:
             args["job"] = job
-        args = build_env(args, job, RepoHandlingMode.SMART)
+        args = await build_env(args, job, RepoHandlingMode.SMART)
         start_time = datetime.now()
         running_job = self.executor.submit(self._timestamped_func, self.func, args)
         if SYNCHRONOUS:
             while not running_job.done():
-                time.sleep(0.1)
-            self._cleanup(running_job, job, start_time)
+                await asyncio.sleep(0.1)
+            await self._cleanup(running_job, job, start_time)
         else:
             self.jobs[running_job] = (job, start_time)
             self.rev_jobs[job] = running_job
@@ -564,7 +565,8 @@ class ExecutorTask(Task):
 
     @staticmethod
     def _timestamped_func(func, args):
-        func(**args)
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(func(**args))
         return datetime.now()
 
 

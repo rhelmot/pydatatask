@@ -4,7 +4,6 @@ import os
 import random
 import shutil
 import string
-import subprocess
 import unittest
 
 import motor.motor_asyncio
@@ -58,11 +57,23 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(1)
         self.client = motor.motor_asyncio.AsyncIOMotorClient(self.mongo_url)
 
-    async def test_minio(self):
+    async def test_mongo(self):
         repo = pydatatask.MongoMetadataRepository(lambda: self.client[self.database], "test")
+        assert repr(repo)
         await repo.dump("foo", {"weh": 1})
+        assert len([x async for x in repo]) == 1
         assert (await repo.info("foo"))["weh"] == 1
         assert (await self.client[self.database].test.find_one({"_id": "foo"}))["weh"] == 1
+        assert await repo.contains("foo")
+        assert not await repo.contains("bar")
+        all_things = await repo.info_all()
+        assert len(all_things) == 1
+        assert "foo" in all_things
+        assert all_things["foo"]["weh"] == 1
+
+        await repo.delete("foo")
+        assert await repo.info("foo") == {}
+        assert len([x async for x in repo]) == 0
 
     async def asyncTearDown(self):
         if self.client is not None:

@@ -69,30 +69,49 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
 
     async def test_minio(self):
         repo = pydatatask.S3BucketRepository(lambda: self.client, self.bucket, prefix="weh/", extension=".weh")
+        repo_yaml = pydatatask.YamlMetadataS3Repository(lambda: self.client, self.bucket, prefix="weh/")
+        assert repr(repo)
         await repo.validate()
+        await repo_yaml.validate()
+
         async with await repo.open("foo", "w") as fp:
             await fp.write("hello world")
         async with (await self.client.get_object(Bucket=self.bucket, Key="weh/foo.weh"))["Body"] as fp:
             assert await fp.read() == b"hello world"
+        async with await repo.open("foo", "wb") as fp:
+            await fp.write(b"hello world")
         async with await repo.open("foo", "rb") as fp:
             assert await fp.read() == b"hello world"
-        async for ident in repo:
-            assert ident == "foo"
-            break
-        else:
-            assert False, "there should be one key"
+        async with await repo.open("foo", "r") as fp:
+            assert await fp.read() == "hello world"
+        assert [ident async for ident in repo] == ["foo"]
+        assert await repo.contains("foo")
+        assert not await repo.contains("bar")
+
+        info = await repo.info("bar")
+        assert str(info) == f"s3://{self.bucket}/weh/bar.weh"
+        assert info.endpoint == "http://" + self.minio_endpoint
+
+        await repo.delete("foo")
+        assert [ident async for ident in repo] == []
+        await repo.delete("bar")
+
+        await repo_yaml.dump("foo", {"weh": 1})
+        assert await repo_yaml.info("foo") == {"weh": 1}
+        assert await repo_yaml.info("bar") == {}
 
     async def asyncTearDown(self):
         if self.client is not None:
-            await self.client.delete_objects(
-                Bucket=self.bucket,
-                Delete={
-                    "Objects": [
-                        {"Key": obj["Key"]}
-                        for obj in (await self.client.list_objects(Bucket=self.bucket)).get("Contents", [])
-                    ]
-                },
-            )
+            objects = [
+                {"Key": obj["Key"]} for obj in (await self.client.list_objects(Bucket=self.bucket)).get("Contents", [])
+            ]
+            if objects:
+                await self.client.delete_objects(
+                    Bucket=self.bucket,
+                    Delete={
+                        "Objects": objects,
+                    },
+                )
             await self.client.delete_bucket(Bucket=self.bucket)
             await self.client.close()
 

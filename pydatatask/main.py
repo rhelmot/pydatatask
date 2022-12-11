@@ -10,9 +10,8 @@ import yaml
 
 import pydatatask
 
-from . import BlobRepository, MetadataRepository
 from .pipeline import Pipeline
-from .repository import Repository
+from .repository import BlobRepository, MetadataRepository, Repository
 from .task import Task, settings
 
 l = logging.getLogger(__name__)

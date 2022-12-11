@@ -94,22 +94,27 @@ class PodManager:
         spec = manifest["spec"]
         spec["restartPolicy"] = "Never"
 
+        await self.cpu_usage()
+
         cpu_request = 0
         mem_request = 0
         for container in spec["containers"]:
             cpu_request += parse_quantity(container["resources"]["requests"]["cpu"])
             mem_request += parse_quantity(container["resources"]["requests"]["memory"])
 
-        if cpu_request + await self.cpu_usage() > self.cpu_quota:
+        # this could maybe stand to be a critical section
+        if cpu_request + self._cpu_usage > self.cpu_quota:
             if task not in self.warned:
                 self.warned.add(task)
                 l.info("Cannot launch %s - cpu limit", task)
             return False
-        if mem_request + await self.mem_usage() > self.mem_quota:
+        if mem_request + self._mem_usage > self.mem_quota:
             if task not in self.warned:
                 self.warned.add(task)
                 l.info("Cannot launch %s - memory limit", task)
             return False
+        self._cpu_usage += cpu_request
+        self._mem_usage += mem_request
 
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
@@ -125,8 +130,6 @@ class PodManager:
 
         l.info("Creating task %s for job %s", task, job)
         await self.v1.create_namespaced_pod(self.namespace, manifest)
-        self._cpu_usage += cpu_request
-        self._mem_usage += mem_request
         return True
 
     async def query(self, job=None, task=None):
