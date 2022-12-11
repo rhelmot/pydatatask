@@ -11,10 +11,10 @@ from typing import (
     Literal,
     Optional,
     Protocol,
+    Union,
 )
 from collections import Counter
 from pathlib import Path
-import asyncio
 import base64
 import codecs
 import hashlib
@@ -281,7 +281,7 @@ class BlobRepository(Repository):
     @job_getter
     async def open(
         self, ident, mode: Literal["r", "rb", "w", "wb"] = "r"
-    ) -> AReadStream | AWriteStream | AReadText | AWriteText:
+    ) -> Union[AReadStream | AWriteStream | AReadText | AWriteText]:
         raise NotImplementedError
 
 

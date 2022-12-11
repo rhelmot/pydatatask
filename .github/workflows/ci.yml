@@ -62,6 +62,7 @@ jobs:
     - uses: pypa/gh-action-pip-audit@v1.0.2
   release:
     name: Release to PyPI
+    needs: ["test", "audit", "analyze"]
     if: "github.event_name == 'push' && github.repository == 'rhelmot/pydatatask' && startsWith(github.ref, 'refs/heads/v') && success()"
     runs-on: ubuntu-latest
     steps:

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-import sys
-import subprocess
 from pathlib import Path
 import re
+import subprocess
+import sys
+
 import semver
 
 package = "pydatatask"
@@ -19,7 +20,7 @@ def is_main_unchanged():
     branch = subprocess.check_output(
         ["git", "symbolic-ref", "HEAD"], stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    if branch.decode().strip() != 'refs/heads/' + canonical_branch:
+    if branch.decode().strip() != "refs/heads/" + canonical_branch:
         print(f"Must be on {canonical_branch} branch for release")
         return False
     status = subprocess.check_output(
@@ -78,9 +79,9 @@ def main():
 
     write_version_number(release_file, release_re, release_str)
     write_version_number(version_file, version_re, version_str)
-    subprocess.check_call(['git', 'commit', '-am', f'Release {release_str}'])
-    subprocess.check_call(['git', 'tag', 'v' + release_str])
-    subprocess.check_call(['git', 'push', '--follow-tags'])
+    subprocess.check_call(["git", "commit", "-am", f"Release {release_str}"])
+    subprocess.check_call(["git", "tag", "v" + release_str])
+    subprocess.check_call(["git", "push", "--follow-tags"])
     return 0
 
 

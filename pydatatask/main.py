@@ -188,7 +188,7 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
 
 
 async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
-    item: Union[Task | Repository]
+    item: Union[Task, Repository]
     if "." in data:
         taskname, reponame = data.split(".")
         item = pipeline.tasks[taskname].links[reponame].repo
