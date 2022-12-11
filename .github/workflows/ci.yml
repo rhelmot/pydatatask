@@ -21,7 +21,7 @@ jobs:
     - name: Start minikube
       uses: medyagh/setup-minikube@master
     - name: Deps
-      run: 'pip install -e .[dev]'
+      run: 'pip install tox'
     - name: Tests
       run: 'tox -e ${{ matrix.python }}'
       env:

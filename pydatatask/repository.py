@@ -281,7 +281,7 @@ class BlobRepository(Repository):
     @job_getter
     async def open(
         self, ident, mode: Literal["r", "rb", "w", "wb"] = "r"
-    ) -> Union[AReadStream | AWriteStream | AReadText | AWriteText]:
+    ) -> Union[AReadStream, AWriteStream, AReadText, AWriteText]:
         raise NotImplementedError
 
 
