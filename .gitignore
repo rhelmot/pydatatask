@@ -5,3 +5,5 @@
 .tox
 .kube
 .minikube
+coverage.xml
+.coverage

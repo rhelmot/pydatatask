@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydatatask"
-version = "0.0.1"
+dynamic = ["version"]
 authors = [
     { name = "Audrey Dutcher", email = "audrey@rhelmot.io" },
 ]
@@ -56,10 +56,15 @@ content-type = "text/markdown"
 [license]
 file = "LICENSE"
 
+[dynamic]
+
 [tool.setuptools]
 zip-safe = false
 package-data = { pydatatask = ["py.typed"] }
 packages = ["pydatatask"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pydatatask.__version__"}
 
 # https://github.com/tomplus/kubernetes_asyncio/issues/230
 [[tool.mypy.overrides]]
@@ -83,7 +88,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=pydatatask"
+addopts = "--cov=pydatatask --cov-report=xml"
 
 [tool.black]
 line-length = 120
