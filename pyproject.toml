@@ -88,7 +88,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=pydatatask --cov-report=xml"
+addopts = "--cov=pydatatask --cov-report=xml -ra"
 
 [tool.black]
 line-length = 120
