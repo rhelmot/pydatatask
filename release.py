@@ -66,13 +66,13 @@ def main():
         return 1
 
     prev_release_str = read_version_number(release_file, release_re)
-    version = semver.VersionInfo.parse(prev_release_str)
+    prev_version = semver.VersionInfo.parse(prev_release_str)
     if sys.argv[1] == "major":
-        version.bump_major()
+        version = prev_version.bump_major()
     elif sys.argv[1] == "minor":
-        version.bump_minor()
+        version = prev_version.bump_minor()
     else:
-        version.bump_patch()
+        version = prev_version.bump_patch()
 
     release_str = str(version)
     version_str = str(version.next_version("prerelease", prerelease_token="dev"))
