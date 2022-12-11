@@ -120,8 +120,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             await pydatatask.delete_data(pipeline, "task", False, [launched[0]])
             while await live.contains(launched[0]):
                 await asyncio.sleep(1)
-            await pydatatask.launch(pipeline, "task", launched[0], False, True, True)
-            assert await live.contains(launched[0])
+            await task.launch(launched[0])
 
             await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
             assert not await live.contains(launched[0])
