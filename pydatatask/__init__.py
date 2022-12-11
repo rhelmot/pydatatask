@@ -5,5 +5,5 @@ from .repository import *
 from .session import *
 from .task import *
 
-__version__ = "0.0.1-dev.2"
+__version__ = "0.0.1-dev.1"
 released_version = "0.0.0"
