@@ -145,7 +145,7 @@ async def roundrobin(iterables: List):
     while iterables:
         i %= len(iterables)
         try:
-            yield await anext(iterables[i])
+            yield await iterables[i].__anext__()
         except StopAsyncIteration:
             iterables.pop(i)
         else:
