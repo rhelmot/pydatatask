@@ -121,6 +121,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             while await live.contains(launched[0]):
                 await asyncio.sleep(1)
             await task.launch(launched[0])
+            await asyncio.sleep(5)
             assert await live.contains(launched[0])
 
             await pydatatask.run(pipeline, forever=False, launch_once=True, timeout=120)
