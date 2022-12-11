@@ -46,17 +46,15 @@ test = [
     "pytest-cov",
 ]
 
-[urls]
+[project.urls]
 repository = "https://github.com/rhelmot/pydatatask"
 
-[readme]
+[project.readme]
 file = "README.md"
 content-type = "text/markdown"
 
-[license]
+[project.license]
 file = "LICENSE"
-
-[dynamic]
 
 [tool.setuptools]
 zip-safe = false

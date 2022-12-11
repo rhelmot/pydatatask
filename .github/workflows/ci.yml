@@ -82,13 +82,13 @@ jobs:
       with:
         python-version: '3.11'
     - name: Deps
-      run: 'pip install build semver'
+      run: 'pip install -U build wheel semver'
     - name: Fix Version
       run: './release.py finalize'
     - name: Build
       run: 'python -m build'
     - name: Publish
-      uses: pypa/gh-action-pypi-publish@master
+      uses: pypa/gh-action-pypi-publish@release/v1
       with:
         user: __token__
         password: ${{ secrets.PYPI_TOKEN }}
