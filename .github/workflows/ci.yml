@@ -18,13 +18,14 @@ jobs:
       uses: actions/setup-python@master
       with:
         python-version: ${{ matrix.python }}
-        cache: 'pip'
     - name: Start minikube
       uses: medyagh/setup-minikube@master
     - name: Deps
       run: 'pip install -e .[dev]'
     - name: Tests
       run: 'tox -e ${{ matrix.python }}'
+      env:
+        PYDATATASK_TEST_KUBE_CONTEXT: minikube
     - name: Upload Coverage
       uses: codecov/codecov-action@v3
       with:
@@ -42,7 +43,6 @@ jobs:
       uses: actions/setup-python@master
       with:
         python-version: '3.11'
-        cache: 'pip'
     - name: Deps
       run: 'pip install -e .[dev]'
     - name: Analyze
@@ -57,7 +57,6 @@ jobs:
       uses: actions/setup-python@master
       with:
         python-version: '3.11'
-        cache: 'pip'
     - name: install
       run: pip install .
     - uses: pypa/gh-action-pip-audit@v1.0.2
@@ -71,7 +70,6 @@ jobs:
       uses: actions/setup-python@master
       with:
         python-version: '3.11'
-        cache: 'pip'
     - name: Deps
       run: 'pip install build semver'
     - name: Fix Version
