@@ -1,4 +1,14 @@
-from typing import Any, Callable, Dict, Iterable, Optional, Protocol, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    Iterable,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+)
 from asyncio import Future
 from concurrent.futures import FIRST_EXCEPTION, Executor, wait
 from dataclasses import dataclass
@@ -10,7 +20,6 @@ import inspect
 import logging
 import os
 import sys
-import time
 import traceback
 
 from kubernetes_asyncio.client import V1Pod
@@ -311,7 +320,10 @@ class KubeTask(Task):
         return yaml.safe_load(rendered)
 
     async def launch(self, job):
-        env = await build_env(vars(self) | self.links | (self.env or {}), job, RepoHandlingMode.LAZY)
+        env_input = vars(self)
+        env_input.update(self.links)
+        env_input.update(self.env)
+        env = await build_env(env_input, job, RepoHandlingMode.LAZY)
         env["job"] = job
         env["task"] = self.name
         env["argv0"] = os.path.basename(sys.argv[0])
@@ -410,7 +422,7 @@ class LocalProcessTask(Task):
 
 
 class FunctionTaskProtocol(Protocol):
-    def __call__(self, job: str, **kwargs):
+    def __call__(self, job: str, **kwargs) -> Coroutine:
         ...
 
 
