@@ -320,7 +320,7 @@ class KubeTask(Task):
         return yaml.safe_load(rendered)
 
     async def launch(self, job):
-        env_input = vars(self)
+        env_input = dict(vars(self))
         env_input.update(self.links)
         env_input.update(self.env)
         env = await build_env(env_input, job, RepoHandlingMode.LAZY)
