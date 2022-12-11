@@ -1,6 +1,6 @@
 from typing import Optional, Set, Union
-import logging
 import asyncio
+import logging
 
 from kubernetes.utils import parse_quantity
 from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
