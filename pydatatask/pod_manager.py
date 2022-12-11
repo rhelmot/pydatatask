@@ -1,5 +1,6 @@
 from typing import Optional, Set, Union
 import logging
+import asyncio
 
 from kubernetes.utils import parse_quantity
 from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
@@ -31,6 +32,8 @@ class PodManager:
         self.warned: Set[str] = set()
         self._v1 = None
         self._v1_ws = None
+
+        self.lock = asyncio.Lock()
 
     @property
     def api(self):
@@ -65,36 +68,35 @@ class PodManager:
             self._api_ws = None
 
     async def cpu_usage(self):
-        if self._cpu_usage is None:
-            await self._load_usage()
+        await self._load_usage()
         return self._cpu_usage
 
     async def mem_usage(self):
-        if self._mem_usage is None:
-            await self._load_usage()
+        await self._load_usage()
         return self._mem_usage
 
     async def _load_usage(self):
-        cpu_usage = mem_usage = 0
+        async with self.lock:
+            if self._cpu_usage is not None:
+                return
+            cpu_usage = mem_usage = 0
 
-        try:
-            for pod in (await self.v1.list_namespaced_pod(self.namespace, label_selector="app=" + self.app)).items:
-                for container in pod.spec.containers:
-                    cpu_usage += parse_quantity(container.resources.requests["cpu"])
-                    mem_usage += parse_quantity(container.resources.requests["memory"])
-        except ApiException as e:
-            if e.reason != "Forbidden":
-                raise
-        finally:
-            self._cpu_usage = cpu_usage
-            self._mem_usage = mem_usage
+            try:
+                for pod in (await self.v1.list_namespaced_pod(self.namespace, label_selector="app=" + self.app)).items:
+                    for container in pod.spec.containers:
+                        cpu_usage += parse_quantity(container.resources.requests["cpu"])
+                        mem_usage += parse_quantity(container.resources.requests["memory"])
+            except ApiException as e:
+                if e.reason != "Forbidden":
+                    raise
+            finally:
+                self._cpu_usage = cpu_usage
+                self._mem_usage = mem_usage
 
     async def launch(self, job, task, manifest):
         assert manifest["kind"] == "Pod"
         spec = manifest["spec"]
         spec["restartPolicy"] = "Never"
-
-        await self.cpu_usage()
 
         cpu_request = 0
         mem_request = 0
@@ -102,19 +104,20 @@ class PodManager:
             cpu_request += parse_quantity(container["resources"]["requests"]["cpu"])
             mem_request += parse_quantity(container["resources"]["requests"]["memory"])
 
-        # this could maybe stand to be a critical section
-        if cpu_request + self._cpu_usage > self.cpu_quota:
-            if task not in self.warned:
-                self.warned.add(task)
-                l.info("Cannot launch %s - cpu limit", task)
-            return False
-        if mem_request + self._mem_usage > self.mem_quota:
-            if task not in self.warned:
-                self.warned.add(task)
-                l.info("Cannot launch %s - memory limit", task)
-            return False
-        self._cpu_usage += cpu_request
-        self._mem_usage += mem_request
+        await self._load_usage()
+        async with self.lock:
+            if cpu_request + self._cpu_usage > self.cpu_quota:
+                if task not in self.warned:
+                    self.warned.add(task)
+                    l.info("Cannot launch %s - cpu limit", task)
+                return False
+            if mem_request + self._mem_usage > self.mem_quota:
+                if task not in self.warned:
+                    self.warned.add(task)
+                    l.info("Cannot launch %s - memory limit", task)
+                return False
+            self._cpu_usage += cpu_request
+            self._mem_usage += mem_request
 
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
@@ -142,11 +145,12 @@ class PodManager:
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 
     async def delete(self, pod):
-        await self.cpu_usage()  # load into self
         await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
-        for container in pod.spec.containers:
-            self._cpu_usage -= parse_quantity(container.resources.requests["cpu"])
-            self._mem_usage -= parse_quantity(container.resources.requests["memory"])
+        await self._load_usage()  # load into self
+        async with self.lock:
+            for container in pod.spec.containers:
+                self._cpu_usage -= parse_quantity(container.resources.requests["cpu"])
+                self._mem_usage -= parse_quantity(container.resources.requests["memory"])
 
     async def logs(self, pod, timeout=10):
         return await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)

@@ -354,6 +354,7 @@ class KubeTask(Task):
         await self.podman.delete(pod)
 
     async def update(self):
+        self.podman.warned.clear()
         result = await super().update()
 
         pods = await self.podman.query(task=self.name)
