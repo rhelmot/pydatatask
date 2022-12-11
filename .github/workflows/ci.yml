@@ -8,22 +8,32 @@ jobs:
     if: always()
     strategy:
       matrix:
-        python: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python:
+          - version: '3.8'
+            env: 'py38'
+          - version: '3.9'
+            env: 'py39'
+          - version: '3.10'
+            env: 'py310'
+          - version: '3.11'
+            env: 'py311'
+          - version: '3.12-alpha'
+            env: 'py312'
     runs-on: ubuntu-latest
     env:
-      PYTHON: ${{ matrix.python }}
+      PYTHON: ${{ matrix.python.version }}
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
       uses: actions/setup-python@master
       with:
-        python-version: ${{ matrix.python }}
+        python-version: ${{ matrix.python.version }}
     - name: Start minikube
       uses: medyagh/setup-minikube@master
     - name: Deps
       run: 'pip install tox'
     - name: Tests
-      run: 'tox -e ${{ matrix.python }}'
+      run: 'tox -e ${{ matrix.python.env }}'
       env:
         PYDATATASK_TEST_KUBE_CONTEXT: minikube
     - name: Upload Coverage
