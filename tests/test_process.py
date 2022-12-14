@@ -66,7 +66,7 @@ echo bye >&2
         pipeline = pydatatask.Pipeline([task], session)
 
         async with pipeline:
-            await pydatatask.run(pipeline, False, False, 30)
+            await pydatatask.run(pipeline, False, False, 120)
 
         assert len(repo_stdout.data) == self.n
         assert len(repo_done.data) == self.n
@@ -169,7 +169,7 @@ echo 'goodbye world!' >&2
         pipeline = pydatatask.Pipeline([task], session)
 
         async with pipeline:
-            await pydatatask.run(pipeline, False, False, 30)
+            await pydatatask.run(pipeline, False, False, 120)
 
         assert len(repo_stdin.data) == self.n
         assert len(repo_stdout.data) == self.n
