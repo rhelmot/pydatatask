@@ -57,6 +57,7 @@ __all__ = (
     "ExecutorTask",
     "KubeFunctionTask",
     "settings",
+    "STDOUT",
 )
 
 
@@ -506,10 +507,11 @@ class ProcessTask(Task):
                 stdin = self.basedir / job / 'stdin'
                 async with await self.stdin.open(job, 'rb') as fpr, await self.manager.open(stdin, 'wb') as fpw:
                     await async_copyfile(fpr, fpw)
-            stdout = None if self.stdout is None else self.basedir / job / 'stdout'
+                stdin = str(stdin)
+            stdout = None if self.stdout is None else str(self.basedir / job / 'stdout')
             stderr = STDOUT
-            if not isinstance(self.stderr, StderrIsStdout):
-                stderr = None if self.stderr is None else self.basedir / job / 'stderr'
+            if not isinstance(self._stderr, StderrIsStdout):
+                stderr = None if self._stderr is None else str(self.basedir / job / 'stderr')
             env_src = dict(self.links)
             env_src['job'] = job
             env_src['task'] = self.name
@@ -521,7 +523,7 @@ class ProcessTask(Task):
                     item.close()
             async with await self.manager.open(exe_path, 'w') as fp:
                 await fp.write(exe_txt)
-            pid = await self.manager.spawn([str(exe_path)], self.environ, cwd, self.basedir / job / 'return_code', stdin, stdout, stderr)
+            pid = await self.manager.spawn([str(exe_path)], self.environ, str(cwd), str(self.basedir / job / 'return_code'), stdin, stdout, stderr)
             if pid is not None:
                 await self.pids.dump(job, {'pid': pid, 'start_time': datetime.now(tz=timezone.utc)})
         except:  # CLEAN UP YOUR MESS
