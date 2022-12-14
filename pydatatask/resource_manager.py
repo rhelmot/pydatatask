@@ -1,16 +1,18 @@
-from typing import Callable, Awaitable, Optional, Union, List
-from dataclasses import dataclass, field
-from enum import Enum, auto
+from typing import Awaitable, Callable, List, Optional, Union
 from asyncio import Lock
+from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum, auto
 
 from kubernetes.utils import parse_quantity
 
-__all__ = ('ResourceType', 'Resources', 'ResourceManager', 'parse_quantity')
+__all__ = ("ResourceType", "Resources", "ResourceManager", "parse_quantity")
+
 
 class ResourceType(Enum):
     CPU = auto()
     MEM = auto()
+
 
 @dataclass
 class Resources:
@@ -18,25 +20,26 @@ class Resources:
     mem: Decimal = field(default=Decimal(0))
 
     @staticmethod
-    def parse(cpu: Union[str, float, int, Decimal], mem: Union[str, float, int, Decimal]) -> 'Resources':
+    def parse(cpu: Union[str, float, int, Decimal], mem: Union[str, float, int, Decimal]) -> "Resources":
         return Resources(cpu=parse_quantity(cpu), mem=parse_quantity(mem))
 
-    def __add__(self, other: 'Resources'):
+    def __add__(self, other: "Resources"):
         return Resources(cpu=self.cpu + other.cpu, mem=self.mem + other.mem)
 
     def __mul__(self, other: int):
         return Resources(cpu=self.cpu * other, mem=self.mem * other)
 
-    def __sub__(self, other: 'Resources'):
+    def __sub__(self, other: "Resources"):
         return self + other * -1
 
-    def excess(self, limit: 'Resources') -> Optional[ResourceType]:
+    def excess(self, limit: "Resources") -> Optional[ResourceType]:
         if self.cpu > limit.cpu:
             return ResourceType.CPU
         elif self.mem > limit.mem:
             return ResourceType.MEM
         else:
             return None
+
 
 class ResourceManager:
     def __init__(self, quota: Resources):

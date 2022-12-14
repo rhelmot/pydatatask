@@ -1,10 +1,10 @@
-import unittest
-import random
-import string
-import base64
-import shutil
-import asyncio
 from pathlib import Path
+import asyncio
+import base64
+import random
+import shutil
+import string
+import unittest
 
 import aioshutil
 import asyncssh
@@ -15,12 +15,13 @@ import pydatatask
 def rid(n=6):
     return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
 
+
 class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
 
-        self.app = f'test-{rid()}'
-        self.dir = Path(f'/tmp/pydatatask-{self.app}')
+        self.app = f"test-{rid()}"
+        self.dir = Path(f"/tmp/pydatatask-{self.app}")
         self.n = 50
 
     async def test_local_process(self):
@@ -32,10 +33,10 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
 
         quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1))
 
-        repo_input = pydatatask.FileRepository(self.dir / 'input')
+        repo_input = pydatatask.FileRepository(self.dir / "input")
         await repo_input.validate()
         for i in range(self.n):
-            async with await repo_input.open(str(i), 'w') as fp:
+            async with await repo_input.open(str(i), "w") as fp:
                 await fp.write(str(i))
         repo_stdout = pydatatask.InProcessBlobRepository()
         repo_done = pydatatask.InProcessMetadataRepository()
@@ -47,7 +48,19 @@ echo weh | cat {{input}} -
 echo bye >&2
         """
 
-        task = pydatatask.ProcessTask("task", localhost, quota, pydatatask.Resources.parse('100m', '100m'), repo_pids, template, {}, repo_done, None, repo_stdout, pydatatask.STDOUT)
+        task = pydatatask.ProcessTask(
+            "task",
+            localhost,
+            quota,
+            pydatatask.Resources.parse("100m", "100m"),
+            repo_pids,
+            template,
+            {},
+            repo_done,
+            None,
+            repo_stdout,
+            pydatatask.STDOUT,
+        )
         task.link("input", repo_input, is_input=True)
 
         pipeline = pydatatask.Pipeline([task], session)
@@ -61,10 +74,11 @@ echo bye >&2
 
         for i in range(self.n):
             assert repo_stdout.data[str(i)] == f"{i}weh\nbye\n".encode()
-            assert repo_done.data[str(i)]['return_code'] == 0
+            assert repo_done.data[str(i)]["return_code"] == 0
 
     async def asyncTearDown(self):
         await aioshutil.rmtree(self.dir, ignore_errors=True)
+
 
 class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
@@ -80,7 +94,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         if self.docker_path is None:
             raise unittest.SkipTest("No mongodb endpoint configured and docker is not installed")
         self.port = random.randrange(0x4000, 0x8000)
-        name = f'pydatatask-test-{self.test_id}'
+        name = f"pydatatask-test-{self.test_id}"
         p = await asyncio.create_subprocess_exec(
             self.docker_path,
             "run",
@@ -103,7 +117,9 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         )
         await p.communicate()
         if await p.wait() != 0:
-            raise unittest.SkipTest("No minio endpoint configured and docker failed to launch linuxserver/openssh-server:latest")
+            raise unittest.SkipTest(
+                "No minio endpoint configured and docker failed to launch linuxserver/openssh-server:latest"
+            )
         self.docker_name = name
         await asyncio.sleep(1)
 
@@ -112,7 +128,9 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
 
         @session.resource
         async def ssh():
-            async with asyncssh.connect('localhost', port=self.port, username='weh', password='weh', known_hosts=None) as s:
+            async with asyncssh.connect(
+                "localhost", port=self.port, username="weh", password="weh", known_hosts=None
+            ) as s:
                 yield s
 
         @session.resource
@@ -134,7 +152,19 @@ echo "The message of day {{job}} is $(base64). That's pretty great!"
 echo 'goodbye world!' >&2
         """
 
-        task = pydatatask.ProcessTask("task", procman, quota, pydatatask.Resources.parse('100m', '100m'), repo_pids, template, {}, repo_done, repo_stdin, repo_stdout, repo_stderr)
+        task = pydatatask.ProcessTask(
+            "task",
+            procman,
+            quota,
+            pydatatask.Resources.parse("100m", "100m"),
+            repo_pids,
+            template,
+            {},
+            repo_done,
+            repo_stdin,
+            repo_stdout,
+            repo_stderr,
+        )
 
         pipeline = pydatatask.Pipeline([task], session)
 
@@ -149,8 +179,11 @@ echo 'goodbye world!' >&2
 
         for i in range(self.n):
             assert repo_stderr.data[str(i)] == f"hello world!\ngoodbye world!\n".encode()
-            assert repo_stdout.data[str(i)] == f"The message of day {i} is {base64.b64encode(repo_stdin.data[str(i)]).decode()}. That's pretty great!\n".encode()
-            assert repo_done.data[str(i)]['return_code'] == 0
+            assert (
+                repo_stdout.data[str(i)]
+                == f"The message of day {i} is {base64.b64encode(repo_stdin.data[str(i)]).decode()}. That's pretty great!\n".encode()
+            )
+            assert repo_done.data[str(i)]["return_code"] == 0
 
     async def asyncTearDown(self):
         if self.docker_name is not None:
@@ -164,5 +197,6 @@ echo 'goodbye world!' >&2
             )
             await p.communicate()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

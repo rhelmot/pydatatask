@@ -1,27 +1,47 @@
-from typing import List, Set, Dict, Optional, Union, Literal, TYPE_CHECKING, Callable, AsyncContextManager
+from typing import (
+    TYPE_CHECKING,
+    AsyncContextManager,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Union,
+)
 from pathlib import Path
-import psutil
 import asyncio
-import shlex
 import os
+import shlex
 import signal
 
 import aiofiles
 import aioshutil
 import asyncssh
+import psutil
 
 from .task import STDOUT, StderrIsStdout
 
 if TYPE_CHECKING:
-    from .repository import AReadText, AWriteText, AReadStream, AWriteStream
+    from .repository import AReadStream, AReadText, AWriteStream, AWriteText
 
-__all__ = ('AbstractLinuxManager', 'LocalLinuxManager', 'SSHLinuxManager')
+__all__ = ("AbstractLinuxManager", "LocalLinuxManager", "SSHLinuxManager")
+
 
 class AbstractLinuxManager:
     async def get_live_pids(self, hint: Set[str]) -> Set[str]:
         raise NotImplementedError
 
-    async def spawn(self, args: List[str], environ: Dict[str, str], cwd: str, return_code: str, stdin: Optional[str], stdout: Optional[str], stderr: Optional[Union[str, StderrIsStdout]]) -> str:
+    async def spawn(
+        self,
+        args: List[str],
+        environ: Dict[str, str],
+        cwd: str,
+        return_code: str,
+        stdin: Optional[str],
+        stdout: Optional[str],
+        stderr: Optional[Union[str, StderrIsStdout]],
+    ) -> str:
         raise NotImplementedError
 
     async def kill(self, pid: str):
@@ -31,7 +51,9 @@ class AbstractLinuxManager:
     def basedir(self) -> Path:
         raise NotImplementedError
 
-    async def open(self, path: Path, mode: Literal['r', 'rb', 'w', 'wb']) -> Union['AReadText', 'AWriteText', 'AReadStream', 'AWriteStream']:
+    async def open(
+        self, path: Path, mode: Literal["r", "rb", "w", "wb"]
+    ) -> Union["AReadText", "AWriteText", "AReadStream", "AWriteStream"]:
         raise NotImplementedError
 
     async def mkdir(self, path: Path):  # exist_ok=True, parents=True
@@ -40,8 +62,9 @@ class AbstractLinuxManager:
     async def rmtree(self, path: Path):
         raise NotImplementedError
 
+
 class LocalLinuxManager(AbstractLinuxManager):
-    def __init__(self, app: str, local_path: Union[Path, str]='/tmp/pydatatask'):
+    def __init__(self, app: str, local_path: Union[Path, str] = "/tmp/pydatatask"):
         self.local_path = Path(local_path) / app
 
     @property
@@ -53,17 +76,17 @@ class LocalLinuxManager(AbstractLinuxManager):
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
         if stdin is None:
-            stdin = '/dev/null'
+            stdin = "/dev/null"
         else:
             stdin = shlex.quote(stdin)
         if stdout is None:
-            stdout = '/dev/null'
+            stdout = "/dev/null"
         else:
             stdout = shlex.quote(stdout)
         if stderr is None:
-            stderr = '/dev/null'
+            stderr = "/dev/null"
         elif stderr is STDOUT:
-            stderr = '&1'
+            stderr = "&1"
         else:
             stderr = shlex.quote(stderr)
         try:
@@ -99,8 +122,9 @@ class LocalLinuxManager(AbstractLinuxManager):
     async def open(self, path, mode):
         return aiofiles.open(path, mode)
 
+
 class SSHLinuxFile:
-    def __init__(self, path: Union[Path, str], mode: Literal['r', 'w', 'rb', 'wb'], ssh: asyncssh.SSHClientConnection):
+    def __init__(self, path: Union[Path, str], mode: Literal["r", "w", "rb", "wb"], ssh: asyncssh.SSHClientConnection):
         self.path = Path(path)
         self.mode = mode
         self.ssh = ssh
@@ -120,8 +144,14 @@ class SSHLinuxFile:
         await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
         await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
+
 class SSHLinuxManager(AbstractLinuxManager):
-    def __init__(self, app: str, ssh: Callable[[], asyncssh.SSHClientConnection], remote_path: Union[Path, str]='/tmp/pydatatask'):
+    def __init__(
+        self,
+        app: str,
+        ssh: Callable[[], asyncssh.SSHClientConnection],
+        remote_path: Union[Path, str] = "/tmp/pydatatask",
+    ):
         self.remote_path = Path(remote_path) / app
         self._ssh = ssh
 
@@ -145,25 +175,25 @@ class SSHLinuxManager(AbstractLinuxManager):
             await sftp.makedirs(path, exist_ok=True)
 
     async def kill(self, pid: str):
-        await self.ssh.run(f'kill -9 {pid}')
+        await self.ssh.run(f"kill -9 {pid}")
 
     async def get_live_pids(self, hint):
-        p = await self.ssh.run('ls /proc')
+        p = await self.ssh.run("ls /proc")
         return {x for x in p.stdout.split() if x.isdigit()}
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
         if stdin is None:
-            stdin = '/dev/null'
+            stdin = "/dev/null"
         else:
             stdin = shlex.quote(stdin)
         if stdout is None:
-            stdout = '/dev/null'
+            stdout = "/dev/null"
         else:
             stdout = shlex.quote(stdout)
         if stderr is None:
-            stderr = '/dev/null'
+            stderr = "/dev/null"
         elif stderr is STDOUT:
-            stderr = '&1'
+            stderr = "&1"
         else:
             stderr = shlex.quote(stderr)
         try:

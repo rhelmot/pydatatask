@@ -1,6 +1,6 @@
 from typing import (
-    Any,
     TYPE_CHECKING,
+    Any,
     Callable,
     Coroutine,
     Dict,
@@ -39,12 +39,13 @@ from .repository import (
     LiveKubeRepository,
     MetadataRepository,
     RelatedItemRepository,
-    Repository, async_copyfile,
+    Repository,
+    async_copyfile,
 )
 
 if TYPE_CHECKING:
     from .linux_manager import AbstractLinuxManager
-    from .resource_manager import Resources, ResourceManager
+    from .resource_manager import ResourceManager, Resources
 
 l = logging.getLogger(__name__)
 
@@ -85,8 +86,12 @@ async def build_env(env, job, mode: RepoHandlingMode):
             result[key] = await repo.info(job)
     return result
 
+
 async def render_template(template, env):
-    j = jinja2.Environment(enable_async=True, keep_trailing_newline=True, )
+    j = jinja2.Environment(
+        enable_async=True,
+        keep_trailing_newline=True,
+    )
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
         async with aiofiles.open(template, "r") as fp:
@@ -406,12 +411,12 @@ class ProcessTask(Task):
     def __init__(
         self,
         name: str,
-        manager: Callable[[], 'AbstractLinuxManager'],
-        resource_manager: 'ResourceManager',
-        job_resources: 'Resources',
+        manager: Callable[[], "AbstractLinuxManager"],
+        resource_manager: "ResourceManager",
+        job_resources: "Resources",
         pids: MetadataRepository,
         template: str,
-        environ: Optional[Dict[str, str]]=None,
+        environ: Optional[Dict[str, str]] = None,
         done: Optional[MetadataRepository] = None,
         stdin: Optional[BlobRepository] = None,
         stdout: Optional[BlobRepository] = None,
@@ -453,7 +458,7 @@ class ProcessTask(Task):
     def manager(self):
         return self._manager()
 
-    async def _get_load(self) -> 'Resources':
+    async def _get_load(self) -> "Resources":
         count = 0
         async for _ in self.pids:
             count += 1
@@ -476,7 +481,7 @@ class ProcessTask(Task):
 
     async def update(self):
         job_map = await self.pids.info_all()
-        pid_map = {meta['pid']: job for job, meta in job_map.items()}
+        pid_map = {meta["pid"]: job for job, meta in job_map.items()}
         expected_live = set(pid_map)
         try:
             live_pids = await self.manager.get_live_pids(expected_live)
@@ -486,7 +491,7 @@ class ProcessTask(Task):
         died = expected_live - live_pids
         for pid in died:
             job = pid_map[pid]
-            start_time = job_map[job]['start_time']
+            start_time = job_map[job]["start_time"]
             await self.reap(job, start_time)
 
     async def launch(self, job):
@@ -499,33 +504,35 @@ class ProcessTask(Task):
         dirmade = False
 
         try:
-            cwd = self.basedir / job / 'cwd'
+            cwd = self.basedir / job / "cwd"
             await self.manager.mkdir(cwd)  # implicitly creates basedir / task / job
             dirmade = True
             stdin = None
             if self.stdin is not None:
-                stdin = self.basedir / job / 'stdin'
-                async with await self.stdin.open(job, 'rb') as fpr, await self.manager.open(stdin, 'wb') as fpw:
+                stdin = self.basedir / job / "stdin"
+                async with await self.stdin.open(job, "rb") as fpr, await self.manager.open(stdin, "wb") as fpw:
                     await async_copyfile(fpr, fpw)
                 stdin = str(stdin)
-            stdout = None if self.stdout is None else str(self.basedir / job / 'stdout')
+            stdout = None if self.stdout is None else str(self.basedir / job / "stdout")
             stderr = STDOUT
             if not isinstance(self._stderr, StderrIsStdout):
-                stderr = None if self._stderr is None else str(self.basedir / job / 'stderr')
+                stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
             env_src = dict(self.links)
-            env_src['job'] = job
-            env_src['task'] = self.name
+            env_src["job"] = job
+            env_src["task"] = self.name
             env = await build_env(env_src, job, RepoHandlingMode.LAZY)
-            exe_path = self.basedir / job / 'exe'
+            exe_path = self.basedir / job / "exe"
             exe_txt = await render_template(self.template, env)
             for item in env.values():
                 if asyncio.iscoroutine(item):
                     item.close()
-            async with await self.manager.open(exe_path, 'w') as fp:
+            async with await self.manager.open(exe_path, "w") as fp:
                 await fp.write(exe_txt)
-            pid = await self.manager.spawn([str(exe_path)], self.environ, str(cwd), str(self.basedir / job / 'return_code'), stdin, stdout, stderr)
+            pid = await self.manager.spawn(
+                [str(exe_path)], self.environ, str(cwd), str(self.basedir / job / "return_code"), stdin, stdout, stderr
+            )
             if pid is not None:
-                await self.pids.dump(job, {'pid': pid, 'start_time': datetime.now(tz=timezone.utc)})
+                await self.pids.dump(job, {"pid": pid, "start_time": datetime.now(tz=timezone.utc)})
         except:  # CLEAN UP YOUR MESS
             try:
                 await self.resource_manager.relinquish(self.job_resources)
@@ -546,17 +553,21 @@ class ProcessTask(Task):
     async def reap(self, job: str, start_time: datetime):
         try:
             if self.stdout is not None:
-                async with await self.manager.open(self.basedir / job / 'stdout', 'rb') as fpr, \
-                        await self.stdout.open(job, 'wb') as fpw:
+                async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
+                    job, "wb"
+                ) as fpw:
                     await async_copyfile(fpr, fpw)
             if self._unique_stderr:
-                async with await self.manager.open(self.basedir / job / 'stderr', 'rb') as fpr, \
-                        await self.stderr.open(job, 'wb') as fpw:
+                async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr, await self.stderr.open(
+                    job, "wb"
+                ) as fpw:
                     await async_copyfile(fpr, fpw)
             if self.done is not None:
-                async with await self.manager.open(self.basedir / job / 'return_code', 'r') as fp1:
+                async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
                     code = int(await fp1.read())
-                await self.done.dump(job, {'return_code': code, 'start_time': start_time, 'end_time': datetime.now(tz=timezone.utc)})
+                await self.done.dump(
+                    job, {"return_code": code, "start_time": start_time, "end_time": datetime.now(tz=timezone.utc)}
+                )
             await self.manager.rmtree(self.basedir / job)
             await self.pids.delete(job)
             await self.resource_manager.relinquish(self.job_resources)
