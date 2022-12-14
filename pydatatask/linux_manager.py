@@ -163,7 +163,7 @@ class SSHLinuxManager(AbstractLinuxManager):
     def basedir(self) -> Path:
         return self.remote_path
 
-    async def open(self, path, mode) -> SSHLinuxFile:
+    async def open(self, path, mode):
         return SSHLinuxFile(path, mode, self.ssh)
 
     async def rmtree(self, path: Path):

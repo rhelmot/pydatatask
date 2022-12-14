@@ -27,6 +27,7 @@ dependencies = [
     "aiofiles",
     "aioshutil",
     "psutil",
+    "asyncssh",
 ]
 
 [project.optional-dependencies]
