@@ -26,6 +26,7 @@ dependencies = [
     "ipython",
     "aiofiles",
     "aioshutil",
+    "psutil",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,7 @@ type = [
     "types-pyyaml",
     "networkx-stubs",
     "types-aiofiles",
+    "types-psutil",
 ]
 test = [
     "pytest",
