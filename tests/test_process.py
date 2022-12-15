@@ -68,13 +68,13 @@ echo bye >&2
         async with pipeline:
             await pydatatask.run(pipeline, False, False, 120)
 
+        assert len(repo_pids.data) == 0
         assert len(repo_stdout.data) == self.n
         assert len(repo_done.data) == self.n
-        assert len(repo_pids.data) == 0
 
         for i in range(self.n):
-            assert repo_stdout.data[str(i)] == f"{i}weh\nbye\n".encode()
             assert repo_done.data[str(i)]["return_code"] == 0
+            assert repo_stdout.data[str(i)] == f"{i}weh\nbye\n".encode()
 
     async def asyncTearDown(self):
         await aioshutil.rmtree(self.dir, ignore_errors=True)

@@ -487,12 +487,13 @@ class ProcessTask(Task):
             live_pids = await self.manager.get_live_pids(expected_live)
         except Exception:
             l.error(f"Could not load live PIDs for {self}", exc_info=True)
-            return True
-        died = expected_live - live_pids
-        for pid in died:
-            job = pid_map[pid]
-            start_time = job_map[job]["start_time"]
-            await self.reap(job, start_time)
+        else:
+            died = expected_live - live_pids
+            for pid in died:
+                job = pid_map[pid]
+                start_time = job_map[job]["start_time"]
+                await self.reap(job, start_time)
+        return bool(expected_live)
 
     async def launch(self, job):
         limit = await self.resource_manager.reserve(self.job_resources)
