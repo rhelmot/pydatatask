@@ -13,6 +13,7 @@ from typing import (
     Protocol,
     Union,
 )
+from abc import abstractmethod
 from collections import Counter
 from pathlib import Path
 import base64
@@ -26,6 +27,7 @@ import string
 
 from types_aiobotocore_s3.client import S3Client
 import aiofiles.os
+import aiohttp.client_exceptions
 import aioshutil
 import botocore.exceptions
 import docker_registry_client_async
@@ -185,20 +187,20 @@ class Repository:
     CHARSET_START_END = string.ascii_letters + string.digits
 
     @classmethod
-    def is_valid_job_id(cls, ident):
+    def is_valid_job_id(cls, job):
         return (
-            0 < len(ident) < 64
-            and all(c in cls.CHARSET for c in ident)
-            and ident[0] in cls.CHARSET_START_END
-            and ident[-1] in cls.CHARSET_START_END
+            0 < len(job) < 64
+            and all(c in cls.CHARSET for c in job)
+            and job[0] in cls.CHARSET_START_END
+            and job[-1] in cls.CHARSET_START_END
         )
 
     async def filter_jobs(self, iterator: AsyncIterable[str]):
-        async for ident in iterator:
-            if self.is_valid_job_id(ident):
-                yield ident
+        async for job in iterator:
+            if self.is_valid_job_id(job):
+                yield job
             else:
-                l.warning("Skipping %s %s - not a valid job id", self, repr(ident))
+                l.warning("Skipping %s %s - not a valid job id", self, repr(job))
 
     async def contains(self, item):
         async for x in self:
@@ -209,35 +211,36 @@ class Repository:
     def __aiter__(self):
         return self.filter_jobs(self._unfiltered_iter())
 
+    @abstractmethod
     async def _unfiltered_iter(self) -> AsyncGenerator[str, None]:
         raise NotImplementedError
         # noinspection PyUnreachableCode
-        yield None
+        yield None  # pylint: disable=unreachable
 
-    @job_getter
-    async def info(self, ident):
+    @abstractmethod
+    async def info(self, job):
         """
-        Returns an arbitrary piece of data related to ident. Notably, this is used during templating.
-        This should do something meaningful even if the repository does not contain ident.
+        Returns an arbitrary piece of data related to job. Notably, this is used during templating.
+        This should do something meaningful even if the repository does not contain job.
         """
         raise NotImplementedError
 
+    @abstractmethod
     async def delete(self, key):
         raise NotImplementedError
 
     async def info_all(self) -> Dict[str, Any]:
-        return {ident: await self.info(ident) async for ident in self}
+        return {job: await self.info(job) async for job in self}
 
     async def validate(self):
         """
         Raise an exception if for any reason the repository is misconfigured.
         """
-        pass
 
     def map(
-        self, func: Callable, filter: Optional[Callable[[Any], Coroutine[None, None, Any]]] = None, allow_deletes=False
+        self, func: Callable, filt: Optional[Callable[[Any], Coroutine[None, None, Any]]] = None, allow_deletes=False
     ) -> "MapRepository":
-        return MapRepository(self, func, filter, allow_deletes=allow_deletes)
+        return MapRepository(self, func, filt, allow_deletes=allow_deletes)
 
 
 class MapRepository(Repository):
@@ -245,12 +248,12 @@ class MapRepository(Repository):
         self,
         child: Repository,
         func: Callable[[Any], Coroutine[None, None, Any]],
-        filter: Optional[Callable[[str], Coroutine[None, None, bool]]] = None,
+        filt: Optional[Callable[[str], Coroutine[None, None, bool]]] = None,
         allow_deletes=False,
     ):
         self.child = child
         self.func = func
-        self.filter = filter
+        self.filter = filt
         self.allow_deletes = allow_deletes
 
     async def contains(self, item):
@@ -267,8 +270,8 @@ class MapRepository(Repository):
             if self.filter is None or await self.filter(item):
                 yield item
 
-    async def info(self, ident):
-        return await self.func(await self.child.info(ident))
+    async def info(self, job):
+        return await self.func(await self.child.info(job))
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.child.info_all()
@@ -284,19 +287,19 @@ class MapRepository(Repository):
 
 
 class MetadataRepository(Repository):
-    @job_getter
+    @abstractmethod
     async def info(self, job):
         raise NotImplementedError
 
-    @job_getter
+    @abstractmethod
     async def dump(self, job, data):
         raise NotImplementedError
 
 
 class BlobRepository(Repository):
-    @job_getter
+    @abstractmethod
     async def open(
-        self, ident, mode: Literal["r", "rb", "w", "wb"] = "r"
+        self, job, mode: Literal["r", "rb", "w", "wb"] = "r"
     ) -> Union[AReadStream, AWriteStream, AReadText, AWriteText]:
         raise NotImplementedError
 
@@ -327,8 +330,8 @@ class FileRepositoryBase(Repository):
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
-    def fullpath(self, ident):
-        return self.basedir / (ident + self.extension)
+    def fullpath(self, job):
+        return self.basedir / (job + self.extension)
 
     @job_getter
     async def info(self, job):
@@ -342,8 +345,8 @@ class FileRepository(FileRepositoryBase, BlobRepository):
     """
 
     @job_getter
-    async def open(self, ident, mode="r"):
-        return aiofiles.open(self.fullpath(ident), mode)
+    async def open(self, job, mode="r"):
+        return aiofiles.open(self.fullpath(job), mode)
 
     async def delete(self, key):
         try:
@@ -362,9 +365,9 @@ class DirectoryRepository(FileRepositoryBase):
         self.discard_empty = discard_empty
 
     @job_getter
-    async def mkdir(self, ident):
+    async def mkdir(self, job):
         try:
-            await aiofiles.os.mkdir(self.fullpath(ident))
+            await aiofiles.os.mkdir(self.fullpath(job))
         except FileExistsError:
             pass
 
@@ -425,7 +428,7 @@ class S3BucketReader:
     async def close(self):
         self.body.close()
 
-    async def read(self, n=None):
+    async def read(self, n=None):  # pylint: disable=unused-argument :(
         return await self.body.read()
 
     async def __aenter__(self):
@@ -493,31 +496,29 @@ class S3BucketRepository(BlobRepository):
             else:
                 raise
 
-    def object_name(self, ident):
-        return f"{self.prefix}{ident}{self.extension}"
+    def object_name(self, job):
+        return f"{self.prefix}{job}{self.extension}"
 
     @job_getter
-    async def open(self, ident, mode="r"):
+    async def open(self, job, mode="r"):
         if mode == "wb":
-            return S3BucketBinaryWriter(self, ident)
+            return S3BucketBinaryWriter(self, job)
         elif mode == "w":
-            return AWriteText(S3BucketBinaryWriter(self, ident))
+            return AWriteText(S3BucketBinaryWriter(self, job))
         elif mode == "rb":
-            return S3BucketReader(
-                (await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))["Body"]
-            )
+            return S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(job)))["Body"])
         elif mode == "r":
             return AReadText(
-                S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(ident)))["Body"])
+                S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(job)))["Body"])
             )
         else:
             raise ValueError(mode)
 
     @job_getter
-    async def info(self, ident):
+    async def info(self, job):
         return S3BucketInfo(
             self.incluster_endpoint or self.client._endpoint.host,
-            f"s3://{self.bucket}/{self.object_name(ident)}",
+            f"s3://{self.bucket}/{self.object_name(job)}",
         )
 
     async def delete(self, key):
@@ -596,10 +597,8 @@ class DockerRepository(Repository):
                 return
             for tag in tags:
                 yield tag
-        except Exception as e:
-            if "404" in str(e):
-                return
-            else:
+        except aiohttp.client_exceptions.ClientResponseError as e:
+            if e.code == 404:
                 raise
 
     def __repr__(self):
@@ -865,10 +864,10 @@ class RelatedItemRepository(Repository):
         await self.base_repository.delete(basename)
 
     @job_getter
-    async def info(self, ident):
-        basename = await self._lookup(ident)
+    async def info(self, job):
+        basename = await self._lookup(job)
         if basename is None:
-            raise LookupError(ident)
+            raise LookupError(job)
 
         return await self.base_repository.info(basename)
 
@@ -910,7 +909,7 @@ class ExecutorLiveRepo(Repository):
     async def delete(self, key):
         await self.task.cancel(key)
 
-    async def info(self, ident):
+    async def info(self, job):
         return None
 
 
@@ -975,8 +974,8 @@ class InProcessBlobRepository(BlobRepository):
         return None
 
     @job_getter
-    async def open(self, ident, mode="r"):
-        stream = InProcessBlobStream(self, ident)
+    async def open(self, job, mode="r"):
+        stream = InProcessBlobStream(self, job)
         if mode == "r":
             return AReadText(stream)
         elif mode == "w":

@@ -57,9 +57,10 @@ __all__ = (
     "InProcessSyncTask",
     "ExecutorTask",
     "KubeFunctionTask",
-    "settings",
     "STDOUT",
 )
+
+# pylint: disable=broad-except,bare-except
 
 
 class RepoHandlingMode(Enum):
@@ -95,21 +96,11 @@ async def render_template(template, env):
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
         async with aiofiles.open(template, "r") as fp:
-            template = await fp.read()
+            template_str = await fp.read()
     else:
-        template = template
-    templating = j.from_string(template)
+        template_str = template
+    templating = j.from_string(template_str)
     return await templating.render_async(**env)
-
-
-SYNCHRONOUS = False
-METADATA = True
-
-
-def settings(sync, meta):
-    global SYNCHRONOUS, METADATA
-    SYNCHRONOUS = sync
-    METADATA = meta
 
 
 @dataclass
@@ -129,6 +120,8 @@ class Task:
         self.name = name
         self._ready = ready
         self.links: Dict[str, Link] = {}
+        self.synchronous = False
+        self.metadata = True
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -241,16 +234,15 @@ class Task:
 
     async def update(self) -> bool:
         """
-        Performs any maintenance operations on the set of live tasks. Returns True if literally anything interesting happened.
+        Performs any maintenance operations on the set of live tasks.
+        Returns True if literally anything interesting happened.
         """
         return False
 
     async def validate(self):
         """
         Raise an exception if for any reason the task is misconfigured.
-        :return:
         """
-        pass
 
 
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
@@ -387,7 +379,7 @@ class KubeTask(Task):
                     l.debug("...timed out")
                     await self.handle_timeout(pod)
                     await self._cleanup(pod, "Timeout")
-            except:
+            except Exception:
                 l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
         return result
 
@@ -486,7 +478,7 @@ class ProcessTask(Task):
         try:
             live_pids = await self.manager.get_live_pids(expected_live)
         except Exception:
-            l.error(f"Could not load live PIDs for {self}", exc_info=True)
+            l.error("Could not load live PIDs for %s", self, exc_info=True)
         else:
             died = expected_live - live_pids
             for pid in died:
@@ -573,7 +565,7 @@ class ProcessTask(Task):
             await self.pids.delete(job)
             await self.resource_manager.relinquish(self.job_resources)
         except Exception:
-            l.error(f"Could not reap process for {self}:{job}", exc_info=True)
+            l.error("Could not reap process for %s:%s", self, job, exc_info=True)
 
 
 class FunctionTaskProtocol(Protocol):
@@ -634,7 +626,7 @@ class InProcessSyncTask(Task):
             result = {"result": "success"}
         result["start_time"] = start_time
         result["end_time"] = datetime.now()
-        if METADATA:
+        if self.metadata:
             await self.done.dump(job, result)
 
 
@@ -716,7 +708,7 @@ class ExecutorTask(Task):
         args = await build_env(args, job, RepoHandlingMode.SMART)
         start_time = datetime.now()
         running_job = self.executor.submit(self._timestamped_func, self.func, args)
-        if SYNCHRONOUS:
+        if self.synchronous:
             while not running_job.done():
                 await asyncio.sleep(0.1)
             await self._cleanup(running_job, job, start_time)
@@ -779,7 +771,7 @@ class KubeFunctionTask(KubeTask):
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def launch(self, job):
-        if SYNCHRONOUS:
+        if self.synchronous:
             await self.launch_sync(job)
         else:
             await super().launch(job)
@@ -805,5 +797,5 @@ class KubeFunctionTask(KubeTask):
             result = {"result": "success"}
         result["start_time"] = start_time
         result["end_time"] = datetime.now()
-        if METADATA:
+        if self.metadata:
             await self.func_done.dump(job, result)
