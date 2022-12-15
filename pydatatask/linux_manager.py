@@ -89,7 +89,7 @@ class LocalLinuxManager(AbstractLinuxManager):
             stderr = "&1"
         else:
             stderr = shlex.quote(stderr)
-        if '/' in args[0]:
+        if "/" in args[0]:
             os.chmod(args[0], 0o755)
         return_code = shlex.quote(return_code)
         p = await asyncio.create_subprocess_shell(
@@ -194,7 +194,7 @@ class SSHLinuxManager(AbstractLinuxManager):
             stderr = "&1"
         else:
             stderr = shlex.quote(stderr)
-        if '/' in args[0]:
+        if "/" in args[0]:
             async with self.ssh.start_sftp_client() as sftp:
                 await sftp.chmod(args[0], 0o755)
         p = await self.ssh.create_process(
