@@ -27,7 +27,7 @@ class Session:
 
     async def open(self):
         for name, manager in self._resource_defs.items():
-            self.resources[name] = await anext(manager)
+            self.resources[name] = await manager.__anext__()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
