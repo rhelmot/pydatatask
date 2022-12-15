@@ -23,6 +23,7 @@ __all__ = (
     "delete_data",
     "inject_data",
     "print_status",
+    "print_trace",
     "launch",
     "shell",
     "run",
