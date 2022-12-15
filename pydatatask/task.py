@@ -1,4 +1,5 @@
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Coroutine,
@@ -35,12 +36,16 @@ from .repository import (
     BlobRepository,
     BlockingRepository,
     ExecutorLiveRepo,
-    FileRepository,
     LiveKubeRepository,
     MetadataRepository,
     RelatedItemRepository,
     Repository,
+    async_copyfile,
 )
+
+if TYPE_CHECKING:
+    from .linux_manager import AbstractLinuxManager
+    from .resource_manager import ResourceManager, Resources
 
 l = logging.getLogger(__name__)
 
@@ -48,10 +53,12 @@ __all__ = (
     "Link",
     "Task",
     "KubeTask",
+    "ProcessTask",
     "InProcessSyncTask",
     "ExecutorTask",
     "KubeFunctionTask",
     "settings",
+    "STDOUT",
 )
 
 
@@ -78,6 +85,21 @@ async def build_env(env, job, mode: RepoHandlingMode):
         else:
             result[key] = await repo.info(job)
     return result
+
+
+async def render_template(template, env):
+    j = jinja2.Environment(
+        enable_async=True,
+        keep_trailing_newline=True,
+    )
+    j.code_generator_class = ParanoidAsyncGenerator
+    if await aiofiles.os.path.isfile(template):
+        async with aiofiles.open(template, "r") as fp:
+            template = await fp.read()
+    else:
+        template = template
+    templating = j.from_string(template)
+    return await templating.render_async(**env)
 
 
 SYNCHRONOUS = False
@@ -307,18 +329,6 @@ class KubeTask(Task):
     def podman(self):
         return self._podman()
 
-    async def render_template(self, env):
-        j = jinja2.Environment(enable_async=True)
-        j.code_generator_class = ParanoidAsyncGenerator
-        if await aiofiles.os.path.isfile(self.template):
-            async with aiofiles.open(self.template, "r") as fp:
-                template = await fp.read()
-        else:
-            template = self.template
-        template = j.from_string(template)
-        rendered = await template.render_async(**env)
-        return yaml.safe_load(rendered)
-
     async def launch(self, job):
         env_input = dict(vars(self))
         env_input.update(self.links)
@@ -327,7 +337,7 @@ class KubeTask(Task):
         env["job"] = job
         env["task"] = self.name
         env["argv0"] = os.path.basename(sys.argv[0])
-        parsed = await self.render_template(env)
+        parsed = yaml.safe_load(await render_template(self.template, env))
         for item in env.values():
             if asyncio.iscoroutine(item):
                 item.close()
@@ -392,34 +402,178 @@ class StderrIsStdout:
 STDOUT = StderrIsStdout()
 
 
-class LocalProcessTask(Task):
+class ProcessTask(Task):
     """
     A task that runs a script. The interpreter is specified by the shebang, or the default shell if none present.
+    The execution environment for the task is defined by the LinuxManager instance provided as an argument.
     """
 
     def __init__(
         self,
         name: str,
-        pids: FileRepository,
+        manager: Callable[[], "AbstractLinuxManager"],
+        resource_manager: "ResourceManager",
+        job_resources: "Resources",
+        pids: MetadataRepository,
         template: str,
-        done: Optional[FileRepository] = None,
-        stdout: Optional[FileRepository] = None,
-        stderr: Optional[Union[FileRepository, StderrIsStdout]] = None,
+        environ: Optional[Dict[str, str]] = None,
+        done: Optional[MetadataRepository] = None,
+        stdin: Optional[BlobRepository] = None,
+        stdout: Optional[BlobRepository] = None,
+        stderr: Optional[Union[BlobRepository, StderrIsStdout]] = None,
         ready: Optional[Repository] = None,
     ):
         super().__init__(name, ready=ready)
 
         self.pids = pids
         self.template = template
+        self.environ = environ
         self.done = done
+        self.stdin = stdin
         self.stdout = stdout
-        self.stderr = stderr
+        self._stderr = stderr
+        self.job_resources = job_resources
+        self.resource_manager = resource_manager
+        self._manager = manager
+        self._registered = False
+        self._lock = asyncio.Lock()
 
-    def update(self):
-        return False
+        self.link("pids", pids, is_status=True, inhibits_start=True, inhibits_output=True)
+        if stdin is not None:
+            self.link("stdin", stdin, is_input=True)
+        if stdout is not None:
+            self.link("stdout", stdout, is_output=True)
+        if isinstance(stderr, BlobRepository):
+            self.link("stderr", stderr, is_output=True)
+        if done is not None:
+            self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
 
-    def launch(self, job):
-        pass
+    async def validate(self):
+        async with self._lock:
+            if not self._registered:
+                self.resource_manager.register(self._get_load)
+                self._registered = True
+
+    @property
+    def manager(self):
+        return self._manager()
+
+    async def _get_load(self) -> "Resources":
+        count = 0
+        async for _ in self.pids:
+            count += 1
+        return self.job_resources * count
+
+    @property
+    def stderr(self):
+        if self._stderr is STDOUT:
+            return self.stdout
+        else:
+            return self._stderr
+
+    @property
+    def _unique_stderr(self):
+        return self._stderr is not None and not isinstance(self._stderr, StderrIsStdout)
+
+    @property
+    def basedir(self):
+        return self.manager.basedir / self.name
+
+    async def update(self):
+        job_map = await self.pids.info_all()
+        pid_map = {meta["pid"]: job for job, meta in job_map.items()}
+        expected_live = set(pid_map)
+        try:
+            live_pids = await self.manager.get_live_pids(expected_live)
+        except Exception:
+            l.error(f"Could not load live PIDs for {self}", exc_info=True)
+        else:
+            died = expected_live - live_pids
+            for pid in died:
+                job = pid_map[pid]
+                start_time = job_map[job]["start_time"]
+                await self.reap(job, start_time)
+        return bool(expected_live)
+
+    async def launch(self, job):
+        limit = await self.resource_manager.reserve(self.job_resources)
+        if limit is not None:
+            l.warning("Cannot launch %s:%s: %s limit", self, job, limit)
+            return
+
+        pid = None
+        dirmade = False
+
+        try:
+            cwd = self.basedir / job / "cwd"
+            await self.manager.mkdir(cwd)  # implicitly creates basedir / task / job
+            dirmade = True
+            stdin = None
+            if self.stdin is not None:
+                stdin = self.basedir / job / "stdin"
+                async with await self.stdin.open(job, "rb") as fpr, await self.manager.open(stdin, "wb") as fpw:
+                    await async_copyfile(fpr, fpw)
+                stdin = str(stdin)
+            stdout = None if self.stdout is None else str(self.basedir / job / "stdout")
+            stderr = STDOUT
+            if not isinstance(self._stderr, StderrIsStdout):
+                stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
+            env_src = dict(self.links)
+            env_src["job"] = job
+            env_src["task"] = self.name
+            env = await build_env(env_src, job, RepoHandlingMode.LAZY)
+            exe_path = self.basedir / job / "exe"
+            exe_txt = await render_template(self.template, env)
+            for item in env.values():
+                if asyncio.iscoroutine(item):
+                    item.close()
+            async with await self.manager.open(exe_path, "w") as fp:
+                await fp.write(exe_txt)
+            pid = await self.manager.spawn(
+                [str(exe_path)], self.environ, str(cwd), str(self.basedir / job / "return_code"), stdin, stdout, stderr
+            )
+            if pid is not None:
+                await self.pids.dump(job, {"pid": pid, "start_time": datetime.now(tz=timezone.utc)})
+        except:  # CLEAN UP YOUR MESS
+            try:
+                await self.resource_manager.relinquish(self.job_resources)
+            except:
+                pass
+            try:
+                if pid is not None:
+                    await self.manager.kill(pid)
+            except:
+                pass
+            try:
+                if dirmade:
+                    await self.manager.rmtree(self.basedir / job)
+            except:
+                pass
+            raise
+
+    async def reap(self, job: str, start_time: datetime):
+        try:
+            if self.stdout is not None:
+                async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
+                    job, "wb"
+                ) as fpw:
+                    await async_copyfile(fpr, fpw)
+            if self._unique_stderr:
+                async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr, await self.stderr.open(
+                    job, "wb"
+                ) as fpw:
+                    await async_copyfile(fpr, fpw)
+            if self.done is not None:
+                async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
+                    code = int(await fp1.read())
+                await self.done.dump(
+                    job, {"return_code": code, "start_time": start_time, "end_time": datetime.now(tz=timezone.utc)}
+                )
+            await self.manager.rmtree(self.basedir / job)
+            await self.pids.delete(job)
+            await self.resource_manager.relinquish(self.job_resources)
+        except Exception:
+            l.error(f"Could not reap process for {self}:{job}", exc_info=True)
 
 
 class FunctionTaskProtocol(Protocol):

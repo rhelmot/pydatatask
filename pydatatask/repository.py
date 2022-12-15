@@ -84,6 +84,14 @@ class AWriteStream(Protocol, AsyncContextManager):
         ...
 
 
+async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 1024):
+    while True:
+        data = await copyfrom.read(blocksize)
+        if not data:
+            break
+        await copyto.write(data)
+
+
 class AReadText:
     def __init__(
         self,
@@ -137,6 +145,14 @@ class AWriteText:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
+
+
+async def async_copyfile_str(copyfrom: AReadText, copyto: AWriteText, blocksize=1024 * 1024):
+    while True:
+        data = await copyfrom.read(blocksize)
+        if not data:
+            break
+        await copyto.write(data)
 
 
 async def roundrobin(iterables: List):
