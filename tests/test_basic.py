@@ -1,6 +1,6 @@
-import unittest
 import contextlib
 import io
+import unittest
 
 import aiofiles.os
 
@@ -55,7 +55,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
 
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
-            await pydatatask.print_trace(pipeline, False, ['0', '1', 'foo'])
+            await pydatatask.print_trace(pipeline, False, ["0", "1", "foo"])
         assert captured.getvalue() == "task\ntask.repo0 0 1\ntask.done 0 1\ntask.repo1 1\n\n"
 
 
