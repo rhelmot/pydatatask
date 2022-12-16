@@ -553,7 +553,7 @@ class KubeTask(Task):
 
     async def update(self):
         self.warned = False
-        result = await super().update()
+        result = False
 
         pods = await self.podman.query(task=self.name)
         for pod in pods:

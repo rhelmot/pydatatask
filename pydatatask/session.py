@@ -51,9 +51,9 @@ class Session:
         self._resource_defs[manager.__name__] = manager()
 
         def inner():
-            if manager not in self.resources:
+            if manager.__name__ not in self.resources:
                 raise Exception("Session is not open")
-            return self.resources[manager]
+            return self.resources[manager.__name__]
 
         return inner
 
