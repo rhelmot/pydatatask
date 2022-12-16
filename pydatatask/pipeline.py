@@ -124,12 +124,12 @@ class Pipeline:
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
         return any(gathered)
 
-    def graph(self) -> networkx.classes.digraph.DiGraph[Union[Repository, Task]]:
+    def graph(self) -> "networkx.classes.digraph.DiGraph[Union[Repository, Task]]":
         """
         Generate the dependency graph for a pipeline. This is a directed graph containing both repositories and tasks
         as nodes.
         """
-        result: networkx.classes.digraph.DiGraph[Union[Repository, Task]] = networkx.classes.digraph.DiGraph()
+        result: "networkx.classes.digraph.DiGraph[Union[Repository, Task]]" = networkx.classes.digraph.DiGraph()
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
