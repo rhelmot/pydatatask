@@ -529,9 +529,6 @@ class KubeTask(Task):
 
     async def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels["job"]
-        request = Resources()
-        for container in pod.spec.containers:
-            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"])
 
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
@@ -548,6 +545,16 @@ class KubeTask(Task):
                 "node": pod.spec.node_name,
             }
             await self.done.dump(job, data)
+
+        await self.delete(pod)
+
+    async def delete(self, pod: V1Pod):
+        """
+        Kill a pod and relinquish its resources without marking the task as complete.
+        """
+        request = Resources()
+        for container in pod.spec.containers:
+            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"])
         await self.podman.delete(pod)
         await self.resources.relinquish(request)
 
@@ -997,7 +1004,7 @@ class ExecutorTask(Task):
             self.jobs[running_job] = (job, start_time)
             self.rev_jobs[job] = running_job
 
-    def cancel(self, job):
+    async def cancel(self, job):
         """
         Stop the current job from running, or do nothing if it is not running.
         """

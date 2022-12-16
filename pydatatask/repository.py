@@ -45,6 +45,7 @@ import dxf
 import motor.motor_asyncio
 import yaml
 
+from .resource_manager import Resources
 from .utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
 
 if TYPE_CHECKING:
@@ -766,8 +767,9 @@ class LiveKubeRepository(Repository):
         Deleting a job from this repository will delete the pod.
         """
         pods = await self.task.podman.query(job=job, task=self.task.name)
+        request = Resources()
         for pod in pods:  # there... really should be only one
-            await self.task.podman.delete(pod)
+            await self.task.delete(pod)
         # while await self.task.podman.query(job=job, task=self.task.name):
         #    await asyncio.sleep(0.2)
 
