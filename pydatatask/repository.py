@@ -23,7 +23,7 @@ from typing import (
     Optional,
     overload,
 )
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 import base64
@@ -89,7 +89,7 @@ def job_getter(f):
     return f
 
 
-class Repository:
+class Repository(ABC):
     """
     A repository is a key-value store where the keys are names of jobs. Since the values have unspecified semantics, the
     only operations you can do on a generic repository are query for keys.
@@ -238,7 +238,7 @@ class MapRepository(Repository):
         return result
 
 
-class MetadataRepository(Repository):
+class MetadataRepository(Repository, ABC):
     """
     A metadata repository has values which are small, structured data, and loads them entirely into memory, returning
     the structured data from the ``info`` method.
@@ -259,7 +259,7 @@ class MetadataRepository(Repository):
         raise NotImplementedError
 
 
-class BlobRepository(Repository):
+class BlobRepository(Repository, ABC):
     """
     A blob repository has values which are flat data blobs that can be streamed for reading or writing.
     """
@@ -288,7 +288,7 @@ class BlobRepository(Repository):
         raise NotImplementedError
 
 
-class FileRepositoryBase(Repository):
+class FileRepositoryBase(Repository, ABC):
     """
     A file repository is a local directory where each job identifier is a filename, optionally suffixed with an
     extension before hitting the filesystem. This is an abstract base class for other file repositories which have more
@@ -883,7 +883,7 @@ class BlockingRepository(Repository):
         await self.source.delete(job)
 
 
-class YamlMetadataRepository(BlobRepository, MetadataRepository):
+class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
     """
     A metadata repository based on a blob repository. When info is accessed, it will **load the target file into
     memory**, parse it as yaml, and return the resulting object.

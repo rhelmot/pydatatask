@@ -111,7 +111,6 @@ max-line-length = 120
 
 [tool.pylint.'MESSAGES CONTROL']
 disable = [
-    "abstract-method",
     "invalid-name",
     "len-as-condition",
     "locally-disabled",

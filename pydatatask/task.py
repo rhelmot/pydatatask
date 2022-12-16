@@ -865,6 +865,9 @@ class InProcessSyncTask(Task):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
+    async def update(self):
+        pass
+
     async def launch(self, job):
         start_time = datetime.now()
         l.debug("Launching in-process %s:%s...", self.name, job)
