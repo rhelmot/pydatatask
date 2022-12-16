@@ -130,7 +130,4 @@ disable = [
     "too-many-statements",
     "unidiomatic-typecheck",
     "consider-using-f-string",
-    "missing-function-docstring",
-    "missing-module-docstring",
-    "missing-class-docstring",
 ]
