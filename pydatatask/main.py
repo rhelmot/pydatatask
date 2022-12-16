@@ -15,6 +15,7 @@ from .task import Task
 l = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")
 
+
 __all__ = (
     "main",
     "update",
