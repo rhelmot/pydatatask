@@ -27,7 +27,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
     async def test_derived(self):
         class DerivedRepository(pydatatask.Repository):
-            async def _unfiltered_iter(self):
+            async def unfiltered_iter(self):
                 yield "foo"
                 yield " "
 
@@ -42,7 +42,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
     async def test_map(self):
         class DerivedRepository(pydatatask.Repository):
-            async def _unfiltered_iter(self):
+            async def unfiltered_iter(self):
                 yield "foo"
                 yield "bar"
 

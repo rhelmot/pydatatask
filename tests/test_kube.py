@@ -113,7 +113,6 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         async with pipeline:
             await pydatatask.update(pipeline)
-            pipeline.session.resource("podman")().warned.clear()
             live = task.links["live"].repo
             launched = [x async for x in live]
             assert launched
@@ -121,8 +120,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             await pydatatask.delete_data(pipeline, "task", False, [launched[0]])
             while await live.contains(launched[0]):
                 await asyncio.sleep(1)
+
+            task.warned = False
             await task.launch(launched[0])
-            pipeline.session.resource("podman")().warned.clear()
             await asyncio.sleep(5)
             assert await live.contains(launched[0])
 

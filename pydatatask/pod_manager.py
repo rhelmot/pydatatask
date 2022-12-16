@@ -1,9 +1,13 @@
-from typing import Optional, Set, Union
-import asyncio
+"""
+In order for a ``KubeTask`` or a subclasse to connect, authenticate, and manage pods in a kubernetes cluster, it needs
+several resource references. the ``PodManager`` simplifies tracking the lifetimes of these resources.
+"""
+
+from typing import Callable, List, Optional
 import logging
 
-from kubernetes.utils import parse_quantity
-from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
+from kubernetes_asyncio.client import ApiClient, CoreV1Api, V1Pod
+from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
 
 l = logging.getLogger(__name__)
@@ -12,54 +16,78 @@ __all__ = ("PodManager",)
 
 
 class PodManager:
+    """
+    A pod manager allows multiple tasks to share a connection to a kubernetes cluster and manage pods on it.
+    """
+
     def __init__(
         self,
         app: str,
         namespace: str,
-        cpu_quota: Union[str, int] = "1",
-        mem_quota: Union[str, int] = "1Gi",
+        config: Optional[Callable[[], Configuration]] = None,
     ):
+        """
+        :param app: The app name string with which to label all created pods.
+        :param namespace: The namespace in which to create and query pods.
+        :param config: Optional: A callable returning a kubernetes configuration object. If not provided, will attempt
+                                 to use the "default" configuration, i.e. what is available after calling
+                                 ``await kubernetes_asyncio.config.load_kube_config()``.
+        """
         self.app = app
         self.namespace = namespace
-        self.cpu_quota = parse_quantity(cpu_quota)
-        self.mem_quota = parse_quantity(mem_quota)
+        self._config = config
+
         self._api: Optional[ApiClient] = None
         self._api_ws: Optional[WsApiClient] = None
-
-        self._cpu_usage = None
-        self._mem_usage = None
-
-        self.warned: Set[str] = set()
         self._v1 = None
         self._v1_ws = None
 
-        self.lock = asyncio.Lock()
-
     @property
     def api(self):
+        """
+        The current API client.
+        """
         if self._api is None:
-            self._api = ApiClient()
+            if self._config is None:
+                self._api = ApiClient()
+            else:
+                self._api = ApiClient(self._config())
         return self._api
 
     @property
-    def api_ws(self):
+    def api_ws(self) -> WsApiClient:
+        """
+        The current websocket-aware API client.
+        """
         if self._api_ws is None:
-            self._api_ws = WsApiClient()
+            if self._config is None:
+                self._api_ws = WsApiClient()
+            else:
+                self._api_ws = WsApiClient(self._config())
         return self._api_ws
 
     @property
-    def v1(self):
+    def v1(self) -> CoreV1Api:
+        """
+        A CoreV1Api instance associated with the current API client.
+        """
         if self._v1 is None:
             self._v1 = CoreV1Api(self.api)
         return self._v1
 
     @property
-    def v1_ws(self):
+    def v1_ws(self) -> CoreV1Api:
+        """
+        A CoreV1Api instance associated with the current websocket-aware API client.
+        """
         if self._v1_ws is None:
             self._v1_ws = CoreV1Api(self.api_ws)
         return self._v1_ws
 
     async def close(self):
+        """
+        Close the network connections associated with this podman.
+        """
         if self._api is not None:
             await self._api.close()
             self._api = None
@@ -67,57 +95,11 @@ class PodManager:
             await self._api_ws.close()
             self._api_ws = None
 
-    async def cpu_usage(self):
-        await self._load_usage()
-        return self._cpu_usage
-
-    async def mem_usage(self):
-        await self._load_usage()
-        return self._mem_usage
-
-    async def _load_usage(self):
-        async with self.lock:
-            if self._cpu_usage is not None:
-                return
-            cpu_usage = mem_usage = 0
-
-            try:
-                for pod in (await self.v1.list_namespaced_pod(self.namespace, label_selector="app=" + self.app)).items:
-                    for container in pod.spec.containers:
-                        cpu_usage += parse_quantity(container.resources.requests["cpu"])
-                        mem_usage += parse_quantity(container.resources.requests["memory"])
-            except ApiException as e:
-                if e.reason != "Forbidden":
-                    raise
-            finally:
-                self._cpu_usage = cpu_usage
-                self._mem_usage = mem_usage
-
     async def launch(self, job, task, manifest):
+        """
+        Create a pod with the given manifest, named and labeled for this podman's app and the given job and task.
+        """
         assert manifest["kind"] == "Pod"
-        spec = manifest["spec"]
-        spec["restartPolicy"] = "Never"
-
-        cpu_request = 0
-        mem_request = 0
-        for container in spec["containers"]:
-            cpu_request += parse_quantity(container["resources"]["requests"]["cpu"])
-            mem_request += parse_quantity(container["resources"]["requests"]["memory"])
-
-        await self._load_usage()
-        async with self.lock:
-            if cpu_request + self._cpu_usage > self.cpu_quota:
-                if task not in self.warned:
-                    self.warned.add(task)
-                    l.info("Cannot launch %s - cpu limit", task)
-                return False
-            if mem_request + self._mem_usage > self.mem_quota:
-                if task not in self.warned:
-                    self.warned.add(task)
-                    l.info("Cannot launch %s - memory limit", task)
-                return False
-            self._cpu_usage += cpu_request
-            self._mem_usage += mem_request
 
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
@@ -133,9 +115,11 @@ class PodManager:
 
         l.info("Creating task %s for job %s", task, job)
         await self.v1.create_namespaced_pod(self.namespace, manifest)
-        return True
 
-    async def query(self, job=None, task=None):
+    async def query(self, job=None, task=None) -> List[V1Pod]:
+        """
+        Return a list of pods labeled for this podman's app and (optional) the given job and task.
+        """
         selectors = ["app=" + self.app]
         if job is not None:
             selectors.append("job=" + job)
@@ -144,13 +128,14 @@ class PodManager:
         selector = ",".join(selectors)
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 
-    async def delete(self, pod):
+    async def delete(self, pod: V1Pod):
+        """
+        Destroy the given pod.
+        """
         await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
-        await self._load_usage()  # load into self
-        async with self.lock:
-            for container in pod.spec.containers:
-                self._cpu_usage -= parse_quantity(container.resources.requests["cpu"])
-                self._mem_usage -= parse_quantity(container.resources.requests["memory"])
 
-    async def logs(self, pod, timeout=10):
+    async def logs(self, pod: V1Pod, timeout=10) -> str:
+        """
+        Retrieve the logs for the given pod.
+        """
         return await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)
