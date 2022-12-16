@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 
 import aiofiles.os
@@ -45,6 +47,16 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         assert len([x async for x in repo0]) == 100
         await repo1.delete("0")
         assert len([x async for x in repo1]) == 99
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            await pydatatask.print_status(pipeline, False)
+        assert captured.getvalue() == "task\ntask.repo0 100\ntask.done 100\ntask.repo1 99\n\n"
+
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            await pydatatask.print_trace(pipeline, False, ["0", "1", "foo"])
+        assert captured.getvalue() == "task\ntask.repo0 0 1\ntask.done 0 1\ntask.repo1 1\n\n"
 
 
 if __name__ == "__main__":

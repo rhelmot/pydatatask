@@ -8,11 +8,9 @@ import sys
 import IPython
 import yaml
 
-import pydatatask
-
 from .pipeline import Pipeline
 from .repository import BlobRepository, MetadataRepository, Repository
-from .task import Task, settings
+from .task import Task
 
 l = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")
@@ -25,6 +23,7 @@ __all__ = (
     "delete_data",
     "inject_data",
     "print_status",
+    "print_trace",
     "launch",
     "shell",
     "run",
@@ -137,6 +136,7 @@ async def main_inner(pipeline, coro):
 
 
 def shell(pipeline: Pipeline):
+    pydatatask = __import__("pydatatask")
     assert pipeline
     assert pydatatask
     IPython.embed(using="asyncio")
@@ -157,33 +157,54 @@ async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Opt
             raise TimeoutError("Pipeline run timeout")
 
 
+def get_repos(pipeline: Pipeline, all_repos: bool):
+    seen = set()
+    for task in pipeline.tasks.values():
+        for link in task.links.values():
+            if not all_repos and not link.is_status and not link.is_input and not link.is_output:
+                continue
+            if link.repo in seen:
+                continue
+            seen.add(link.repo)
+            yield link.repo
+
+
 async def print_status(pipeline: Pipeline, all_repos: bool):
-    for task in pipeline.tasks.values():  # TODO parallelize - waiting on repos to be a top-level abstraction
+    async def inner(repo: Repository):
+        the_sum = 0
+        async for _ in repo:
+            the_sum += 1
+        return the_sum
+
+    repo_list = list(get_repos(pipeline, all_repos))
+    repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
+
+    for task in pipeline.tasks.values():
         print(task.name)
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
-            if not all_repos and not link.is_status and not link.is_input and not link.is_output:
-                continue
-            the_sum = 0
-            async for _ in link.repo:
-                the_sum += 1
-            print(f"{task.name}.{link_name} {the_sum}")
+            if link.repo in repo_sizes:
+                print(f"{task.name}.{link_name} {repo_sizes[link.repo]}")
         print()
 
 
 async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
-    for task in pipeline.tasks.values():  # TODO parallelize - waiting on repos to be a top-level abstraction
+    async def inner(repo: Repository):
+        return [j for j in job if await repo.contains(j)]
+
+    repo_list = list(get_repos(pipeline, all_repos))
+    repo_members = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
+
+    for task in pipeline.tasks.values():
         print(task.name)
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
-            if not all_repos and not link.is_status and not link.is_input and not link.is_output:
-                continue
-            jobs = [j for j in job if await link.repo.contains(j)]
-            print(f'{task.name}.{link_name} {" ".join(jobs)}')
+            if link.repo in repo_members:
+                print(f"{task.name}.{link_name} {' '.join(repo_members[link.repo])}")
         print()
 
 
@@ -204,11 +225,11 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
                 jobs = job
                 check = True
 
-            async def del_job(j):
-                await dependant.delete(j)
-                print(j, dependant)
+            async def del_job(j, dep):
+                await dep.delete(j)
+                print(j, dep)
 
-            await asyncio.gather(*[del_job(j) for j in jobs if not check or await dependant.contains(j)])
+            await asyncio.gather(*[del_job(j, dependant) for j in jobs if not check or await dependant.contains(j)])
 
 
 async def list_data(pipeline: Pipeline, data: List[str]):
@@ -218,7 +239,7 @@ async def list_data(pipeline: Pipeline, data: List[str]):
     for token in tokens:
         task, repo = token.split(".")
         await namespace[task].consume(repo)
-    result = eval(input_text, {}, namespace)
+    result = eval(input_text, {}, namespace)  # pylint: disable=eval-used
 
     for job in sorted(result):
         print(job)
@@ -264,7 +285,7 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
     item = pipeline.tasks[taskname].links[reponame].repo
 
     if isinstance(item, BlobRepository):
-        with item.open(job, "wb") as fp:
+        async with await item.open(job, "wb") as fp:
             while True:
                 data_bytes = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.buffer.read, 1024 * 1024)
                 if not data:
@@ -284,8 +305,7 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
 
 async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool):
     task = pipeline.tasks[task_name]
-    job = job
-    settings(sync, meta)
+    pipeline.settings(sync, meta)
 
     if force or await task.ready.contains(job):
         await task.launch(job)

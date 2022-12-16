@@ -20,6 +20,11 @@ class Pipeline:
         self._opened = False
         self.session = session
 
+    def settings(self, synchronous=False, metadata=True):
+        for task in self.tasks.values():
+            task.synchronous = synchronous
+            task.metadata = metadata
+
     async def validate(self):
         seen_repos = set()
         for task in self.tasks.values():
@@ -79,6 +84,7 @@ class Pipeline:
             result.add_node(task)
             for link_name, link in task.links.items():
                 attrs = dict(vars(link))
+                attrs["link_name"] = link_name
                 repo = attrs.pop("repo")
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
                     result.add_edge(repo, task, **attrs)

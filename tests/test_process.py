@@ -121,7 +121,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
                 "No minio endpoint configured and docker failed to launch linuxserver/openssh-server:latest"
             )
         self.docker_name = name
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
 
     async def test_ssh_process(self):
         session = pydatatask.Session()
