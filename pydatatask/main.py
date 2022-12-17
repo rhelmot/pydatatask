@@ -1,3 +1,31 @@
+"""
+The top-level script you write using pydatatask should call `pydatatask.main.main` in its ``if __name__ == '__main__'``
+block. This will parse ``sys.argv`` and display the administration interface for the pipeline.
+
+The help screen should look something like this:
+
+.. code::
+
+    $ python3 main.py --help
+      usage: main.py [-h] {update,run,status,trace,rm,ls,cat,inject,launch,shell} ...
+
+    positional arguments:
+      {update,run,status,trace,rm,ls,cat,inject,launch,shell}
+        update              Keep the pipeline in motion
+        run                 Run update in a loop until everything is quiet
+        status              View the pipeline status
+        trace               Track a job's progress through the pipeline
+        rm                  Delete data from the pipeline
+        ls                  List jobs in a repository
+        cat                 Print data from a repository
+        inject              Dump data into a repository
+        launch              Manually start a task
+        shell               Launch an interactive shell to interrogate the pipeline
+
+    options:
+      -h, --help            show this help message and exit
+"""
+
 from typing import Callable, Dict, List, Optional, Set, Union
 import argparse
 import asyncio
@@ -29,11 +57,19 @@ __all__ = (
     "run",
 )
 
+# pylint: disable=missing-function-docstring,missing-class-docstring
+
 
 def main(
     pipeline: Pipeline,
     instrument: Optional[Callable[[argparse._SubParsersAction], None]] = None,
 ):
+    """
+    The pydatatask main function! Call this with the pipeline you've constructed to parse ``sys.argv`` and display the
+    pipeline administration interface.
+
+    If you like, you can pass as the ``instrument`` argument a function which will add additional commands to the menu.
+    """
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 

@@ -1,9 +1,14 @@
+"""
+A pipeline is just an unordered collection of tasks. Relationships between the tasks are implicit, defined by which
+repositories they share.
+"""
+
 from typing import Dict, Iterable, Union
 import asyncio
 import logging
 
-import networkx
 import networkx.algorithms.traversal.depth_first_search
+import networkx.classes.digraph
 
 from .repository import Repository
 from .session import Session
@@ -15,17 +20,32 @@ __all__ = ("Pipeline",)
 
 
 class Pipeline:
+    """
+    The pipeline class.
+    """
+
     def __init__(self, tasks: Iterable[Task], session: Session):
+        """
+        :param tasks: The tasks which make up this pipeline.
+        :param session: The session to open while this pipeline is active.
+        """
         self.tasks: Dict[str, Task] = {task.name: task for task in tasks}
         self._opened = False
         self.session = session
 
     def settings(self, synchronous=False, metadata=True):
+        """
+        This method can be called to set properties of the current run.
+
+        :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before
+                            a launch phase succeeds.
+        :param metadata: Whether jobs will store their completion metadata.
+        """
         for task in self.tasks.values():
             task.synchronous = synchronous
             task.metadata = metadata
 
-    async def validate(self):
+    async def _validate(self):
         seen_repos = set()
         for task in self.tasks.values():
             await task.validate()
@@ -39,11 +59,15 @@ class Pipeline:
         await self.open()
 
     async def open(self):
+        """
+        Opens the pipeline and its associated resource session. This will be automatically when entering an
+        ``async with pipeline:`` block.
+        """
         if self._opened:
             raise Exception("Pipeline is alredy used")
         self._opened = True
         await self.session.open()
-        await self.validate()
+        await self._validate()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_val is not None:
@@ -51,9 +75,19 @@ class Pipeline:
         await self.close()
 
     async def close(self):
+        """
+        Closes the pipeline and its associated resource session. This will be automatically called when exiting an
+        ``async with pipeline:`` block.
+        """
         await self.session.close()
 
-    async def update(self):
+    async def update(self) -> bool:
+        """
+        Perform one round of pipeline maintenance, running the update phase and then the launch phase. The pipeline must
+        be opened for this function to run.
+
+        :return: Whether there is any activity in the pipeline.
+        """
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
@@ -62,7 +96,13 @@ class Pipeline:
         l.debug("Completed update")
         return result
 
-    async def update_only_update(self):
+    async def update_only_update(self) -> bool:
+        """
+        Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this function to
+        run.
+
+        :return: Whether there were any live jobs.
+        """
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
@@ -71,6 +111,12 @@ class Pipeline:
         return any(gathered)
 
     async def update_only_launch(self):
+        """
+        Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this function to
+        run.
+
+        :return: Whether there were any jobs launched or ready to launch.
+        """
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
@@ -78,8 +124,12 @@ class Pipeline:
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
         return any(gathered)
 
-    def graph(self):
-        result = networkx.DiGraph()
+    def graph(self) -> "networkx.classes.digraph.DiGraph[Union[Repository, Task]]":
+        """
+        Generate the dependency graph for a pipeline. This is a directed graph containing both repositories and tasks
+        as nodes.
+        """
+        result: "networkx.classes.digraph.DiGraph[Union[Repository, Task]]" = networkx.classes.digraph.DiGraph()
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
@@ -95,10 +145,16 @@ class Pipeline:
 
         return result
 
-    def dependants(self, repo: Union[Repository, Task], recursive: bool):
+    def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:
+        """
+        Iterate the list of repositories that are dependent on the given node of the dependency graph.
+
+        :param node: The starting point of the graph traversal.
+        :param recursive: Whether to return only direct dependencies (False) or transitive dependencies (True) of node.
+        """
         graph = self.graph()
         if recursive:
-            yield from networkx.algorithms.traversal.depth_first_search.dfs_preorder_nodes(graph, source=repo)
+            yield from networkx.algorithms.traversal.depth_first_search.dfs_preorder_nodes(graph, source=node)
         else:
-            yield repo
-            yield from graph.successors(repo)
+            yield node
+            yield from graph.successors(node)

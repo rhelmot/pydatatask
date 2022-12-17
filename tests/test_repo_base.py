@@ -5,31 +5,17 @@ import pydatatask
 
 
 class TestRepoBase(unittest.IsolatedAsyncioTestCase):
-    async def test_base(self):
-        repo = pydatatask.Repository()
-        blob = pydatatask.BlobRepository()
-        meta = pydatatask.MetadataRepository()
-
-        with self.assertRaises(NotImplementedError):
-            await repo.info("weh")
-        with self.assertRaises(NotImplementedError):
-            await repo.delete("weh")
-        with self.assertRaises(NotImplementedError):
-            await repo.contains("weh")
-        with self.assertRaises(NotImplementedError):
-            await repo.info_all()
-        with self.assertRaises(NotImplementedError):
-            await blob.open("weh")
-        with self.assertRaises(NotImplementedError):
-            await meta.info("weh")
-        with self.assertRaises(NotImplementedError):
-            await meta.dump("weh", {})
-
     async def test_derived(self):
         class DerivedRepository(pydatatask.Repository):
-            async def _unfiltered_iter(self):
+            async def unfiltered_iter(self):
                 yield "foo"
                 yield " "
+
+            async def delete(self, job):
+                pass
+
+            async def info(self, job):
+                return None
 
         repo = DerivedRepository()
 
@@ -42,7 +28,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
     async def test_map(self):
         class DerivedRepository(pydatatask.Repository):
-            async def _unfiltered_iter(self):
+            async def unfiltered_iter(self):
                 yield "foo"
                 yield "bar"
 

@@ -1,3 +1,16 @@
+"""
+A Task is a unit of execution which can act on multiple repositories.
+
+You define a task by instantiating a Task subclass and passing it to a Pipeline object.
+
+Tasks are related to Repositories by Links. Links are created by
+``Task.link("my_link_name", my_repository, **disposition)``. The main disposition kwargs you'll want to use are
+``is_input`` and ``is_output``. See `Task.link` for more information.
+
+For a shortcut for linking the output of one task as the input of another task, see `Task.plug`.
+
+.. autodata:: STDOUT
+"""
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -10,6 +23,7 @@ from typing import (
     Tuple,
     Union,
 )
+from abc import abstractmethod
 from asyncio import Future
 from concurrent.futures import FIRST_EXCEPTION, Executor, wait
 from dataclasses import dataclass
@@ -23,7 +37,7 @@ import os
 import sys
 import traceback
 
-from kubernetes_asyncio.client import V1Pod
+from kubernetes_asyncio.client import ApiException, V1Pod
 import aiofiles.os
 import jinja2.async_utils
 import jinja2.compiler
@@ -40,12 +54,12 @@ from .repository import (
     MetadataRepository,
     RelatedItemRepository,
     Repository,
-    async_copyfile,
 )
+from .resource_manager import ResourceManager, Resources
+from .utils import async_copyfile
 
 if TYPE_CHECKING:
-    from .linux_manager import AbstractLinuxManager
-    from .resource_manager import ResourceManager, Resources
+    from .proc_manager import AbstractProcessManager
 
 l = logging.getLogger(__name__)
 
@@ -64,12 +78,24 @@ __all__ = (
 
 
 class RepoHandlingMode(Enum):
+    """
+    Mode for the `build_env` function.
+
+    LAZY = Build repositories and links into repository references
+    SMART = Build repositories and links into un-awaited `info` coroutines.
+    EAGER = Build repositories and links into awaited `info` values.
+    """
+
     LAZY = auto()
     SMART = auto()
     EAGER = auto()
 
 
-async def build_env(env, job, mode: RepoHandlingMode):
+async def build_env(env: Dict[str, Any], job: str, mode: RepoHandlingMode) -> Dict[str, Any]:
+    """
+    Given a mapping from environment key names to values that can be used during templating. The way repositories are
+    transformed into job-related information is controlled by the `RepoHandlingMode`.
+    """
     result = {}
     for key, val in env.items():
         if isinstance(val, Repository):
@@ -88,7 +114,14 @@ async def build_env(env, job, mode: RepoHandlingMode):
     return result
 
 
-async def render_template(template, env):
+async def render_template(template, env: Dict[str, Any]):
+    """
+    Given a template and an environment, use jinja2 to parameterize the template with the environment.
+
+    :param template:  A template string, or a path to a local template file.
+    :param env:       A mapping from environment key names to values.
+    :return:          The rendered template, as a string.
+    """
     j = jinja2.Environment(
         enable_async=True,
         keep_trailing_newline=True,
@@ -105,6 +138,11 @@ async def render_template(template, env):
 
 @dataclass
 class Link:
+    """
+    The dataclass for holding linked repositories and their disposition metadata. Don't create these manually, instead
+    use `Task.link`.
+    """
+
     repo: Repository
     is_input: bool = False
     is_output: bool = False
@@ -116,6 +154,10 @@ class Link:
 
 
 class Task:
+    """
+    The Task base class.
+    """
+
     def __init__(self, name: str, ready: Optional[Repository] = None):
         self.name = name
         self._ready = ready
@@ -128,6 +170,11 @@ class Task:
 
     @property
     def ready(self):
+        """
+        Return the repository whose job membership is used to determine whether a task instance should be launched.
+        If an override is provided to the constructor, this is that, otherwise it is
+        ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
+        """
         if self._ready is not None:
             return self._ready
         return BlockingRepository(
@@ -139,14 +186,31 @@ class Task:
         self,
         name: str,
         repo: Repository,
-        is_input=False,
-        is_output=False,
-        is_status=False,
-        inhibits_start=False,
-        required_for_start=None,
-        inhibits_output=False,
-        required_for_output=None,
+        is_input: bool = False,
+        is_output: bool = False,
+        is_status: bool = False,
+        inhibits_start: bool = False,
+        required_for_start: Optional[bool] = None,
+        inhibits_output: bool = False,
+        required_for_output: Optional[bool] = None,
     ):
+        """
+        Create a link between this task and a repository.
+
+        :param name: The name of the link. Used only in the admin interface.
+        :param repo: The repository to link.
+        :param is_input: Whether this repository contains data which is consumed by the task. Default False.
+        :param is_output: Whether this repository is populated by the task. Default False.
+        :param is_status: Whether this task is populated with task-ephemeral data. Default False.
+        :param inhibits_start: Whether membership in this repository should be used in the default ``ready`` repository
+                               to prevent jobs for being launched. Default False.
+        :param required_for_start: Whether membership in this repository should be used in the default ``ready``
+                                   repository to allow jobs to be launched. If unspecified, defaults to ``is_input``.
+        :param inhibits_output:     Whether this repository should become ``inhibits_start`` in tasks this task is
+                                    plugged into. Default False.
+        :param required_for_output: Whether this repository should become `required_for_start` in tasks this task is
+                                    plugged into. If unspecified, defaults to ``is_output``.
+        """
         if required_for_start is None:
             required_for_start = is_input
         if required_for_output is None:
@@ -172,6 +236,20 @@ class Task:
         translate_allow_deletes=False,
         translate_prefetch_lookup=True,
     ):
+        """
+        Link the output repositories from `output` as inputs to this task.
+
+        :param output:  The task to plug into this one.
+        :param output_links: Optional: An iterable allowlist of links to only use.
+        :param meta: Whether to transfer repository inhibit- and required_for- dispositions. Default True.
+        :param translator: Optional: A repository used to transform job identifiers. If this is provided, a job will be
+                           said to be present in the resulting linked repository if the source repository contains the
+                           key ``await translator.info(job)``.
+        :param translate_allow_deletes:  If translator is provided, this controls whether attempts to delete from the
+                                         translated repository will do anything. Default False.
+        :param translate_prefetch_lookup: If translator is provided, this controls whether the translated repository
+                                          will pre-fetch the list of translations on first access. Default True.
+        """
         for name, link in output.links.items():
             link_attrs = {}
             if link.inhibits_output and meta:
@@ -195,29 +273,76 @@ class Task:
 
     @property
     def input(self):
+        """
+        A mapping from link name to repository for all links marked ``is_input``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.is_input}
 
     @property
     def output(self):
+        """
+        A mapping from link name to repository for all links marked ``is_output``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.is_output}
 
     @property
     def status(self):
+        """
+        A mapping from link name to repository for all links marked ``is_status``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.is_status}
 
     @property
     def inhibits_start(self):
+        """
+        A mapping from link name to repository for all links marked ``inhibits_start``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.inhibits_start}
 
     @property
     def required_for_start(self):
+        """
+        A mapping from link name to repository for all links marked ``required_for_start``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.required_for_start}
 
     @property
     def inhibits_output(self):
+        """
+        A mapping from link name to repository for all links marked ``inhibits_output``.
+        """
         return {name: link.repo for name, link in self.links.items() if link.inhibits_output}
 
+    @property
+    def required_for_output(self):
+        """
+        A mapping from link name to repository for all links marked ``required_for_output``.
+        """
+        return {name: link.repo for name, link in self.links.items() if link.required_for_output}
+
+    async def validate(self):
+        """
+        Raise an exception if for any reason the task is misconfigured. This is guaranteed to be called exactly once per
+        pipeline, so it is safe to use for setup and initialization in an async context.
+        """
+
+    @abstractmethod
+    async def update(self) -> bool:
+        """
+        Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set of
+        live tasks. Typically, this entails reaping finished processes.
+
+        Returns True if literally anything interesting happened, or if there are any live tasks.
+        """
+        raise NotImplementedError
+
     async def launch_all(self):
+        """
+        Part two of the pipeline maintenance loop. Do not override this; the default implementation is typically pretty
+        good - it enumerates `ready` and calls `launch` for each ready job.
+
+        Returns True if there were any jobs to launch.
+        """
         launchers = [self._launch(job) async for job in self.ready]
         await asyncio.gather(*launchers)
         return bool(launchers)
@@ -229,23 +354,20 @@ class Task:
         except:
             l.exception("Failed to launch %s:%s", self, job)
 
+    @abstractmethod
     async def launch(self, job):
+        """
+        Launch a job. Override this to begin execution of the provided job. Error handling will be done for you.
+        """
         raise NotImplementedError
-
-    async def update(self) -> bool:
-        """
-        Performs any maintenance operations on the set of live tasks.
-        Returns True if literally anything interesting happened.
-        """
-        return False
-
-    async def validate(self):
-        """
-        Raise an exception if for any reason the task is misconfigured.
-        """
 
 
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
+    """
+    A class to instrument jinja2 to be more aggressive about awaiting objects and to cache their results. Probably
+    don't use this directly.
+    """
+
     def write_commons(self):
         self.writeline("from jinja2.async_utils import _common_primitives")
         self.writeline("import inspect")
@@ -273,10 +395,18 @@ class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
 
 
 class KubeTask(Task):
+    """
+    A task which runs a kubernetes pod.
+
+    Will automatically link a `LiveKubeRepository` as "live" with
+    ``inhibits_start, inhibits_output, is_status``
+    """
+
     def __init__(
         self,
-        podman: Callable[[], PodManager],
         name: str,
+        podman: Callable[[], PodManager],
+        resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional[BlobRepository],
         done: Optional[MetadataRepository],
@@ -284,14 +414,36 @@ class KubeTask(Task):
         env: Optional[Dict[str, Any]] = None,
         ready: Optional[Repository] = None,
     ):
+        """
+        :param name: The name of the task.
+        :param podman: A callable returning a PodManager to use to connect to the cluster.
+        :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
+                          would break the quota.
+        :param template: YAML markup for a pod manifest template, either as a string or a path to a file.
+        :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
+                               ``inhibits_start, required_for_output, is_status``.
+        :param done: A MetadataRepository in which to dump some information about the pod's lifetime and termination on
+                     completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
+        :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it will
+                        be timed out and stopped. The method `handle_timeout` will be called in-process.
+        :param env:     Optional: Additional keys to add to the template environment.
+        :param ready:   Optional: A repository from which to read task-ready status.
+
+        It is highly recommended to provide one or more of ``done`` or ``logs`` so that at least one link is present
+        with ``inhibits_start``.
+        """
         super().__init__(name, ready)
 
         self.template = template
+        self.resources = resources
         self._podman = podman
         self.logs = logs
         self.timeout = timeout
         self.done = done
         self.env = env if env is not None else {}
+        self.warned = False
+
+        self.resources.register(self._get_load)
 
         self.link(
             "live",
@@ -318,8 +470,30 @@ class KubeTask(Task):
             )
 
     @property
-    def podman(self):
+    def podman(self) -> PodManager:
+        """
+        The pod manager instance for this task. Will raise an error if the manager is provided by an unopened session.
+        """
         return self._podman()
+
+    async def _get_load(self):
+        usage = Resources()
+
+        try:
+            for pod in (
+                await self.podman.v1.list_namespaced_pod(
+                    self.podman.namespace, label_selector=f"app={self.podman.app},task={self.name}"
+                )
+            ).items:
+                for container in pod.spec.containers:
+                    usage += Resources.parse(
+                        container.resources.requests["cpu"], container.resources.requests["memory"]
+                    )
+        except ApiException as e:
+            if e.reason != "Forbidden":
+                raise
+
+        return usage
 
     async def launch(self, job):
         env_input = dict(vars(self))
@@ -329,15 +503,35 @@ class KubeTask(Task):
         env["job"] = job
         env["task"] = self.name
         env["argv0"] = os.path.basename(sys.argv[0])
-        parsed = yaml.safe_load(await render_template(self.template, env))
+        manifest = yaml.safe_load(await render_template(self.template, env))
         for item in env.values():
             if asyncio.iscoroutine(item):
                 item.close()
 
-        await self.podman.launch(job, self.name, parsed)
+        assert manifest["kind"] == "Pod"
+        spec = manifest["spec"]
+        spec["restartPolicy"] = "Never"
+
+        request = Resources()
+        for container in spec["containers"]:
+            request += Resources.parse(
+                container["resources"]["requests"]["cpu"], container["resources"]["requests"]["memory"]
+            )
+
+        limit = await self.resources.reserve(request)
+        if limit is None:
+            try:
+                await self.podman.launch(job, self.name, manifest)
+            except:
+                await self.resources.relinquish(request)
+                raise
+        elif not self.warned:
+            l.warning("Cannot launch %s: %s limit", self, limit)
+            self.warned = True
 
     async def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels["job"]
+
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
                 try:
@@ -353,11 +547,22 @@ class KubeTask(Task):
                 "node": pod.spec.node_name,
             }
             await self.done.dump(job, data)
+
+        await self.delete(pod)
+
+    async def delete(self, pod: V1Pod):
+        """
+        Kill a pod and relinquish its resources without marking the task as complete.
+        """
+        request = Resources()
+        for container in pod.spec.containers:
+            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"])
         await self.podman.delete(pod)
+        await self.resources.relinquish(request)
 
     async def update(self):
-        self.podman.warned.clear()
-        result = await super().update()
+        self.warned = False
+        result = False
 
         pods = await self.podman.query(task=self.name)
         for pod in pods:
@@ -383,27 +588,30 @@ class KubeTask(Task):
                 l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
         return result
 
-    async def handle_timeout(self, pod):
-        pass
+    async def handle_timeout(self, pod: V1Pod):
+        """
+        You may override this method in a subclass, and it will be called whenever a pod times out. You can use this
+        method to e.g. scrape in-progress data out of the pod via an exec.
+        """
 
 
-class StderrIsStdout:
+class _StderrIsStdout:
     pass
 
 
-STDOUT = StderrIsStdout()
+STDOUT = _StderrIsStdout()
 
 
 class ProcessTask(Task):
     """
     A task that runs a script. The interpreter is specified by the shebang, or the default shell if none present.
-    The execution environment for the task is defined by the LinuxManager instance provided as an argument.
+    The execution environment for the task is defined by the ProcessManager instance provided as an argument.
     """
 
     def __init__(
         self,
         name: str,
-        manager: Callable[[], "AbstractLinuxManager"],
+        manager: Callable[[], "AbstractProcessManager"],
         resource_manager: "ResourceManager",
         job_resources: "Resources",
         pids: MetadataRepository,
@@ -412,9 +620,40 @@ class ProcessTask(Task):
         done: Optional[MetadataRepository] = None,
         stdin: Optional[BlobRepository] = None,
         stdout: Optional[BlobRepository] = None,
-        stderr: Optional[Union[BlobRepository, StderrIsStdout]] = None,
+        stderr: Optional[Union[BlobRepository, _StderrIsStdout]] = None,
         ready: Optional[Repository] = None,
     ):
+        """
+        :param name: The name of this task.
+        :param manager: A callable returnint the process manager with control over the target execution environment.
+        :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
+                                 if they would break the quota.
+        :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
+                              is currently **not enforced** target-side, so jobs may actually take up more resources
+                              than assigned.
+        :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
+                     linked as "pids" with ``is_status, inhibits_start, inhibits_output``.
+        :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
+        :param environ: Additional environment variables to set on the target machine before running the task.
+        :param done: Optional: A metadata repository in which to dump some information about the process's lifetime and
+                     termination on completion. Linked as "done" with
+                     ``inhibits_start, required_for_output, is_status``.
+        :param stdin: Optional: A blob repository from which to source the process' standard input. The content will be
+                      preloaded and transferred to the target environment, so the target does not need to be
+                      authenticated to this repository. Linked as "stdin" with ``is_input``.
+        :param stdout: Optional: A blob repository into which to dump the process' standard output. The content will be
+                       transferred from the target environment on completion, so the target does not need to be
+                       authenticated to this repository. Linked as "stdout" with ``is_output``.
+        :param stderr: Optional: A blob repository into which to dump the process' standard error, or the constant
+                       `pydatatask.task.STDOUT` to indicate that the stream should be interleaved with stdout.
+                       Otherwise, the content will be transferred from the target environment on completion, so the
+                       target does not need to be authenticated to this repository. Linked as "stderr" with
+                       ``is_output``.
+        :param ready:  Optional: A repository from which to read task-ready status.
+
+        It is highly recommended to provide at least one of ``done``, ``stdout``, or ``stderr``, so that at least one
+        link is present with ``inhibits_start``.
+        """
         super().__init__(name, ready=ready)
 
         self.pids = pids
@@ -427,8 +666,9 @@ class ProcessTask(Task):
         self.job_resources = job_resources
         self.resource_manager = resource_manager
         self._manager = manager
-        self._registered = False
-        self._lock = asyncio.Lock()
+        self.warned = False
+
+        self.resource_manager.register(self._get_load)
 
         self.link("pids", pids, is_status=True, inhibits_start=True, inhibits_output=True)
         if stdin is not None:
@@ -440,14 +680,11 @@ class ProcessTask(Task):
         if done is not None:
             self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
 
-    async def validate(self):
-        async with self._lock:
-            if not self._registered:
-                self.resource_manager.register(self._get_load)
-                self._registered = True
-
     @property
-    def manager(self):
+    def manager(self) -> "AbstractProcessManager":
+        """
+        The process manager for this task. Will raise an error if the manager comes from a session which is closed.
+        """
         return self._manager()
 
     async def _get_load(self) -> "Resources":
@@ -457,21 +694,28 @@ class ProcessTask(Task):
         return self.job_resources * count
 
     @property
-    def stderr(self):
-        if self._stderr is STDOUT:
-            return self.stdout
-        else:
+    def stderr(self) -> Optional[BlobRepository]:
+        """
+        The repository into which stderr will be dumped, or None if it will go to the null device.
+        """
+        if isinstance(self._stderr, BlobRepository):
             return self._stderr
+        else:
+            return self.stdout
 
     @property
     def _unique_stderr(self):
-        return self._stderr is not None and not isinstance(self._stderr, StderrIsStdout)
+        return self._stderr is not None and not isinstance(self._stderr, _StderrIsStdout)
 
     @property
-    def basedir(self):
+    def basedir(self) -> Path:
+        """
+        The path in the target environment that will be used to store information about this task.
+        """
         return self.manager.basedir / self.name
 
     async def update(self):
+        self.warned = False
         job_map = await self.pids.info_all()
         pid_map = {meta["pid"]: job for job, meta in job_map.items()}
         expected_live = set(pid_map)
@@ -484,13 +728,15 @@ class ProcessTask(Task):
             for pid in died:
                 job = pid_map[pid]
                 start_time = job_map[job]["start_time"]
-                await self.reap(job, start_time)
+                await self._reap(job, start_time)
         return bool(expected_live)
 
     async def launch(self, job):
         limit = await self.resource_manager.reserve(self.job_resources)
         if limit is not None:
-            l.warning("Cannot launch %s:%s: %s limit", self, job, limit)
+            if not self.warned:
+                l.warning("Cannot launch %s: %s limit", self, limit)
+                self.warned = True
             return
 
         pid = None
@@ -508,7 +754,7 @@ class ProcessTask(Task):
                 stdin = str(stdin)
             stdout = None if self.stdout is None else str(self.basedir / job / "stdout")
             stderr = STDOUT
-            if not isinstance(self._stderr, StderrIsStdout):
+            if not isinstance(self._stderr, _StderrIsStdout):
                 stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
             env_src = dict(self.links)
             env_src["job"] = job
@@ -543,15 +789,15 @@ class ProcessTask(Task):
                 pass
             raise
 
-    async def reap(self, job: str, start_time: datetime):
+    async def _reap(self, job: str, start_time: datetime):
         try:
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
                     job, "wb"
                 ) as fpw:
                     await async_copyfile(fpr, fpw)
-            if self._unique_stderr:
-                async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr, await self.stderr.open(
+            if isinstance(self._stderr, BlobRepository):
+                async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr, await self._stderr.open(
                     job, "wb"
                 ) as fpw:
                     await async_copyfile(fpr, fpw)
@@ -569,11 +815,28 @@ class ProcessTask(Task):
 
 
 class FunctionTaskProtocol(Protocol):
+    """
+    The protocol which is expected by the tasks which take a python function to execute.
+    """
+
     def __call__(self, job: str, **kwargs) -> Coroutine:
         ...
 
 
 class InProcessSyncTask(Task):
+    """
+    A task which runs in-process. Typical usage of this task might look like the following:
+
+    .. code:: python
+
+        @pydatatask.InProcessSyncTask("my_task", done_repo)
+        async def my_task(job: str, inp: pydatatask.MetadataRepository, out: pydatatask.MetadataRepository):
+            await out.dump(job, await inp.info(job))
+
+        my_task.link("inp", repo_input, is_input=True)
+        my_task.link("out", repo_output, is_output=True)
+    """
+
     def __init__(
         self,
         name: str,
@@ -581,6 +844,14 @@ class InProcessSyncTask(Task):
         ready: Optional[Repository] = None,
         func: Optional[FunctionTaskProtocol] = None,
     ):
+        """
+        :param name: The name of this task.
+        :param done: A metadata repository to store some information about a job's runtime and termination on
+                     completion.
+        :param ready: Optional: A repository from which to read task-ready status.
+        :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
+                     decorator.
+        """
         super().__init__(name, ready=ready)
 
         self.done = done
@@ -604,6 +875,9 @@ class InProcessSyncTask(Task):
                 self._env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+
+    async def update(self):
+        pass
 
     async def launch(self, job):
         start_time = datetime.now()
@@ -631,6 +905,15 @@ class InProcessSyncTask(Task):
 
 
 class ExecutorTask(Task):
+    """
+    A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been tested on
+    anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
+
+    See `InProcessSyncTask` for information on how to use instances of this class as decorators for their bodies.
+
+    It is expected that the executor will perform all necessary resource quota management.
+    """
+
     def __init__(
         self,
         name: str,
@@ -639,6 +922,15 @@ class ExecutorTask(Task):
         ready: Optional[Repository] = None,
         func: Optional[Callable] = None,
     ):
+        """
+        :param name: The name of this task.
+        :param executor: The executor to run jobs in.
+        :param done: A metadata repository to store some information about a job's runtime and termination on
+                     completion.
+        :param ready: Optional: A repository from which to read task-ready status.
+        :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
+                     decorator.
+        """
         super().__init__(name, ready)
 
         self.executor = executor
@@ -716,7 +1008,10 @@ class ExecutorTask(Task):
             self.jobs[running_job] = (job, start_time)
             self.rev_jobs[job] = running_job
 
-    def cancel(self, job):
+    async def cancel(self, job):
+        """
+        Stop the current job from running, or do nothing if it is not running.
+        """
         future = self.rev_jobs.pop(job)
         if future is not None:
             future.cancel()
@@ -730,17 +1025,85 @@ class ExecutorTask(Task):
 
 
 class KubeFunctionTask(KubeTask):
+    """
+    A task which runs a python function on a kubernetes cluster. Requires a pod template which will execute a python
+    script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job] --sync``.
+
+    Sample usage:
+
+    .. code:: python
+
+        @KubeFunctionTask(
+            "my_task",
+            podman,
+            resman,
+            '''
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                    - name: leader
+                      image: "docker.example.com/my/image"
+                      command:
+                        - python3
+                        - {{argv0}}
+                        - launch
+                        - "{{task}}"
+                        - "{{job}}"
+                        - "--force"
+                        - "--sync"
+                      resources:
+                        requests:
+                          cpu: 100m
+                          memory: 256Mi
+            ''',
+            repo_logs,
+            repo_done,
+            repo_func_done,
+        )
+        async def my_task(job: str, inp: pydatatask.MetadataRepository, out: pydatatask.MetadataRepository):
+            await out.dump(job, await inp.info(job))
+
+        my_task.link("inp", repo_input, is_input=True)
+        my_task.link("out", repo_output, is_output=True)
+    """
+
     def __init__(
         self,
-        podman: Callable[[], PodManager],
         name: str,
+        podman: Callable[[], PodManager],
+        resources: ResourceManager,
         template: Union[str, Path],
-        logs: Optional[BlobRepository],
-        kube_done: Optional[MetadataRepository],
-        func_done: Optional[MetadataRepository],
+        logs: Optional[BlobRepository] = None,
+        kube_done: Optional[MetadataRepository] = None,
+        func_done: Optional[MetadataRepository] = None,
+        env: Optional[Dict[str, Any]] = None,
         func: Optional[Callable] = None,
     ):
-        super().__init__(podman, name, template, logs, kube_done)
+        """
+        :param name: The name of this task.
+        :param podman: A callable returning a PodManager to use to connect to the cluster.
+        :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
+                          would break the quota.
+        :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
+                         ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
+        :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
+                               ``inhibits_start, required_for_output, is_status``.
+        :param kube_done: Optional: A MetadataRepository in which to dump some information about the pod's lifetime and
+                          termination on completion. Linked as "done" with
+                          ``inhibits_start, required_for_output, is_status``.
+        :param func_done: Optional: A MetadataRepository in which to dump some information about the function's lifetime
+                          and termination on completion. Linked as "func_done" with
+                          ``inhibits_start, required_for_output, is_status``.
+        :param env:     Optional: Additional keys to add to the template environment.
+        :param ready:   Optional: A repository from which to read task-ready status.
+        :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
+                     decorator.
+
+        It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
+        one link is present with ``inhibits_start``.
+        """
+        super().__init__(name, podman, resources, template, logs, kube_done, env=env)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -751,7 +1114,7 @@ class KubeFunctionTask(KubeTask):
                 is_status=True,
                 inhibits_start=True,
             )
-        self._env: Dict[str, Any] = {}
+        self._func_env: Dict[str, Any] = {}
 
     def __call__(self, f: Callable) -> "KubeFunctionTask":
         self.func = f
@@ -764,22 +1127,22 @@ class KubeFunctionTask(KubeTask):
         sig = inspect.signature(self.func, follow_wrapped=True)
         for name in sig.parameters.keys():
             if name == "job":
-                self._env[name] = None
+                self._func_env[name] = None
             elif name in self.links:
-                self._env[name] = self.links[name].repo
+                self._func_env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def launch(self, job):
         if self.synchronous:
-            await self.launch_sync(job)
+            await self._launch_sync(job)
         else:
             await super().launch(job)
 
-    async def launch_sync(self, job):
+    async def _launch_sync(self, job):
         start_time = datetime.now()
         l.debug("Launching --sync %s:%s...", self.name, job)
-        args = dict(self._env)
+        args = dict(self._func_env)
         if "job" in args:
             args["job"] = job
         args = await build_env(args, job, RepoHandlingMode.SMART)

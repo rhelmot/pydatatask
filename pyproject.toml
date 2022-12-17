@@ -41,20 +41,26 @@ type = [
     "mypy",
     "kubernetes-typed",
     "types-pyyaml",
-    "networkx-stubs",
+    "networkx-stubs @ git+https://github.com/fmagin/networkx-stubs",
     "types-aiofiles",
     "types-psutil",
 ]
 test = [
     "pytest",
     "pytest-cov",
+    "coverage[toml]"
 ]
 lint = [
     "pylint",
 ]
+doc = [
+    "sphinx",
+    "furo",
+]
 
 [project.urls]
 repository = "https://github.com/rhelmot/pydatatask"
+documentation = "https://pydatatask.readthedocs.io/"
 
 [project.readme]
 file = "README.md"
@@ -102,6 +108,7 @@ line-length = 120
 profile = "black"
 force_to_top = ["typing"]
 from_first = true
+skip = ["__init__.py"]
 
 [tool.pylint]
 py-version = "3.8"
@@ -111,7 +118,6 @@ max-line-length = 120
 
 [tool.pylint.'MESSAGES CONTROL']
 disable = [
-    "abstract-method",
     "invalid-name",
     "len-as-condition",
     "locally-disabled",
@@ -130,7 +136,25 @@ disable = [
     "too-many-statements",
     "unidiomatic-typecheck",
     "consider-using-f-string",
-    "missing-function-docstring",
-    "missing-module-docstring",
-    "missing-class-docstring",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    # Have to re-enable the standard pragma
+    "pragma: no cover",
+
+    # Don't complain about missing debug-only code:
+    "def __repr__",
+    "if self\\.debug",
+
+    # Don't complain if tests don't hit defensive assertion code:
+    "raise AssertionError",
+    "raise NotImplementedError",
+
+    # Don't complain if non-runnable code isn't run:
+    "if 0:",
+    "if __name__ == .__main__.:",
+
+    # Don't complain about abstract methods, they aren't run:
+    "@(abc\\.)?abstract",
 ]

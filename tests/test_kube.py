@@ -55,13 +55,13 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
 
+        cluster_quota = pydatatask.ResourceManager(pydatatask.Resources.parse("1", "1Gi"))
+
         @session.resource
         async def podman():
             podman = pydatatask.PodManager(
                 f"test-{self.test_id}",
                 self.kube_namespace,
-                cpu_quota="1",
-                mem_quota="1Gi",
             )
             yield podman
             await podman.close()
@@ -82,8 +82,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                     raise Exception("Minikube failed to give us anything interesting within 20 seconds")
 
         task = pydatatask.KubeTask(
-            podman,
             "task",
+            podman,
+            cluster_quota,
             r"""
             apiVersion: v1
             kind: Pod
@@ -113,7 +114,6 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         async with pipeline:
             await pydatatask.update(pipeline)
-            pipeline.session.resource("podman")().warned.clear()
             live = task.links["live"].repo
             launched = [x async for x in live]
             assert launched
@@ -121,8 +121,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             await pydatatask.delete_data(pipeline, "task", False, [launched[0]])
             while await live.contains(launched[0]):
                 await asyncio.sleep(1)
+
+            task.warned = False
             await task.launch(launched[0])
-            pipeline.session.resource("podman")().warned.clear()
             await asyncio.sleep(5)
             assert await live.contains(launched[0])
 

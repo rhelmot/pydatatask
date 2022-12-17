@@ -1,5 +1,6 @@
 /build
 /dist
+/build-docs
 *.egg-info
 *.pyc
 .tox
