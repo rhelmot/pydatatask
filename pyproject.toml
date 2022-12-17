@@ -41,7 +41,7 @@ type = [
     "mypy",
     "kubernetes-typed",
     "types-pyyaml",
-    "networkx-stubs @ git+https://github.com/fmagin/networkx-stubs",
+    "networkx-stubs",
     "types-aiofiles",
     "types-psutil",
 ]
