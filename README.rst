@@ -16,13 +16,13 @@ Tasks read and write data from **repositories**, which are arbitrary key-value s
 The way your data is stored
 ---------------------------
 
-:py:class:`Repository <pydatatask.repository.Repository>` classes are the core of pydatatask.
+`Repository` classes are the core of pydatatask.
 You can store your data in any way you desire and as long as you can write a repository class to describe it, it can be used to drive a pipeline.
 
 The notion of the "value" part of the key-value store abstraction is defined very, very loosely.
 The repository base class doesn't have an interface to get or store values, only to query for and delete keys.
 Instead, you have to know which repository subclass you're working with, and use its interfaces.
-For example, :py:class:`MetadataRepository <pydatatask.repository.MetadataRepository>` assumes that its values are structured objects and loads them fully into memory, and :py:class:`BlobRepository <pydatatask.repository.BlobRepository>` provides a streaming interface to a flat address space.
+For example, `MetadataRepository` assumes that its values are structured objects and loads them fully into memory, and :py:class:`BlobRepository <pydatatask.repository.BlobRepository>` provides a streaming interface to a flat address space.
 
 Current in-tree repositories:
 
@@ -36,7 +36,7 @@ Current in-tree repositories:
 The way your tasks are executed
 -------------------------------
 
-A :py:class:`Task <pydatatask.task.Task>` is connected to repositories through :py:class:`links <pydatatask.task.Link>`. A link is a repository plus a collection of properties describing the repository's relationship to the task - i.e. whether it is input or output, whether it should inhibit dependent tasks from starting, etc.
+A `Task` is connected to repositories through `links <Link>`. A link is a repository plus a collection of properties describing the repository's relationship to the task - i.e. whether it is input or output, whether it should inhibit dependent tasks from starting, etc.
 
 Current in-tree task types:
 
@@ -50,7 +50,7 @@ Most tasks define the notion of an **environment** which is used to template the
 Putting it together: the Pipeline object
 ----------------------------------------
 
-A :py:class:`Pipeline <pydatatask.pipeline.Pipeline>` is just an unordered collection of tasks. Relationships between the tasks are implicit, defined by which repositories they share.
+A `Pipeline` is just an unordered collection of tasks. Relationships between the tasks are implicit, defined by which repositories they share.
 
 Management of resources: the Session
 ------------------------------------
