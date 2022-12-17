@@ -46,7 +46,7 @@ class AbstractProcessManager:
     async def get_live_pids(self, hint: Set[str]) -> Set[str]:
         """
         Get a set of the live process identifiers. This may include processes which are not part of the current
-        app/task, but MUST include all the processes in `hint` which are still alive.
+        app/task, but MUST include all the processes in ``hint`` which are still alive.
         """
         raise NotImplementedError
 
@@ -185,7 +185,7 @@ class LocalLinuxManager(AbstractProcessManager):
 
 class SSHLinuxFile:
     """
-    A file returned by ``SSHLinuxManager.open()``. Probably don't instantiate this directly.
+    A file returned by `SSHLinuxManager.open`. Probably don't instantiate this directly.
     """
 
     def __init__(self, path: Union[Path, str], mode: Literal["r", "w", "rb", "wb"], ssh: asyncssh.SSHClientConnection):
@@ -212,9 +212,11 @@ class SSHLinuxFile:
 class SSHLinuxManager(AbstractProcessManager):
     """
     A process manager that runs its processes on a remote linux machine, accessed over SSH.
-    The SSH connection is parameterized by an ``asyncssh.SSHClientConection`` instance.
+    The SSH connection is parameterized by an :external:class:`asyncssh.connection.SSHClientConnection` instance.
 
-    Sample usage::
+    Sample usage:
+
+    .. code:: python
 
         session = pydatatask.Session()
 
@@ -244,7 +246,7 @@ class SSHLinuxManager(AbstractProcessManager):
     @property
     def ssh(self) -> asyncssh.SSHClientConnection:
         """
-        The ``asyncssh.SSHClientConnection`` instance associated. Will fail if the connection is provided by an unopened
+        The `asyncssh.SSHClientConnection` instance associated. Will fail if the connection is provided by an unopened
         Session.
         """
         return self._ssh()

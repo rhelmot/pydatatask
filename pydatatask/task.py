@@ -5,9 +5,11 @@ You define a task by instantiating a Task subclass and passing it to a Pipeline 
 
 Tasks are related to Repositories by Links. Links are created by
 ``Task.link("my_link_name", my_repository, **disposition)``. The main disposition kwargs you'll want to use are
-``is_input`` and ``is_output``. See ``link`` for more information.
+``is_input`` and ``is_output``. See `Task.link` for more information.
 
-For a shortcut for linking the output of one task as the input of another task, see ``Task.plug(task)``.
+For a shortcut for linking the output of one task as the input of another task, see `Task.plug`.
+
+.. autodata:: STDOUT
 """
 from typing import (
     TYPE_CHECKING,
@@ -77,11 +79,11 @@ __all__ = (
 
 class RepoHandlingMode(Enum):
     """
-    Mode for the ``build_env`` function.
+    Mode for the `build_env` function.
 
     LAZY = Build repositories and links into repository references
-    SMART = Build repositories and links into un-awaited ``info()` coroutines.
-    EAGER = Build repositories and links into awaited ``info()`` values.
+    SMART = Build repositories and links into un-awaited `info` coroutines.
+    EAGER = Build repositories and links into awaited `info` values.
     """
 
     LAZY = auto()
@@ -92,7 +94,7 @@ class RepoHandlingMode(Enum):
 async def build_env(env: Dict[str, Any], job: str, mode: RepoHandlingMode) -> Dict[str, Any]:
     """
     Given a mapping from environment key names to values that can be used during templating. The way repositories are
-    transformed into job-related information is controlled by the ``RepoHandlingMode``.
+    transformed into job-related information is controlled by the `RepoHandlingMode`.
     """
     result = {}
     for key, val in env.items():
@@ -138,7 +140,7 @@ async def render_template(template, env: Dict[str, Any]):
 class Link:
     """
     The dataclass for holding linked repositories and their disposition metadata. Don't create these manually, instead
-    use ``Task.link()``.
+    use `Task.link`.
     """
 
     repo: Repository
@@ -206,7 +208,7 @@ class Task:
                                    repository to allow jobs to be launched. If unspecified, defaults to ``is_input``.
         :param inhibits_output:     Whether this repository should become ``inhibits_start`` in tasks this task is
                                     plugged into. Default False.
-        :param required_for_output: Whether this repository should become ``required_for_start`` in tasks this task is
+        :param required_for_output: Whether this repository should become `required_for_start` in tasks this task is
                                     plugged into. If unspecified, defaults to ``is_output``.
         """
         if required_for_start is None:
@@ -235,7 +237,7 @@ class Task:
         translate_prefetch_lookup=True,
     ):
         """
-        Link the output repositories from ``output`` as inputs to this task.
+        Link the output repositories from `output` as inputs to this task.
 
         :param output:  The task to plug into this one.
         :param output_links: Optional: An iterable allowlist of links to only use.
@@ -337,7 +339,7 @@ class Task:
     async def launch_all(self):
         """
         Part two of the pipeline maintenance loop. Do not override this; the default implementation is typically pretty
-        good - it enumerates ``self.ready`` and calls ``self.launch`` for each ready job.
+        good - it enumerates `ready` and calls `launch` for each ready job.
 
         Returns True if there were any jobs to launch.
         """
@@ -396,8 +398,8 @@ class KubeTask(Task):
     """
     A task which runs a kubernetes pod.
 
-    Will automatically link a ``LiveKubeRepository`` as "live" with
-    ``inhibits_start=True, inhibits_output=True, is_status=True``
+    Will automatically link a `LiveKubeRepository` as "live" with
+    ``inhibits_start, inhibits_output, is_status``
     """
 
     def __init__(
@@ -423,7 +425,7 @@ class KubeTask(Task):
         :param done: A MetadataRepository in which to dump some information about the pod's lifetime and termination on
                      completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
         :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it will
-                        be timed out and stopped. The method ``handle_timeout`` will be called in-process.
+                        be timed out and stopped. The method `handle_timeout` will be called in-process.
         :param env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
 
@@ -630,7 +632,7 @@ class ProcessTask(Task):
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
         :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
-                     linked as "pids" with ``is_status=True, inhibits_start=True, inhibits_output=True``.
+                     linked as "pids" with ``is_status, inhibits_start, inhibits_output``.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
         :param environ: Additional environment variables to set on the target machine before running the task.
         :param done: Optional: A metadata repository in which to dump some information about the process's lifetime and
@@ -643,7 +645,7 @@ class ProcessTask(Task):
                        transferred from the target environment on completion, so the target does not need to be
                        authenticated to this repository. Linked as "stdout" with ``is_output``.
         :param stderr: Optional: A blob repository into which to dump the process' standard error, or the constant
-                       ``pydatatask.task.STDOUT`` to indicate that the stream should be interleaved with stdout.
+                       `pydatatask.task.STDOUT` to indicate that the stream should be interleaved with stdout.
                        Otherwise, the content will be transferred from the target environment on completion, so the
                        target does not need to be authenticated to this repository. Linked as "stderr" with
                        ``is_output``.
@@ -823,7 +825,9 @@ class FunctionTaskProtocol(Protocol):
 
 class InProcessSyncTask(Task):
     """
-    A task which runs in-process. Typical usage of this task might look like the following::
+    A task which runs in-process. Typical usage of this task might look like the following:
+
+    .. code:: python
 
         @pydatatask.InProcessSyncTask("my_task", done_repo)
         async def my_task(job: str, inp: pydatatask.MetadataRepository, out: pydatatask.MetadataRepository):
@@ -902,10 +906,10 @@ class InProcessSyncTask(Task):
 
 class ExecutorTask(Task):
     """
-    A task which runs python functions in a ``concurrent.futures.Executor``. This has not been tested on anything but
-    the ``ThreadPoolExecutor``, so beware!
+    A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been tested on
+    anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
 
-    See ``InProcessSyncTask`` for information on how to use instances of this class as decorators for their bodies.
+    See `InProcessSyncTask` for information on how to use instances of this class as decorators for their bodies.
 
     It is expected that the executor will perform all necessary resource quota management.
     """
@@ -1023,9 +1027,11 @@ class ExecutorTask(Task):
 class KubeFunctionTask(KubeTask):
     """
     A task which runs a python function on a kubernetes cluster. Requires a pod template which will execute a python
-    script calling ``pydatatask.main()``. This works by running ``python3 main.py launch [task] [job] --sync``.
+    script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job] --sync``.
 
-    Sample usage::
+    Sample usage:
+
+    .. code:: python
 
         @KubeFunctionTask(
             "my_task",
@@ -1079,7 +1085,7 @@ class KubeFunctionTask(KubeTask):
         :param podman: A callable returning a PodManager to use to connect to the cluster.
         :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
-        :param template: YAML markup for a pod manifest template that will run ``pydatatask.main()`` as
+        :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
                          ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
                                ``inhibits_start, required_for_output, is_status``.

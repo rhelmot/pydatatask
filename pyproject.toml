@@ -52,9 +52,14 @@ test = [
 lint = [
     "pylint",
 ]
+doc = [
+    "sphinx",
+    "furo",
+]
 
 [project.urls]
 repository = "https://github.com/rhelmot/pydatatask"
+documentation = "https://pydatatask.readthedocs.io/"
 
 [project.readme]
 file = "README.md"
@@ -102,6 +107,7 @@ line-length = 120
 profile = "black"
 force_to_top = ["typing"]
 from_first = true
+skip = ["__init__.py"]
 
 [tool.pylint]
 py-version = "3.8"

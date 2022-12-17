@@ -2,7 +2,9 @@
 A session is a tool for managing multiple live resources. Async resource manager routines can be registered, and in
 their place will be left a callable which will return the live resource while the session is opened.
 
-For example::
+For example:
+
+.. code:: python
 
     session = pydatatask.Session()
 

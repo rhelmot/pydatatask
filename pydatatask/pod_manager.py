@@ -1,6 +1,6 @@
 """
-In order for a ``KubeTask`` or a subclasse to connect, authenticate, and manage pods in a kubernetes cluster, it needs
-several resource references. the ``PodManager`` simplifies tracking the lifetimes of these resources.
+In order for a `KubeTask` or a subclass to connect, authenticate, and manage pods in a kubernetes cluster, it needs
+several resource references. the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
 from typing import Callable, List, Optional

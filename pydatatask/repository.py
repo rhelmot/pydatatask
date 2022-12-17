@@ -45,7 +45,6 @@ import dxf
 import motor.motor_asyncio
 import yaml
 
-from .resource_manager import Resources
 from .utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
 
 if TYPE_CHECKING:
@@ -115,7 +114,7 @@ class Repository(ABC):
 
     async def filter_jobs(self, iterator: AsyncIterable[str]) -> AsyncIterable[str]:
         """
-        Apply ``is_valid_job_id`` as a filter to an async iterator.
+        Apply `is_valid_job_id` as a filter to an async iterator.
         """
         async for job in iterator:
             if self.is_valid_job_id(job):
@@ -142,7 +141,7 @@ class Repository(ABC):
         """
         The core method of Repository. Implement this to produce an iterable of every string which could potentially
         be a job identifier present in this repository. When the repository is iterated directly, this will be filtered
-        by ``filter_jobs``.
+        by `filter_jobs`.
         """
         raise NotImplementedError
         # noinspection PyUnreachableCode
@@ -180,7 +179,7 @@ class Repository(ABC):
         self, func: Callable, filt: Optional[Callable[[str], Awaitable[bool]]] = None, allow_deletes=False
     ) -> "MapRepository":
         """
-        Generate a ``MapRepository`` based on this repository and the given parameters.
+        Generate a :class:`MapRepository` based on this repository and the given parameters.
         """
         return MapRepository(self, func, filt, allow_deletes=allow_deletes)
 
@@ -198,7 +197,7 @@ class MapRepository(Repository):
         allow_deletes=False,
     ):
         """
-        :param func: The function to use to translate the base repository's ``info`` results into the mapped ``info``
+        :param func: The function to use to translate the base repository's `info` results into the mapped `info`
                      results.
         :param filt: Optional: An async function to use to determine whether a given key should be considered part of
                      the mapped repository.
@@ -242,7 +241,7 @@ class MapRepository(Repository):
 class MetadataRepository(Repository, ABC):
     """
     A metadata repository has values which are small, structured data, and loads them entirely into memory, returning
-    the structured data from the ``info`` method.
+    the structured data from the `info` method.
     """
 
     @abstractmethod
@@ -397,7 +396,7 @@ class DirectoryRepository(FileRepositoryBase):
 
 class S3BucketBinaryWriter:
     """
-    A class for streaming (or buffering) byte data to be written to an ``S3BucketRepository``.
+    A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`.
     """
 
     def __init__(self, repo: "S3BucketRepository", job: str):
@@ -436,7 +435,7 @@ class S3BucketBinaryWriter:
 
 class S3BucketReader:
     """
-    A class for streaming byte data from an ``S3BucketRepository``.
+    A class for streaming byte data from an `S3BucketRepository`.
     """
 
     def __init__(self, body):
@@ -464,7 +463,7 @@ class S3BucketReader:
 
 class S3BucketInfo:
     """
-    The data structure returned from ``S3BucketRepository.info(job)``.
+    The data structure returned from :meth:`S3BucketRepository.info`.
 
     :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
                return this.
@@ -570,7 +569,7 @@ class S3BucketRepository(BlobRepository):
     @job_getter
     async def info(self, job):
         """
-        Return an ``S3BucketInfo`` corresponding to the given job.
+        Return an `S3BucketInfo` corresponding to the given job.
         """
         return S3BucketInfo(
             self.incluster_endpoint or self.client._endpoint.host,
@@ -652,8 +651,9 @@ class DockerRepository(Repository):
         repository: str,
     ):
         """
-        :param registry: A callable returning a ``docker_registry_client_async`` client object with appropriate
-                         authentication information.
+        :param registry: A callable returning a
+                         `docker_registry_client_async <https://pypi.org/project/docker-registry-client-async/>`_
+                         client object with appropriate authentication information.
         :param domain: The registry domain to connect to, e.g. ``index.docker.io``.
         :param repository: The repository to store images in within the domain, e.g. ``myname/myrepo``.
         """
@@ -686,7 +686,9 @@ class DockerRepository(Repository):
     @job_getter
     async def info(self, job):
         """
-        The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.::
+        The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
+
+        .. code::
 
             { "withdomain": "docker.example.com/myname/myrepo:job", "withoutdomain": "myname/myrepo:job" }
         """
@@ -732,8 +734,9 @@ class DockerRepository(Repository):
 
 class LiveKubeRepository(Repository):
     """
-    A repository where keys translate to `job` labels on running kube pods. This repository is constructed automatically
-    by a ``KubeTask`` or subclass and is linked as the ``live`` repository. Do not construct this class manually.
+    A repository where keys translate to ``job`` labels on running kube pods. This repository is constructed
+    automatically by a `KubeTask` or subclass and is linked as the ``live`` repository. Do not construct this class
+    manually.
     """
 
     def __init__(self, task: "KubeTask"):
@@ -767,7 +770,6 @@ class LiveKubeRepository(Repository):
         Deleting a job from this repository will delete the pod.
         """
         pods = await self.task.podman.query(job=job, task=self.task.name)
-        request = Resources()
         for pod in pods:  # there... really should be only one
             await self.task.delete(pod)
         # while await self.task.podman.query(job=job, task=self.task.name):
@@ -852,7 +854,7 @@ class AggregateOrRepository(Repository):
 
 class BlockingRepository(Repository):
     """
-    A class that is said to contain a job if `source` contains it and `unless` does not contain it
+    A class that is said to contain a job if ``source`` contains it and ``unless`` does not contain it
     """
 
     def __init__(self, source: Repository, unless: Repository, enumerate_unless=True):
@@ -1045,7 +1047,7 @@ class ExecutorLiveRepo(Repository):
 
     async def info(self, job):
         """
-        There is no templating info for an ``ExecutorLiveRepo``.
+        There is no templating info for an `ExecutorLiveRepo`.
         """
         return None
 
@@ -1083,7 +1085,7 @@ class InProcessMetadataRepository(MetadataRepository):
 
 class InProcessBlobStream:
     """
-    A stream returned from an ``InProcessBlobRepository.open()`` call. Do not construct this manually.
+    A stream returned from an `BlobRepository.open` call from `InProcessBlobRepository`. Do not construct this manually.
     """
 
     def __init__(self, repo: "InProcessBlobRepository", job: str):  # pylint: disable=missing-function-docstring
@@ -1131,7 +1133,7 @@ class InProcessBlobRepository(BlobRepository):
     @job_getter
     async def info(self, job):
         """
-        There is no templating info for an ``InProcessBlobRepository``.
+        There is no templating info for an `InProcessBlobRepository`.
         """
         return None
 

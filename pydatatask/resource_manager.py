@@ -1,9 +1,11 @@
 """
 pydatatask defines the notion of resources, or numerical quantities of CPU and memory which can be allocated to a given
-job. This is mediated through a ``ResourceManager``, an object which can atomically track increments and decrements from
-a quota, and reject a request if it would break the quota.
+job. This is mediated through a :class:`ResourceManager`, an object which can atomically track increments and decrements
+from a quota, and reject a request if it would break the quota.
 
-Typical usage is to construct a ``ResourceManager`` and pass it to a task constructor::
+Typical usage is to construct a :class:`ResourceManager` and pass it to a task constructor:
+
+.. code:: python
 
     quota = pydatatask.ResourceManager(pydatatask.Resources.parse(cpu='1000m', mem='1Gi'))
     task = pydatatask.ProcessTask("my_task", localhost, quota, ...)
@@ -33,7 +35,9 @@ class Resources:
     """
     A dataclass containing a quantity of resources.
 
-    Resources can be summed::
+    Resources can be summed:
+
+    .. code:: python
 
         r = pydatatask.Resources.parse(1, 1)
         r += pydatatask.Resources.parse(2, 3)
@@ -47,7 +51,7 @@ class Resources:
     @staticmethod
     def parse(cpu: Union[str, float, int, Decimal], mem: Union[str, float, int, Decimal]) -> "Resources":
         """
-        Construct a ``Resources`` instance by parsing the given quantities of CPU and memory.
+        Construct a :class:`Resources` instance by parsing the given quantities of CPU and memory.
         """
         return Resources(cpu=parse_quantity(cpu), mem=parse_quantity(mem))
 

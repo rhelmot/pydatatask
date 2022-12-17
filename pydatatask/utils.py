@@ -51,7 +51,7 @@ async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=
 
 class AReadText:
     """
-    An async version of ``io.TextIOWrapper`` which can only handle reading.
+    An async version of :external:class:`io.TextIOWrapper` which can only handle reading.
     """
 
     def __init__(
@@ -68,7 +68,7 @@ class AReadText:
 
     async def read(self, n: Optional[int] = None) -> str:
         """
-        Read up to ``n` chars from the string, or the rest of the stream if not provided.
+        Read up to ``n`` chars from the string, or the rest of the stream if not provided.
         """
         while n is None or len(self.buffer) < n:
             data = await self.base.read(self.chunksize)
