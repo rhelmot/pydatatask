@@ -1,4 +1,6 @@
-pydatatask is a library for building data pipelines. Sounds familiar? The cool part here is that you are not restricted in the way your data is stored or the way your tasks are executed.
+pydatatask is a library for building data pipelines.
+Sounds familiar?
+The cool part here is that you are not restricted in the way your data is stored or the way your tasks are executed.
 
 Installing
 ----------
@@ -22,7 +24,7 @@ You can store your data in any way you desire and as long as you can write a rep
 The notion of the "value" part of the key-value store abstraction is defined very, very loosely.
 The repository base class doesn't have an interface to get or store values, only to query for and delete keys.
 Instead, you have to know which repository subclass you're working with, and use its interfaces.
-For example, `MetadataRepository` assumes that its values are structured objects and loads them fully into memory, and :py:class:`BlobRepository <pydatatask.repository.BlobRepository>` provides a streaming interface to a flat address space.
+For example, `MetadataRepository` assumes that its values are structured objects and loads them fully into memory, and `BlobRepository` provides a streaming interface to a flat address space.
 
 Current in-tree repositories:
 
@@ -44,18 +46,21 @@ Current in-tree task types:
 - Python function execution with the help of a concurrent.futures Executor
 - Python function execution on a kubernetes cluster
 - Script execution on a kubernetes cluster
+- Script execution locally or over SSH
 
 Most tasks define the notion of an **environment** which is used to template the task for the particular job that is being run.
-
-Putting it together: the Pipeline object
-----------------------------------------
-
-A `Pipeline` is just an unordered collection of tasks. Relationships between the tasks are implicit, defined by which repositories they share.
 
 Management of resources: the Session
 ------------------------------------
 
-TODO
+A session is a tool for managing multiple live resources.
+Async resource manager routines can be registered, and in their place will be left a callable which will return the live resource while the session is opened.
+
+Putting it together: the Pipeline object
+----------------------------------------
+
+A `Pipeline` is just an unordered collection of tasks paired with a Session.
+Relationships between the tasks are implicit, defined by which repositories they share.
 
 Example
 -------
