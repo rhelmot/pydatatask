@@ -25,7 +25,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
-      uses: actions/setup-python@master
+      uses: actions/setup-python@main
       with:
         python-version: ${{ matrix.python.version }}
     - name: Start minikube
@@ -50,7 +50,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
-      uses: actions/setup-python@master
+      uses: actions/setup-python@main
       with:
         python-version: '3.11'
     - name: Deps
@@ -64,7 +64,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
-      uses: actions/setup-python@master
+      uses: actions/setup-python@main
       with:
         python-version: '3.11'
     - name: install
@@ -77,7 +77,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
-      uses: actions/setup-python@master
+      uses: actions/setup-python@main
       with:
         python-version: '3.11'
     - name: Deps
@@ -92,7 +92,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Setup python
-      uses: actions/setup-python@master
+      uses: actions/setup-python@main
       with:
         python-version: '3.11'
     - name: Deps
