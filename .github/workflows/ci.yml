@@ -67,6 +67,8 @@ jobs:
       uses: actions/setup-python@main
       with:
         python-version: '3.11'
+    - name: Update Build Deps
+      run: pip install -U setuptools pip wheel
     - name: install
       run: pip install .
     - uses: pypa/gh-action-pip-audit@v1.0.6
