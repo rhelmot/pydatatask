@@ -136,6 +136,7 @@ disable = [
     "too-many-statements",
     "unidiomatic-typecheck",
     "consider-using-f-string",
+    "broad-exception-raised",  # TODO fix
 ]
 
 [tool.coverage.report]
