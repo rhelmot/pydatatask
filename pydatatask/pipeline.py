@@ -120,7 +120,7 @@ class Pipeline:
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
-        to_gather = [task.launch_all() for task in self.tasks.values()]
+        to_gather = [task.launch_all() for task in self.tasks.values() if not task.disabled]
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
         return any(gathered)
 

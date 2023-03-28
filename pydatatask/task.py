@@ -158,12 +158,13 @@ class Task:
     The Task base class.
     """
 
-    def __init__(self, name: str, ready: Optional[Repository] = None):
+    def __init__(self, name: str, ready: Optional[Repository] = None, disabled: bool = False):
         self.name = name
         self._ready = ready
         self.links: Dict[str, Link] = {}
         self.synchronous = False
         self.metadata = True
+        self.disabled = disabled
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
