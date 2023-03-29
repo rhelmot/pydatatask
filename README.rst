@@ -53,8 +53,10 @@ Most tasks define the notion of an **environment** which is used to template the
 Management of resources: the Session
 ------------------------------------
 
-A session is a tool for managing multiple live resources.
-Async resource manager routines can be registered, and in their place will be left a callable which will return the live resource while the session is opened.
+A `Session` is a tool for managing multiple live resources.
+After constructing a session, you can register async resource manager routines.
+You will receive in return a callable which will return the live resource while the session is opened.
+This means that a pipeline and all its resources can be defined in a synchronous context, and then allocated and connected whenthe async context is activated.
 
 Putting it together: the Pipeline object
 ----------------------------------------
