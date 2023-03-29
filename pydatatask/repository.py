@@ -677,7 +677,7 @@ class DockerRepository(Repository):
             for tag in tags:
                 yield tag
         except aiohttp.client_exceptions.ClientResponseError as e:
-            if e.status == 404:
+            if e.status != 404:
                 raise
 
     def __repr__(self):
