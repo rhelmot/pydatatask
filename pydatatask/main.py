@@ -26,7 +26,7 @@ The help screen should look something like this:
       -h, --help            show this help message and exit
 """
 
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 import argparse
 import asyncio
 import logging
@@ -38,9 +38,9 @@ import yaml
 
 from .pipeline import Pipeline
 from .repository import BlobRepository, MetadataRepository, Repository
-from .task import Task
+from .task import Link, Task
 
-l = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")
 
 __all__ = (
@@ -193,16 +193,16 @@ async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Opt
             raise TimeoutError("Pipeline run timeout")
 
 
-def get_repos(pipeline: Pipeline, all_repos: bool):
+def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[Link]:
     seen = set()
     for task in pipeline.tasks.values():
         for link in task.links.values():
             if not all_repos and not link.is_status and not link.is_input and not link.is_output:
                 continue
-            if link.repo in seen:
+            if link in seen:
                 continue
-            seen.add(link.repo)
-            yield link.repo
+            seen.add(link)
+            yield link
 
 
 async def print_status(pipeline: Pipeline, all_repos: bool):
@@ -212,7 +212,8 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
             the_sum += 1
         return the_sum
 
-    repo_list = list(get_repos(pipeline, all_repos))
+    link_list = set(get_links(pipeline, all_repos))
+    repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
     for task in pipeline.tasks.values():
@@ -221,7 +222,7 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
-            if link.repo in repo_sizes:
+            if link in link_list:
                 print(f"{task.name}.{link_name} {repo_sizes[link.repo]}")
         print()
 
@@ -230,7 +231,8 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
     async def inner(repo: Repository):
         return [j for j in job if await repo.contains(j)]
 
-    repo_list = list(get_repos(pipeline, all_repos))
+    link_list = set(get_links(pipeline, all_repos))
+    repo_list = list(set(link.repo for link in link_list))
     repo_members = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
     for task in pipeline.tasks.values():
@@ -239,7 +241,7 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
-            if link.repo in repo_members:
+            if link in link_list:
                 print(f"{task.name}.{link_name} {' '.join(repo_members[link.repo])}")
         print()
 
@@ -346,5 +348,5 @@ async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta:
     if force or await task.ready.contains(job):
         await task.launch(job)
     else:
-        l.warning("Task is not ready to launch - use -f to force")
+        log.warning("Task is not ready to launch - use -f to force")
         return 1

@@ -159,3 +159,6 @@ exclude_lines = [
     # Don't complain about abstract methods, they aren't run:
     "@(abc\\.)?abstract",
 ]
+
+[tool.ruff]
+line-length = 120
