@@ -199,9 +199,9 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[Link]:
         for link in task.links.values():
             if not all_repos and not link.is_status and not link.is_input and not link.is_output:
                 continue
-            if link in seen:
+            if id(link) in seen:
                 continue
-            seen.add(link)
+            seen.add(id(link))
             yield link
 
 
@@ -212,7 +212,7 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
             the_sum += 1
         return the_sum
 
-    link_list = set(get_links(pipeline, all_repos))
+    link_list = list(get_links(pipeline, all_repos))
     repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
@@ -231,7 +231,7 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
     async def inner(repo: Repository):
         return [j for j in job if await repo.contains(j)]
 
-    link_list = set(get_links(pipeline, all_repos))
+    link_list = list(get_links(pipeline, all_repos))
     repo_list = list(set(link.repo for link in link_list))
     repo_members = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
