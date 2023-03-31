@@ -11,5 +11,5 @@ from .resource_manager import *
 from .pod_manager import *
 from .proc_manager import *
 
-__version__ = "0.3.2-dev.1"
-released_version = "0.3.1"
+__version__ = "0.3.3-dev.1"
+released_version = "0.3.2"
