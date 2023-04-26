@@ -31,6 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+fuse = [
+    "pydatafs"
+]
 dev = [
     "tox>=4.0.0",
     "black",

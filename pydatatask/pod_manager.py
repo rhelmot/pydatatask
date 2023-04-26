@@ -100,6 +100,7 @@ class PodManager:
         Create a pod with the given manifest, named and labeled for this podman's app and the given job and task.
         """
         assert manifest["kind"] == "Pod"
+        task = task.replace("_", "-")
 
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
@@ -124,7 +125,7 @@ class PodManager:
         if job is not None:
             selectors.append("job=" + job)
         if task is not None:
-            selectors.append("task=" + task)
+            selectors.append("task=" + task.replace("_", "-"))
         selector = ",".join(selectors)
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 

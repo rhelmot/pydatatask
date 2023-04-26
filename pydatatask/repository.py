@@ -341,6 +341,8 @@ class FileRepository(FileRepositoryBase, BlobRepository):
 
     @job_getter
     async def open(self, job, mode="r"):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         return aiofiles.open(self.fullpath(job), mode)
 
     async def delete(self, job):
@@ -468,11 +470,17 @@ class S3BucketInfo:
     :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
                return this.
     :ivar endpoint: The URL of the API server providing the S3 interface.
+    :ivar bucket: The name of the bucket objects are stored in.
+    :ivar prefix: How to prefix an object name such that it will fit into this repository.
+    :ivar suffix: How to suffix an object name such that it will fit into this repository.
     """
 
-    def __init__(self, endpoint: str, uri: str):
+    def __init__(self, endpoint: str, uri: str, bucket: str, prefix: str, suffix: str):
         self.endpoint = endpoint
         self.uri = uri
+        self.prefix = prefix
+        self.suffix = suffix
+        self.bucket = bucket
 
     def __str__(self):
         return self.uri
@@ -488,7 +496,7 @@ class S3BucketRepository(BlobRepository):
         client: Callable[[], S3Client],
         bucket: str,
         prefix: str = "",
-        extension: str = "",
+        suffix: str = "",
         mimetype: str = "application/octet-stream",
         incluster_endpoint: Optional[str] = None,
     ):
@@ -498,7 +506,7 @@ class S3BucketRepository(BlobRepository):
         :param bucket: The name of the bucket from which to load and store.
         :param prefix: A prefix to put on the job name before translating it into a bucket path. If this is meant to be
                        a directory name it should end with a slash character.
-        :param extension: A suffix to put on the job name before translating it into a bucket path. If this is meant to
+        :param suffix: A suffix to put on the job name before translating it into a bucket path. If this is meant to
                           be a file extension it should start with a dot.
         :param mimetype: The MIME type to set the content when adding data.
         :param incluster_endpoint: Optional: An endpoint URL to provide as the result of info() queries instead of
@@ -507,7 +515,7 @@ class S3BucketRepository(BlobRepository):
         self._client = client
         self.bucket = bucket
         self.prefix = prefix
-        self.extension = extension
+        self.suffix = suffix
         self.mimetype = mimetype
         self.incluster_endpoint = incluster_endpoint
 
@@ -519,7 +527,7 @@ class S3BucketRepository(BlobRepository):
         return self._client()
 
     def __repr__(self):
-        return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.extension}>"
+        return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"
 
     async def contains(self, item):
         try:
@@ -533,8 +541,8 @@ class S3BucketRepository(BlobRepository):
         paginator = self.client.get_paginator("list_objects")
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
             for obj in page.get("Contents", []):
-                if obj["Key"].endswith(self.extension):
-                    yield obj["Key"][len(self.prefix) : -len(self.extension) if self.extension else None]
+                if obj["Key"].endswith(self.suffix):
+                    yield obj["Key"][len(self.prefix) : -len(self.suffix) if self.suffix else None]
 
     async def validate(self):
         try:
@@ -549,10 +557,12 @@ class S3BucketRepository(BlobRepository):
         """
         Return the object name for the given job.
         """
-        return f"{self.prefix}{job}{self.extension}"
+        return f"{self.prefix}{job}{self.suffix}"
 
     @job_getter
     async def open(self, job, mode="r"):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         if mode == "wb":
             return S3BucketBinaryWriter(self, job)
         elif mode == "w":
@@ -574,6 +584,9 @@ class S3BucketRepository(BlobRepository):
         return S3BucketInfo(
             self.incluster_endpoint or self.client._endpoint.host,
             f"s3://{self.bucket}/{self.object_name(job)}",
+            self.bucket,
+            self.prefix,
+            self.suffix,
         )
 
     async def delete(self, job):
@@ -635,6 +648,8 @@ class MongoMetadataRepository(MetadataRepository):
 
     @job_getter
     async def dump(self, job, data):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         await self.collection.replace_one({"_id": job}, data, upsert=True)
 
 
@@ -712,8 +727,8 @@ class DockerRepository(Repository):
             dxf_obj._headers = {"Authorization": "Basic " + result}
 
     async def delete(self, job):
-        if not await self.contains(job):
-            return
+        # if not await self.contains(job):
+        #    return
 
         self._delete_inner(job)  # blocking! epic fail
 
@@ -903,6 +918,8 @@ class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
 
     @job_getter
     async def dump(self, job, data):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         s = yaml.safe_dump(data, None)
         async with await self.open(job, "w") as fp:
             await fp.write(s)
@@ -922,8 +939,8 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
     A metadata repository based on a s3 bucket repository.
     """
 
-    def __init__(self, client, bucket, prefix, extension=".yaml", mimetype="text/yaml"):
-        super().__init__(client, bucket, prefix, extension=extension, mimetype=mimetype)
+    def __init__(self, client, bucket, prefix, suffix=".yaml", mimetype="text/yaml"):
+        super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)
 
     @job_getter
     async def info(self, job):
@@ -1070,6 +1087,8 @@ class InProcessMetadataRepository(MetadataRepository):
 
     @job_getter
     async def dump(self, job, data):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         self.data[job] = data
 
     async def contains(self, item):
@@ -1139,6 +1158,8 @@ class InProcessBlobRepository(BlobRepository):
 
     @job_getter
     async def open(self, job, mode="r"):
+        if not self.is_valid_job_id(job):
+            raise KeyError(job)
         stream = InProcessBlobStream(self, job)
         if mode == "r":
             return AReadText(stream)

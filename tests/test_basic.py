@@ -36,7 +36,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         task.link("repo0", repo0, is_input=True)
         task.link("repo1", repo1, is_output=True)
 
-        pipeline = pydatatask.Pipeline([task], session)
+        pipeline = pydatatask.Pipeline([task], session, [])
         async with pipeline:
             await pydatatask.run(pipeline, forever=False, launch_once=False, timeout=None)
 

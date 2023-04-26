@@ -68,7 +68,7 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
         ).__aenter__()
 
     async def test_minio(self):
-        repo = pydatatask.S3BucketRepository(lambda: self.client, self.bucket, prefix="weh/", extension=".weh")
+        repo = pydatatask.S3BucketRepository(lambda: self.client, self.bucket, prefix="weh/", suffix=".weh")
         repo_yaml = pydatatask.YamlMetadataS3Repository(lambda: self.client, self.bucket, prefix="weh/")
         assert repr(repo)
         await repo.validate()

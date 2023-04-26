@@ -14,8 +14,8 @@ For a shortcut for linking the output of one task as the input of another task, 
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
-    Coroutine,
     Dict,
     Iterable,
     Optional,
@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
 import asyncio
+import copy
 import inspect
 import logging
 import os
@@ -337,24 +338,6 @@ class Task:
         """
         raise NotImplementedError
 
-    async def launch_all(self):
-        """
-        Part two of the pipeline maintenance loop. Do not override this; the default implementation is typically pretty
-        good - it enumerates `ready` and calls `launch` for each ready job.
-
-        Returns True if there were any jobs to launch.
-        """
-        launchers = [self._launch(job) async for job in self.ready]
-        await asyncio.gather(*launchers)
-        return bool(launchers)
-
-    async def _launch(self, job):
-        try:
-            l.debug("Launching %s:%s", self.name, job)
-            await self.launch(job)
-        except:
-            l.exception("Failed to launch %s:%s", self, job)
-
     @abstractmethod
     async def launch(self, job):
         """
@@ -411,6 +394,7 @@ class KubeTask(Task):
         template: Union[str, Path],
         logs: Optional[BlobRepository],
         done: Optional[MetadataRepository],
+        window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         env: Optional[Dict[str, Any]] = None,
         ready: Optional[Repository] = None,
@@ -425,6 +409,8 @@ class KubeTask(Task):
                                ``inhibits_start, required_for_output, is_status``.
         :param done: A MetadataRepository in which to dump some information about the pod's lifetime and termination on
                      completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
+        :param window:  Optional: How far back into the past to look in order to determine whether we have recently
+                        launched too many pods too quickly.
         :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it will
                         be timed out and stopped. The method `handle_timeout` will be called in-process.
         :param env:     Optional: Additional keys to add to the template environment.
@@ -443,6 +429,7 @@ class KubeTask(Task):
         self.done = done
         self.env = env if env is not None else {}
         self.warned = False
+        self.window = window
 
         self.resources.register(self._get_load)
 
@@ -479,16 +466,15 @@ class KubeTask(Task):
 
     async def _get_load(self):
         usage = Resources()
+        cutoff = datetime.now(tz=timezone.utc) - self.window
 
         try:
-            for pod in (
-                await self.podman.v1.list_namespaced_pod(
-                    self.podman.namespace, label_selector=f"app={self.podman.app},task={self.name}"
-                )
-            ).items:
+            for pod in await self.podman.query(task=self.name):
+                if pod.metadata.creation_timestamp > cutoff:
+                    usage += Resources(launches=1)
                 for container in pod.spec.containers:
                     usage += Resources.parse(
-                        container.resources.requests["cpu"], container.resources.requests["memory"]
+                        container.resources.requests["cpu"], container.resources.requests["memory"], 0
                     )
         except ApiException as e:
             if e.reason != "Forbidden":
@@ -513,10 +499,12 @@ class KubeTask(Task):
         spec = manifest["spec"]
         spec["restartPolicy"] = "Never"
 
-        request = Resources()
+        request = Resources(launches=1)
         for container in spec["containers"]:
             request += Resources.parse(
-                container["resources"]["requests"]["cpu"], container["resources"]["requests"]["memory"]
+                container["resources"]["requests"]["cpu"],
+                container["resources"]["requests"]["memory"],
+                0,
             )
 
         limit = await self.resources.reserve(request)
@@ -537,13 +525,13 @@ class KubeTask(Task):
             async with await self.logs.open(job, "w") as fp:
                 try:
                     await fp.write(await self.podman.logs(pod))
-                except TimeoutError:
+                except (TimeoutError, ApiException):
                     await fp.write("<failed to fetch logs>\n")
         if self.done is not None:
             data = {
                 "reason": reason,
                 "start_time": pod.metadata.creation_timestamp,
-                "end_time": datetime.now(timezone.utc),
+                "end_time": datetime.now(tz=timezone.utc),
                 "image": pod.status.container_statuses[0].image,
                 "node": pod.spec.node_name,
             }
@@ -555,9 +543,9 @@ class KubeTask(Task):
         """
         Kill a pod and relinquish its resources without marking the task as complete.
         """
-        request = Resources()
+        request = Resources(launches=1)
         for container in pod.spec.containers:
-            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"])
+            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
         await self.podman.delete(pod)
         await self.resources.relinquish(request)
 
@@ -566,28 +554,31 @@ class KubeTask(Task):
         result = False
 
         pods = await self.podman.query(task=self.name)
-        for pod in pods:
-            result = True
-            try:
-                uptime: timedelta = datetime.now(timezone.utc) - pod.metadata.creation_timestamp
-                total_min = uptime.total_seconds() // 60
-                uptime_hours, uptime_min = divmod(total_min, 60)
-                l.debug(
-                    "Pod %s is alive for %dh%dm",
-                    pod.metadata.name,
-                    uptime_hours,
-                    uptime_min,
-                )
-                if pod.status.phase in ("Succeeded", "Failed"):
-                    l.debug("...finished: %s", pod.status.phase)
-                    await self._cleanup(pod, pod.status.phase)
-                elif self.timeout is not None and uptime > self.timeout:
-                    l.debug("...timed out")
-                    await self.handle_timeout(pod)
-                    await self._cleanup(pod, "Timeout")
-            except Exception:
-                l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
+        result = bool(pods)
+        jobs = [self._update_one(pod) for pod in pods]
+        await asyncio.gather(*jobs)
         return result
+
+    async def _update_one(self, pod: V1Pod):
+        try:
+            uptime: timedelta = datetime.now(tz=timezone.utc) - pod.metadata.creation_timestamp
+            total_min = uptime.total_seconds() // 60
+            uptime_hours, uptime_min = divmod(total_min, 60)
+            l.debug(
+                "Pod %s is alive for %dh%dm",
+                pod.metadata.name,
+                uptime_hours,
+                uptime_min,
+            )
+            if pod.status.phase in ("Succeeded", "Failed"):
+                l.debug("...finished: %s", pod.status.phase)
+                await self._cleanup(pod, pod.status.phase)
+            elif self.timeout is not None and uptime > self.timeout:
+                l.debug("...timed out")
+                await self.handle_timeout(pod)
+                await self._cleanup(pod, "Timeout")
+        except Exception:
+            l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
 
     async def handle_timeout(self, pod: V1Pod):
         """
@@ -617,6 +608,7 @@ class ProcessTask(Task):
         job_resources: "Resources",
         pids: MetadataRepository,
         template: str,
+        window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
         done: Optional[MetadataRepository] = None,
         stdin: Optional[BlobRepository] = None,
@@ -636,6 +628,8 @@ class ProcessTask(Task):
                      linked as "pids" with ``is_status, inhibits_start, inhibits_output``.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
         :param environ: Additional environment variables to set on the target machine before running the task.
+        :param window: How recently a process must have been launched in order to contribute to the process
+                       rate-limiting.
         :param done: Optional: A metadata repository in which to dump some information about the process's lifetime and
                      termination on completion. Linked as "done" with
                      ``inhibits_start, required_for_output, is_status``.
@@ -664,10 +658,12 @@ class ProcessTask(Task):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self.job_resources = job_resources
+        self.job_resources = copy.copy(job_resources)
+        self.job_resources.launches = 1
         self.resource_manager = resource_manager
         self._manager = manager
         self.warned = False
+        self.window = window
 
         self.resource_manager.register(self._get_load)
 
@@ -689,10 +685,16 @@ class ProcessTask(Task):
         return self._manager()
 
     async def _get_load(self) -> "Resources":
+        cutoff = datetime.now(tz=timezone.utc) - self.window
         count = 0
-        async for _ in self.pids:
+        recent = 0
+        job_map = await self.pids.info_all()
+        for v in job_map.values():
             count += 1
-        return self.job_resources * count
+            if v["start_time"] > cutoff:
+                recent += 1
+
+        return self.job_resources * count - Resources(launches=count - recent)
 
     @property
     def stderr(self) -> Optional[BlobRepository]:
@@ -726,10 +728,12 @@ class ProcessTask(Task):
             l.error("Could not load live PIDs for %s", self, exc_info=True)
         else:
             died = expected_live - live_pids
+            coros = []
             for pid in died:
                 job = pid_map[pid]
                 start_time = job_map[job]["start_time"]
-                await self._reap(job, start_time)
+                coros.append(self._reap(job, start_time))
+            await asyncio.gather(*coros)
         return bool(expected_live)
 
     async def launch(self, job):
@@ -820,7 +824,7 @@ class FunctionTaskProtocol(Protocol):
     The protocol which is expected by the tasks which take a python function to execute.
     """
 
-    def __call__(self, job: str, **kwargs) -> Coroutine:
+    def __call__(self, job: str, **kwargs) -> Awaitable[None]:
         ...
 
 
@@ -881,7 +885,7 @@ class InProcessSyncTask(Task):
         pass
 
     async def launch(self, job):
-        start_time = datetime.now()
+        start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching in-process %s:%s...", self.name, job)
         args = dict(self._env)
         if "job" in args:
@@ -900,7 +904,7 @@ class InProcessSyncTask(Task):
             l.debug("...success")
             result = {"result": "success"}
         result["start_time"] = start_time
-        result["end_time"] = datetime.now()
+        result["end_time"] = datetime.now(tz=timezone.utc)
         if self.metadata:
             await self.done.dump(job, result)
 
@@ -957,11 +961,13 @@ class ExecutorTask(Task):
     async def update(self):
         result = bool(self.jobs)
         done, _ = wait(self.jobs, 0, FIRST_EXCEPTION)
+        coros = []
         for finished_job in done:
             job, start_time = self.jobs.pop(finished_job)
             # noinspection PyAsyncCall
             self.rev_jobs.pop(job)
-            await self._cleanup(finished_job, job, start_time)
+            coros.append(self._cleanup(finished_job, job, start_time))
+        await asyncio.gather(*coros)
         return result
 
     async def _cleanup(self, job_future, job, start_time):
@@ -972,7 +978,7 @@ class ExecutorTask(Task):
                 "result": "exception",
                 "exception": repr(e),
                 "traceback": traceback.format_tb(e.__traceback__),
-                "end_time": datetime.now(),
+                "end_time": datetime.now(tz=timezone.utc),
             }
         else:
             l.debug("...executor task %s:%s success", self.name, job)
@@ -999,7 +1005,7 @@ class ExecutorTask(Task):
         if "job" in args:
             args["job"] = job
         args = await build_env(args, job, RepoHandlingMode.SMART)
-        start_time = datetime.now()
+        start_time = datetime.now(tz=timezone.utc)
         running_job = self.executor.submit(self._timestamped_func, self.func, args)
         if self.synchronous:
             while not running_job.done():
@@ -1022,7 +1028,7 @@ class ExecutorTask(Task):
     def _timestamped_func(func, args):
         loop = asyncio.new_event_loop()
         loop.run_until_complete(func(**args))
-        return datetime.now()
+        return datetime.now(tz=timezone.utc)
 
 
 class KubeFunctionTask(KubeTask):
@@ -1141,7 +1147,7 @@ class KubeFunctionTask(KubeTask):
             await super().launch(job)
 
     async def _launch_sync(self, job):
-        start_time = datetime.now()
+        start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching --sync %s:%s...", self.name, job)
         args = dict(self._func_env)
         if "job" in args:
@@ -1160,6 +1166,6 @@ class KubeFunctionTask(KubeTask):
             l.debug("...success")
             result = {"result": "success"}
         result["start_time"] = start_time
-        result["end_time"] = datetime.now()
+        result["end_time"] = datetime.now(tz=timezone.utc)
         if self.metadata:
             await self.func_done.dump(job, result)

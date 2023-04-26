@@ -23,11 +23,12 @@ __all__ = ("ResourceType", "Resources", "ResourceManager", "parse_quantity")
 
 class ResourceType(Enum):
     """
-    An enum class indicating a type of resource. Presently can be CPU or MEM.
+    An enum class indicating a type of resource. Presently can be CPU, MEM, or RATE.
     """
 
     CPU = auto()
     MEM = auto()
+    RATE = auto()
 
 
 @dataclass
@@ -39,27 +40,34 @@ class Resources:
 
     .. code:: python
 
-        r = pydatatask.Resources.parse(1, 1)
-        r += pydatatask.Resources.parse(2, 3)
-        r -= pydatatask.Resources.parse(1, 1)
-        assert r == pydatatask.Resources.parse(2, 3)
+        r = pydatatask.Resources.parse(1, 1, 100)
+        r += pydatatask.Resources.parse(2, 3, 0)
+        r -= pydatatask.Resources.parse(1, 1, 0)
+        assert r == pydatatask.Resources.parse(2, 3, 100)
     """
 
     cpu: Decimal = field(default=Decimal(0))
     mem: Decimal = field(default=Decimal(0))
+    launches: int = 1
 
     @staticmethod
-    def parse(cpu: Union[str, float, int, Decimal], mem: Union[str, float, int, Decimal]) -> "Resources":
+    def parse(
+        cpu: Union[str, float, int, Decimal],
+        mem: Union[str, float, int, Decimal],
+        launches: Union[str, float, int, Decimal, None] = None,
+    ) -> "Resources":
         """
-        Construct a :class:`Resources` instance by parsing the given quantities of CPU and memory.
+        Construct a :class:`Resources` instance by parsing the given quantities of CPU, memory, and launches.
         """
-        return Resources(cpu=parse_quantity(cpu), mem=parse_quantity(mem))
+        if launches is None:
+            launches = 999999999
+        return Resources(cpu=parse_quantity(cpu), mem=parse_quantity(mem), launches=int(launches))
 
     def __add__(self, other: "Resources"):
-        return Resources(cpu=self.cpu + other.cpu, mem=self.mem + other.mem)
+        return Resources(cpu=self.cpu + other.cpu, mem=self.mem + other.mem, launches=self.launches + other.launches)
 
     def __mul__(self, other: int):
-        return Resources(cpu=self.cpu * other, mem=self.mem * other)
+        return Resources(cpu=self.cpu * other, mem=self.mem * other, launches=self.launches * other)
 
     def __sub__(self, other: "Resources"):
         return self + other * -1
@@ -74,6 +82,8 @@ class Resources:
             return ResourceType.CPU
         elif self.mem > limit.mem:
             return ResourceType.MEM
+        elif self.launches > limit.launches:
+            return ResourceType.RATE
         else:
             return None
 
@@ -108,6 +118,14 @@ class ResourceManager:
         for getter in self._registered_getters:
             result += await getter()
         return result
+
+    async def flush(self):
+        """
+        Forget the cached amount of resources currently being used. Next call to reserve or relinquish will calculate
+        usage anew.
+        """
+        async with self._lock:
+            self._cached = None
 
     async def reserve(self, request: Resources) -> Optional[ResourceType]:
         """

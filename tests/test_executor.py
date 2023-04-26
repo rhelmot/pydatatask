@@ -35,7 +35,7 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
         phase1.plug(phase0)
         phase1.link("repo_two", repo2, is_output=True)
 
-        pipeline = pydatatask.Pipeline([phase0, phase1], session)
+        pipeline = pydatatask.Pipeline([phase0, phase1], session, [])
 
         async with pipeline:
             await pydatatask.run(pipeline, forever=False, launch_once=False, timeout=120)

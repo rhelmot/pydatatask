@@ -55,7 +55,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
 
-        cluster_quota = pydatatask.ResourceManager(pydatatask.Resources.parse("1", "1Gi"))
+        cluster_quota = pydatatask.ResourceManager(pydatatask.Resources.parse("1", "1Gi", 99999))
 
         @session.resource
         async def podman():
@@ -110,7 +110,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         )
         task.link("repo0", repo0, is_input=True)
 
-        pipeline = pydatatask.Pipeline([task], session)
+        pipeline = pydatatask.Pipeline([task], session, [cluster_quota])
 
         async with pipeline:
             await pydatatask.update(pipeline)

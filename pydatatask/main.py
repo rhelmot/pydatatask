@@ -26,7 +26,7 @@ The help screen should look something like this:
       -h, --help            show this help message and exit
 """
 
-from typing import Callable, Dict, Iterable, List, Optional, Set, Union
+from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Union
 import argparse
 import asyncio
 import logging
@@ -39,6 +39,12 @@ import yaml
 from .pipeline import Pipeline
 from .repository import BlobRepository, MetadataRepository, Repository
 from .task import Link, Task
+
+fuse: Optional[Callable[[Pipeline, str, bool], Awaitable[None]]]
+try:
+    from .fuse import main as fuse
+except ModuleNotFoundError:
+    fuse = None
 
 log = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")
@@ -152,6 +158,12 @@ def main(
 
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
     parser_shell.set_defaults(func=shell)
+
+    if fuse is not None:
+        parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
+        parser_fuse.set_defaults(func=fuse)
+        parser_fuse.add_argument("path", help="The mountpoint")
+        parser_fuse.add_argument("--verbose", "-v", dest="debug", action="store_true", help="Show FUSE debug logging")
 
     if instrument is not None:
         instrument(subparsers)

@@ -31,7 +31,7 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
         async def localhost():
             yield pydatatask.LocalLinuxManager(self.app, local_path=self.dir)
 
-        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1))
+        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1, 99999))
 
         repo_input = pydatatask.FileRepository(self.dir / "input")
         await repo_input.validate()
@@ -63,7 +63,7 @@ echo bye >&2
         )
         task.link("input", repo_input, is_input=True)
 
-        pipeline = pydatatask.Pipeline([task], session)
+        pipeline = pydatatask.Pipeline([task], session, [quota])
 
         async with pipeline:
             await pydatatask.run(pipeline, False, False, 120)
@@ -137,7 +137,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         async def procman():
             yield pydatatask.SSHLinuxManager(self.test_id, ssh)
 
-        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1))
+        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1, 99999))
 
         repo_stdin = pydatatask.InProcessBlobRepository({str(i): str(i).encode() for i in range(self.n)})
         repo_stdout = pydatatask.InProcessBlobRepository()
@@ -166,7 +166,7 @@ echo 'goodbye world!' >&2
             repo_stderr,
         )
 
-        pipeline = pydatatask.Pipeline([task], session)
+        pipeline = pydatatask.Pipeline([task], session, [quota])
 
         async with pipeline:
             await pydatatask.run(pipeline, False, False, 120)
