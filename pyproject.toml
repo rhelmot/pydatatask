@@ -31,6 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+all = [
+    "pydatafs"
+]
 fuse = [
     "pydatafs"
 ]
