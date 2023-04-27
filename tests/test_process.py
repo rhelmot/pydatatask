@@ -55,11 +55,11 @@ echo bye >&2
             pydatatask.Resources.parse("100m", "100m"),
             repo_pids,
             template,
-            {},
-            repo_done,
-            None,
-            repo_stdout,
-            pydatatask.STDOUT,
+            environ={},
+            done=repo_done,
+            stdin=None,
+            stdout=repo_stdout,
+            stderr=pydatatask.STDOUT,
         )
         task.link("input", repo_input, is_input=True)
 
@@ -110,16 +110,14 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
             "USER_PASSWORD=weh",
             "-e",
             "PASSWORD_ACCESS=true",
-            "linuxserver/openssh-server:latest",
+            "linuxserver/openssh-server:version-9.1_p1-r2",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
         await p.communicate()
         if await p.wait() != 0:
-            raise unittest.SkipTest(
-                "No minio endpoint configured and docker failed to launch linuxserver/openssh-server:latest"
-            )
+            raise unittest.SkipTest("docker failed to launch linuxserver/openssh-server:version-9.1_p1-r2")
         self.docker_name = name
         await asyncio.sleep(2)
 
@@ -129,7 +127,12 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         @session.resource
         async def ssh():
             async with asyncssh.connect(
-                "localhost", port=self.port, username="weh", password="weh", known_hosts=None
+                "localhost",
+                port=self.port,
+                username="weh",
+                password="weh",
+                known_hosts=None,
+                client_keys=None,
             ) as s:
                 yield s
 
@@ -159,11 +162,11 @@ echo 'goodbye world!' >&2
             pydatatask.Resources.parse("100m", "100m"),
             repo_pids,
             template,
-            {},
-            repo_done,
-            repo_stdin,
-            repo_stdout,
-            repo_stderr,
+            environ={},
+            done=repo_done,
+            stdin=repo_stdin,
+            stdout=repo_stdout,
+            stderr=repo_stderr,
         )
 
         pipeline = pydatatask.Pipeline([task], session, [quota])
@@ -178,7 +181,7 @@ echo 'goodbye world!' >&2
         assert len(repo_pids.data) == 0
 
         for i in range(self.n):
-            assert repo_stderr.data[str(i)] == f"hello world!\ngoodbye world!\n".encode()
+            assert repo_stderr.data[str(i)] == "hello world!\ngoodbye world!\n".encode()
             assert (
                 repo_stdout.data[str(i)]
                 == f"The message of day {i} is {base64.b64encode(repo_stdin.data[str(i)]).decode()}. That's pretty great!\n".encode()
