@@ -11,6 +11,7 @@ python:
       path: .
       extra_requirements:
         - doc
+        - fuse
 
 sphinx:
   configuration: docs/conf.py
