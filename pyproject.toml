@@ -47,6 +47,7 @@ type = [
     "networkx-stubs",
     "types-aiofiles",
     "types-psutil",
+    "pyfuse3-stubs",
 ]
 test = [
     "pytest",
