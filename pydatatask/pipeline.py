@@ -105,7 +105,7 @@ class Pipeline:
             raise Exception("Pipeline must be opened")
 
         l.info("Running update...")
-        result = await self.update_only_update() | await self.update_only_launch()
+        result: bool = await self.update_only_update() | await self.update_only_launch()
         l.debug("Completed update")
         return result
 
@@ -177,7 +177,7 @@ class Pipeline:
                 try:
                     l.debug("Launching %s:%s", task, job)
                     await self.tasks[task].launch(job)
-                except:
+                except:  # pylint: disable=bare-except
                     l.exception("Failed to launch %s:%s", task, job)
 
         for prio_queue in jobs_by_priority:
@@ -189,6 +189,9 @@ class Pipeline:
         return True
 
     async def gather_ready_jobs(self, task: Task) -> Set[str]:
+        """
+        Collect all jobs that are ready to be launched for a given task.
+        """
         result: Set[str] = set()
         if task.disabled:
             l.debug("%s is disabled - no jobs will be scheduled", task.name)
@@ -202,7 +205,7 @@ class Pipeline:
         Generate the dependency graph for a pipeline. This is a directed graph containing both repositories and tasks
         as nodes.
         """
-        result = networkx.classes.digraph.DiGraph()
+        result: networkx.classes.digraph.DiGraph = networkx.classes.digraph.DiGraph()
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():

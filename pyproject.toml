@@ -90,14 +90,9 @@ ignore_missing_imports = true
 module = "motor.*"
 ignore_missing_imports = true
 
-# https://github.com/davedoesdev/dxf/pull/43
+# lol
 [[tool.mypy.overrides]]
-module = "dxf.*"
-ignore_missing_imports = true
-
-# https://github.com/ipython/ipython/pull/13858
-[[tool.mypy.overrides]]
-module = "IPython.*"
+module = "pydatafs.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

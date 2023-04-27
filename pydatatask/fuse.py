@@ -1,3 +1,5 @@
+# pylint: disable=missing-class-docstring,missing-module-docstring,missing-function-docstring,unused-argument
+# pylint: disable=import-error
 from typing import TYPE_CHECKING
 import os
 
