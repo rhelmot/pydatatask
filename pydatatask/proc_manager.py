@@ -27,7 +27,7 @@ import aioshutil
 import asyncssh
 import psutil
 
-from .task import STDOUT, _StderrIsStdout
+from .consts import STDOUT, _StderrIsStdout
 
 if TYPE_CHECKING:
     from .repository import AReadStream, AReadText, AWriteStream, AWriteText
@@ -59,7 +59,7 @@ class AbstractProcessManager:
         return_code: str,
         stdin: Optional[str],
         stdout: Optional[str],
-        stderr: Optional[Union[str, _StderrIsStdout]],
+        stderr: Optional[Union[str, "_StderrIsStdout"]],
     ) -> str:
         """
         Launch a process on the target system. This function MUST NOT wait until the process has terminated before
@@ -304,3 +304,6 @@ class SSHLinuxManager(AbstractProcessManager):
         )
         pid = await p.stdout.readline()
         return pid.strip()
+
+
+localhost_manager = LocalLinuxManager("default")

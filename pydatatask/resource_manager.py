@@ -17,6 +17,7 @@ from decimal import Decimal
 from enum import Enum, auto
 
 from kubernetes.utils import parse_quantity
+import psutil
 
 __all__ = ("ResourceType", "Resources", "ResourceManager", "parse_quantity")
 
@@ -153,3 +154,8 @@ class ResourceManager:
                 self._cached = await self._getter()
 
             self._cached -= request
+
+
+localhost_resource_manager = ResourceManager(
+    Resources.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)
+)

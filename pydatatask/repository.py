@@ -930,8 +930,8 @@ class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
     A metadata repository based on a file blob repository.
     """
 
-    def __init__(self, filename, extension=".yaml", case_insensitive=False):
-        super().__init__(filename, extension=extension, case_insensitive=case_insensitive)
+    def __init__(self, basedir, extension=".yaml", case_insensitive=False):
+        super().__init__(basedir, extension=extension, case_insensitive=case_insensitive)
 
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):

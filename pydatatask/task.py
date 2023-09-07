@@ -12,7 +12,6 @@ For a shortcut for linking the output of one task as the input of another task, 
 .. autodata:: STDOUT
 """
 from typing import (
-    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -44,7 +43,9 @@ import jinja2.async_utils
 import jinja2.compiler
 import yaml
 
+from .consts import STDOUT, _StderrIsStdout
 from .pod_manager import PodManager
+from .proc_manager import AbstractProcessManager, localhost_manager
 from .repository import (
     AggregateAndRepository,
     AggregateOrRepository,
@@ -55,12 +56,10 @@ from .repository import (
     MetadataRepository,
     RelatedItemRepository,
     Repository,
+    YamlMetadataFileRepository,
 )
-from .resource_manager import ResourceManager, Resources
+from .resource_manager import ResourceManager, Resources, localhost_resource_manager
 from .utils import async_copyfile
-
-if TYPE_CHECKING:
-    from .proc_manager import AbstractProcessManager
 
 l = logging.getLogger(__name__)
 
@@ -587,13 +586,6 @@ class KubeTask(Task):
         """
 
 
-class _StderrIsStdout:
-    pass
-
-
-STDOUT = _StderrIsStdout()
-
-
 class ProcessTask(Task):
     """
     A task that runs a script. The interpreter is specified by the shebang, or the default shell if none present.
@@ -603,11 +595,11 @@ class ProcessTask(Task):
     def __init__(
         self,
         name: str,
-        manager: Callable[[], "AbstractProcessManager"],
-        resource_manager: "ResourceManager",
-        job_resources: "Resources",
-        pids: MetadataRepository,
         template: str,
+        manager: Callable[[], "AbstractProcessManager"] = lambda: localhost_manager,
+        resource_manager: "ResourceManager" = localhost_resource_manager,
+        job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
+        pids: Optional[MetadataRepository] = None,
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
         done: Optional[MetadataRepository] = None,
@@ -650,6 +642,9 @@ class ProcessTask(Task):
         link is present with ``inhibits_start``.
         """
         super().__init__(name, ready=ready)
+
+        if pids is None:
+            pids = YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
 
         self.pids = pids
         self.template = template

@@ -11,7 +11,7 @@ import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
 
 from .repository import Repository
-from .resource_manager import ResourceManager
+from .resource_manager import ResourceManager, localhost_resource_manager
 from .session import Session
 from .task import Task
 
@@ -123,6 +123,7 @@ class Pipeline:
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
         for res in self.resources:
             await res.flush()
+        await localhost_resource_manager.flush()
         return any(gathered)
 
     async def update_only_launch(self) -> bool:
