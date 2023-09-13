@@ -89,11 +89,6 @@ version = {attr = "pydatatask.__version__"}
 module = "kubernetes_asyncio.*"
 ignore_missing_imports = true
 
-# https://jira.mongodb.org/projects/MOTOR/issues/MOTOR-331
-[[tool.mypy.overrides]]
-module = "motor.*"
-ignore_missing_imports = true
-
 # lol
 [[tool.mypy.overrides]]
 module = "pydatafs.*"

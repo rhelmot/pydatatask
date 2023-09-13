@@ -42,6 +42,7 @@ import aioshutil
 import botocore.exceptions
 import docker_registry_client_async
 import dxf
+import motor.core
 import motor.motor_asyncio
 import yaml
 
@@ -600,7 +601,7 @@ class MongoMetadataRepository(MetadataRepository):
 
     def __init__(
         self,
-        collection: Callable[[], motor.motor_asyncio.AsyncIOMotorCollection],
+        collection: Callable[[], motor.core.AgnosticCollection],
         subcollection: Optional[str],
     ):
         """
@@ -614,7 +615,7 @@ class MongoMetadataRepository(MetadataRepository):
         return f"<{type(self).__name__} {self._subcollection}>"
 
     @property
-    def collection(self) -> motor.motor_asyncio.AsyncIOMotorCollection:
+    def collection(self) -> motor.core.AgnosticCollection:
         """
         The motor async collection data will be stored in. If this is provided by an unopened session, raise an error.
         """

@@ -50,11 +50,11 @@ echo bye >&2
 
         task = pydatatask.ProcessTask(
             "task",
+            template,
             localhost,
             quota,
             pydatatask.Resources.parse("100m", "100m"),
             repo_pids,
-            template,
             environ={},
             done=repo_done,
             stdin=None,
@@ -157,11 +157,11 @@ echo 'goodbye world!' >&2
 
         task = pydatatask.ProcessTask(
             "task",
+            template,
             procman,
             quota,
             pydatatask.Resources.parse("100m", "100m"),
             repo_pids,
-            template,
             environ={},
             done=repo_done,
             stdin=repo_stdin,

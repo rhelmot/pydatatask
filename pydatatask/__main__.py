@@ -1,12 +1,16 @@
-from typing import Any, Dict, List, Optional, TypeVar, Union
+"""
+This module is called when you run `python -m pydatatask`. Its whole purpose is to parse pipeline.yaml files and then
+feed the result into pydatatask.main.main().
+"""
+from typing import Any, Dict, List, Optional, TypeVar
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import timedelta
 import os
 import pathlib
 import sys
 
 import aiobotocore.session
-import kubernetes
 import kubernetes_asyncio.config
 import yaml
 
@@ -28,16 +32,16 @@ _T = TypeVar("_T")
 _K = TypeVar("_K", bound=Task)
 
 
-def find_config() -> Optional[pathlib.Path]:
+def _find_config() -> Optional[pathlib.Path]:
     thing = os.getenv("PIPELINE_YAML")
     if thing is not None:
         return pathlib.Path(thing)
 
     root = pathlib.Path.cwd()
     while True:
-        thing = root / "pipeline.yaml"
-        if thing.exists():
-            return thing
+        pth = root / "pipeline.yaml"
+        if pth.exists():
+            return pth
         newroot = root.parent
         if newroot == root:
             return None
@@ -45,7 +49,7 @@ def find_config() -> Optional[pathlib.Path]:
             root = newroot
 
 
-def parse_bool(thing) -> bool:
+def _parse_bool(thing) -> bool:
     if isinstance(thing, bool):
         return thing
     if isinstance(thing, int):
@@ -59,7 +63,7 @@ def parse_bool(thing) -> bool:
     raise ValueError(f"{type(thing)} is not valid as a bool")
 
 
-def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str, Any]) -> Callable[[Any], _T]:
+def _make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str, Any]) -> Callable[[Any], _T]:
     def inner(thing):
         if not isinstance(thing, dict):
             raise ValueError(f"{name} must be followed by a mapping")
@@ -74,11 +78,11 @@ def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str
     return inner
 
 
-def make_task_constructor(
+def _make_task_constructor(
     name: str, constructor: Callable[..., _K], schema: Dict[str, Any], repos: Mapping[str, Repository]
 ) -> Callable[[Any], _K]:
-    inner_constructor = make_constructor(name, constructor, schema)
-    repo_picker = make_picker("repo", repos)
+    inner_constructor = _make_constructor(name, constructor, schema)
+    repo_picker = _make_picker("repo", repos)
 
     def inner(thing):
         if not isinstance(thing, dict):
@@ -107,7 +111,7 @@ def make_task_constructor(
     return inner
 
 
-def make_dispatcher(name: str, mapping: Dict[str, Callable[[Any], _T]]) -> Callable[[Any], _T]:
+def _make_dispatcher(name: str, mapping: Dict[str, Callable[[Any], _T]]) -> Callable[[Any], _T]:
     def inner(thing):
         if not mapping:
             raise ValueError(f"You must provide at least one {name} to reference")
@@ -122,7 +126,7 @@ def make_dispatcher(name: str, mapping: Dict[str, Callable[[Any], _T]]) -> Calla
     return inner
 
 
-def make_dict_parser(
+def _make_dict_parser(
     name: str, key_parser: Callable[[str], str], value_parser: Callable[[Any], _T]
 ) -> Callable[[Any], Dict[str, _T]]:
     def inner(thing):
@@ -133,7 +137,7 @@ def make_dict_parser(
     return inner
 
 
-def make_list_parser(name: str, value_parser: Callable[[Any], _T]) -> Callable[[Any], List[_T]]:
+def _make_list_parser(name: str, value_parser: Callable[[Any], _T]) -> Callable[[Any], List[_T]]:
     def inner(thing):
         if not isinstance(thing, list):
             raise ValueError(f"{name} must be a list")
@@ -142,7 +146,7 @@ def make_list_parser(name: str, value_parser: Callable[[Any], _T]) -> Callable[[
     return inner
 
 
-def make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], _T]:
+def _make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], _T]:
     def inner(thing):
         if not options:
             raise ValueError(f"Must provide at least one {name}")
@@ -155,7 +159,7 @@ def make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], _T]:
     return inner
 
 
-def build_podman(namespace: str, app: str = "pipeline-worker"):
+def _build_podman(namespace: str, app: str = "pipeline-worker"):
     async def podman():
         if os.path.exists(os.path.expanduser(kubernetes_asyncio.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION)):
             await kubernetes_asyncio.config.load_kube_config()
@@ -171,7 +175,7 @@ def build_podman(namespace: str, app: str = "pipeline-worker"):
     return podman
 
 
-def build_s3_connection(endpoint: str, username: str, password: str):
+def _build_s3_connection(endpoint: str, username: str, password: str):
     async def minio():
         minio_session = aiobotocore.session.get_session()
         async with minio_session.create_client(
@@ -185,15 +189,22 @@ def build_s3_connection(endpoint: str, username: str, password: str):
     return minio
 
 
-quota_constructor = make_constructor("quota", Resources.parse, {"cpu": str, "mem": str, "launches": str})
-timedelta_constructor = make_constructor(
+_quota_constructor = _make_constructor("quota", Resources.parse, {"cpu": str, "mem": str, "launches": str})
+_timedelta_constructor = _make_constructor(
     "timedelta",
     timedelta,
     {"days": int, "seconds": int, "microseconds": int, "milliseconds": int, "minutes": int, "hours": int, "weeks": int},
 )
 
 
-def parse_pipeline(cfgpath: pathlib.Path, content: dict) -> Optional[Pipeline]:
+@dataclass
+class _PriorityEntry:
+    priority: int
+    task: Optional[str] = None
+    job: Optional[str] = None
+
+
+def _parse_pipeline(content: dict) -> Optional[Pipeline]:
     extras = set(content.keys()) - {"repos", "tasks", "resources", "quotas", "priorities"}
     if extras:
         raise ValueError(f"Extra keys in root: {', '.join(extras)}")
@@ -201,32 +212,32 @@ def parse_pipeline(cfgpath: pathlib.Path, content: dict) -> Optional[Pipeline]:
     if needed:
         raise ValueError(f"Missing keys in root: {', '.join(needed)}")
 
-    priorities_constructor = make_list_parser(
-        "priorities", make_constructor("priority", dict, {"task": str, "job": str, "priority": int})
+    priorities_constructor = _make_list_parser(
+        "priorities", _make_constructor("priority", _PriorityEntry, {"task": str, "job": str, "priority": int})
     )
     priorities = priorities_constructor(content.get("priorities", []))
 
-    quotas_constructor = make_dict_parser("quotas", str, quota_constructor)
+    quotas_constructor = _make_dict_parser("quotas", str, _quota_constructor)
     quotas = {k: ResourceManager(v) for k, v in quotas_constructor(content.get("quotas", {})).items()}
 
     session = Session()
-    resources_constructor = make_dict_parser(
+    resources_constructor = _make_dict_parser(
         "resources",
         str,
-        make_dispatcher(
+        _make_dispatcher(
             "Resource",
             {
-                "KubernetesCluster": make_constructor(
+                "KubernetesCluster": _make_constructor(
                     "KubernetesCluster",
-                    build_podman,
+                    _build_podman,
                     {
                         "app": str,
                         "namespace": str,
                     },
                 ),
-                "S3Connection": make_constructor(
+                "S3Connection": _make_constructor(
                     "S3Connection",
-                    build_s3_connection,
+                    _build_s3_connection,
                     {
                         "endpoint": str,
                         "username": str,
@@ -239,35 +250,35 @@ def parse_pipeline(cfgpath: pathlib.Path, content: dict) -> Optional[Pipeline]:
     resources_input = content.get("resources", {})
     resources = {k: session.resource(v) for k, v in resources_constructor(resources_input).items()}
 
-    repo_constructor = make_dict_parser(
+    repo_constructor = _make_dict_parser(
         "repo",
         str,
-        make_dispatcher(
+        _make_dispatcher(
             "Repository",
             {
-                "File": make_constructor(
+                "File": _make_constructor(
                     "FileRepository",
                     FileRepository,
                     {
                         "basedir": str,
                         "extension": str,
-                        "case_insensitive": parse_bool,
+                        "case_insensitive": _parse_bool,
                     },
                 ),
-                "YamlMetadataFile": make_constructor(
+                "YamlMetadataFile": _make_constructor(
                     "YamlMetadataFileRepository",
                     YamlMetadataFileRepository,
                     {
                         "basedir": str,
                         "extension": str,
-                        "case_insensitive": parse_bool,
+                        "case_insensitive": _parse_bool,
                     },
                 ),
-                "S3Bucket": make_constructor(
+                "S3Bucket": _make_constructor(
                     "S3BucketRepository",
                     S3BucketRepository,
                     {
-                        "client": make_picker("S3Connection", resources),
+                        "client": _make_picker("S3Connection", resources),
                         "bucket": str,
                         "prefix": str,
                         "suffix": str,
@@ -281,30 +292,30 @@ def parse_pipeline(cfgpath: pathlib.Path, content: dict) -> Optional[Pipeline]:
 
     repos = repo_constructor(content["repos"])
 
-    task_constructor = make_list_parser(
+    task_constructor = _make_list_parser(
         "task",
-        make_dispatcher(
+        _make_dispatcher(
             "Task",
             {
-                "Process": make_task_constructor(
+                "Process": _make_task_constructor(
                     "ProcessTask",
                     ProcessTask,
                     {
                         "name": str,
                         "template": str,
-                        "manager": make_picker("ProcessManager", resources),
-                        "resource_manager": make_picker("ResourceManager", quotas),
-                        "job_resources": quota_constructor,
-                        "pids": make_picker("Repository", repos),
-                        "window": timedelta_constructor,
-                        "environ": make_dict_parser("environ", str, str),
-                        "done": make_picker("Repository", repos),
-                        "stdin": make_picker("Repository", repos),
-                        "stdout": make_picker("Repository", repos),
+                        "manager": _make_picker("ProcessManager", resources),
+                        "resource_manager": _make_picker("ResourceManager", quotas),
+                        "job_resources": _quota_constructor,
+                        "pids": _make_picker("Repository", repos),
+                        "window": _timedelta_constructor,
+                        "environ": _make_dict_parser("environ", str, str),
+                        "done": _make_picker("Repository", repos),
+                        "stdin": _make_picker("Repository", repos),
+                        "stdout": _make_picker("Repository", repos),
                         "stderr": lambda thing: pydatatask.task.STDOUT
                         if thing == "STDOUT"
-                        else make_picker("Repository", repos)(thing),
-                        "ready": make_picker("Repository", repos),
+                        else _make_picker("Repository", repos)(thing),
+                        "ready": _make_picker("Repository", repos),
                     },
                     repos,
                 ),
@@ -317,29 +328,30 @@ def parse_pipeline(cfgpath: pathlib.Path, content: dict) -> Optional[Pipeline]:
     def get_priority(task: str, job: str) -> int:
         result = 0
         for directive in priorities:
-            if directive.get("job", job) == job and directive.get("task", task) == task:
-                result += directive["priority"]
+            if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):
+                result += directive.priority
         return result
 
     pipeline = Pipeline(tasks, session, quotas.values(), get_priority)
     return pipeline
 
 
-def main() -> Optional[int]:
-    cfgpath = find_config()
+def _main() -> Optional[int]:
+    cfgpath = _find_config()
     if cfgpath is None:
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
 
-    with open(cfgpath, "r") as fp:
+    with open(cfgpath, "r", encoding="utf-8") as fp:
         content = yaml.safe_load(fp)
 
-    pipeline = parse_pipeline(cfgpath, content)
+    pipeline = _parse_pipeline(content)
     if pipeline is None:
         return 1
 
     real_main(pipeline)
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_main())
