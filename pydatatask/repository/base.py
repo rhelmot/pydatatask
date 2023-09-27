@@ -26,59 +26,25 @@ from typing import (
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
-import base64
-import hashlib
 import inspect
-import io
 import logging
 import os
+import io
 import string
 
-from kubernetes_asyncio.client import V1Pod
-from types_aiobotocore_s3.client import S3Client
 import aiofiles.os
 import aiohttp.client_exceptions
 import aioshutil
-import botocore.exceptions
-import docker_registry_client_async
-import dxf
-import motor.core
-import motor.motor_asyncio
 import yaml
 
-from .utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
-
 if TYPE_CHECKING:
-    from .task import ExecutorTask, KubeTask
+    from ..task import ExecutorTask, KubeTask
 
 l = logging.getLogger(__name__)
 
-__all__ = (
-    "Repository",
-    "BlobRepository",
-    "MetadataRepository",
-    "FileRepositoryBase",
-    "FileRepository",
-    "DirectoryRepository",
-    "S3BucketRepository",
-    "S3BucketInfo",
-    "MongoMetadataRepository",
-    "InProcessMetadataRepository",
-    "InProcessBlobStream",
-    "InProcessBlobRepository",
-    "DockerRepository",
-    "LiveKubeRepository",
-    "ExecutorLiveRepo",
-    "AggregateOrRepository",
-    "AggregateAndRepository",
-    "BlockingRepository",
-    "YamlMetadataRepository",
-    "YamlMetadataFileRepository",
-    "YamlMetadataS3Repository",
-    "RelatedItemRepository",
-)
+from ..utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
 
-
+# Helper Functions
 def job_getter(f):
     """
     Use this function to annotate non-abstract methods which take a job identifier as their first parameter. This is
@@ -90,6 +56,7 @@ def job_getter(f):
     return f
 
 
+# Base Classes
 class Repository(ABC):
     """
     A repository is a key-value store where the keys are names of jobs. Since the values have unspecified semantics, the
@@ -335,7 +302,7 @@ class FileRepositoryBase(Repository, ABC):
         return str(self.fullpath(job))
 
 
-class FileRepository(FileRepositoryBase, BlobRepository):
+class FileRepository(FileRepositoryBase, BlobRepository): #BlobFileRepository?
     """
     A file repository whose members are files, treated as streamable blobs.
     """
@@ -397,400 +364,88 @@ class DirectoryRepository(FileRepositoryBase):
                 yield item
 
 
-class S3BucketBinaryWriter:
+class RelatedItemRepository(Repository):
     """
-    A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`.
-    """
-
-    def __init__(self, repo: "S3BucketRepository", job: str):
-        self.repo = repo
-        self.job = job
-        self.buffer = io.BytesIO()
-        super().__init__()
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    async def close(self):
-        """
-        Close and flush the data to the bucket.
-        """
-        self.buffer.seek(0, io.SEEK_END)
-        size = self.buffer.tell()
-        self.buffer.seek(0, io.SEEK_SET)
-        await self.repo.client.put_object(
-            Bucket=self.repo.bucket,
-            Key=self.repo.object_name(self.job),
-            Body=self.buffer,
-            ContentLength=size,
-            ContentType=self.repo.mimetype,
-        )
-
-    async def write(self, data: bytes):
-        """
-        Write some data to the stream.
-        """
-        self.buffer.write(data)
-
-
-class S3BucketReader:
-    """
-    A class for streaming byte data from an `S3BucketRepository`.
-    """
-
-    def __init__(self, body):
-        self.body = body
-
-    async def close(self):
-        """
-        Close and release the stream.
-        """
-        self.body.close()
-
-    async def read(self, n=None):  # pylint: disable=unused-argument :(
-        """
-        Read the entire body of the blob. Due to API limitations, we can't read less than that at once...
-        """
-        return await self.body.read()
-
-    async def __aenter__(self):
-        await self.body.__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.body.__aexit__(exc_type, exc_val, exc_tb)
-
-
-class S3BucketInfo:
-    """
-    The data structure returned from :meth:`S3BucketRepository.info`.
-
-    :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
-               return this.
-    :ivar endpoint: The URL of the API server providing the S3 interface.
-    :ivar bucket: The name of the bucket objects are stored in.
-    :ivar prefix: How to prefix an object name such that it will fit into this repository.
-    :ivar suffix: How to suffix an object name such that it will fit into this repository.
-    """
-
-    def __init__(self, endpoint: str, uri: str, bucket: str, prefix: str, suffix: str):
-        self.endpoint = endpoint
-        self.uri = uri
-        self.prefix = prefix
-        self.suffix = suffix
-        self.bucket = bucket
-
-    def __str__(self):
-        return self.uri
-
-
-class S3BucketRepository(BlobRepository):
-    """
-    A repository where keys are paths in a S3 bucket. Provides a streaming interface to the corresponding blobs.
+    A repository which returns items from another repository based on following a related-item lookup.
     """
 
     def __init__(
         self,
-        client: Callable[[], S3Client],
-        bucket: str,
-        prefix: str = "",
-        suffix: str = "",
-        mimetype: str = "application/octet-stream",
-        incluster_endpoint: Optional[str] = None,
+        base_repository: Repository,
+        translator_repository: Repository,
+        allow_deletes=False,
+        prefetch_lookup=True,
     ):
         """
-        :param client: A callable returning an aiobotocore S3 client connected and authenticated to the server you wish
-                       to store things on.
-        :param bucket: The name of the bucket from which to load and store.
-        :param prefix: A prefix to put on the job name before translating it into a bucket path. If this is meant to be
-                       a directory name it should end with a slash character.
-        :param suffix: A suffix to put on the job name before translating it into a bucket path. If this is meant to
-                          be a file extension it should start with a dot.
-        :param mimetype: The MIME type to set the content when adding data.
-        :param incluster_endpoint: Optional: An endpoint URL to provide as the result of info() queries instead of
-                                   extracting the URL from ``client``.
+        :param base_repository: The repository from which to return results based on translated keys. The resulting
+                                repository will duck-type as the same type as the base.
+        :param translator_repository: A repository whose info() will be used to translate keys:
+                                      ``info(job) == translated_job``.
+        :param allow_deletes: Whether the delete operation on this repository does anything. If enabled, it will delete
+                              only from the base repository.
+        :param prefetch_lookup: Whether to cache the entirety of the translator repository in memory to improve
+                                performance.
         """
-        self._client = client
-        self.bucket = bucket
-        self.prefix = prefix
-        self.suffix = suffix
-        self.mimetype = mimetype
-        self.incluster_endpoint = incluster_endpoint
-
-    @property
-    def client(self):
-        """
-        The aiobotocore S3 client. This will raise an error if the client comes from a session which is not opened.
-        """
-        return self._client()
+        self.base_repository = base_repository
+        self.translator_repository = translator_repository
+        self.allow_deletes = allow_deletes
+        self.prefetch_lookup_setting = prefetch_lookup
+        self.prefetch_lookup = None
 
     def __repr__(self):
-        return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"
+        return f"<{type(self).__name__} {self.base_repository} by {self.translator_repository}>"
+
+    async def _lookup(self, item):
+        if self.prefetch_lookup is None and self.prefetch_lookup_setting:
+            self.prefetch_lookup = await self.translator_repository.info_all()
+        if self.prefetch_lookup:
+            return self.prefetch_lookup.get(item)
+        else:
+            return await self.translator_repository.info(item)
 
     async def contains(self, item):
-        try:
-            await self.client.head_object(Bucket=self.bucket, Key=self.object_name(item))
-        except botocore.exceptions.ClientError:
+        basename = await self._lookup(item)
+        if basename is None:
             return False
-        else:
-            return True
+        return await self.base_repository.contains(basename)
 
-    async def unfiltered_iter(self):
-        paginator = self.client.get_paginator("list_objects")
-        async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
-            for obj in page.get("Contents", []):
-                if obj["Key"].endswith(self.suffix):
-                    yield obj["Key"][len(self.prefix) : -len(self.suffix) if self.suffix else None]
+    async def delete(self, job):
+        if not self.allow_deletes:
+            return
 
-    async def validate(self):
-        try:
-            await self.client.head_bucket(Bucket=self.bucket)
-        except botocore.exceptions.ClientError as e:
-            if "404" in str(e):
-                await self.client.create_bucket(Bucket=self.bucket)
-            else:
-                raise
+        basename = await self._lookup(job)
+        if basename is None:
+            return
 
-    def object_name(self, job):
-        """
-        Return the object name for the given job.
-        """
-        return f"{self.prefix}{job}{self.suffix}"
-
-    @job_getter
-    async def open(self, job, mode="r"):
-        if not self.is_valid_job_id(job):
-            raise KeyError(job)
-        if mode == "wb":
-            return S3BucketBinaryWriter(self, job)
-        elif mode == "w":
-            return AWriteText(S3BucketBinaryWriter(self, job))
-        elif mode == "rb":
-            return S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(job)))["Body"])
-        elif mode == "r":
-            return AReadText(
-                S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(job)))["Body"])
-            )
-        else:
-            raise ValueError(mode)
+        await self.base_repository.delete(basename)
 
     @job_getter
     async def info(self, job):
-        """
-        Return an `S3BucketInfo` corresponding to the given job.
-        """
-        return S3BucketInfo(
-            self.incluster_endpoint or self.client._endpoint.host,
-            f"s3://{self.bucket}/{self.object_name(job)}",
-            self.bucket,
-            self.prefix,
-            self.suffix,
-        )
+        basename = await self._lookup(job)
+        if basename is None:
+            raise LookupError(job)
 
-    async def delete(self, job):
-        await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
+        return await self.base_repository.info(basename)
 
+    def __getattr__(self, item):
+        v = getattr(self.base_repository, item)
+        if not getattr(v, "is_job_getter", False):
+            return v
 
-class MongoMetadataRepository(MetadataRepository):
-    """
-    A metadata repository using a MongoDB collection as the backing store.
-    """
+        async def inner(job, *args, **kwargs):
+            basename = await self._lookup(job)
+            if basename is None:
+                raise LookupError(job)
+            return await v(basename, *args, **kwargs)
 
-    def __init__(
-        self,
-        collection: Callable[[], motor.core.AgnosticCollection],
-        subcollection: Optional[str],
-    ):
-        """
-        :param collection: A callable returning a motor async collection.
-        :param subcollection: Optional: the name of a subcollection within the collection in which to store data.
-        """
-        self._collection = collection
-        self._subcollection = subcollection
-
-    def __repr__(self):
-        return f"<{type(self).__name__} {self._subcollection}>"
-
-    @property
-    def collection(self) -> motor.core.AgnosticCollection:
-        """
-        The motor async collection data will be stored in. If this is provided by an unopened session, raise an error.
-        """
-        result = self._collection()
-        if self._subcollection is not None:
-            result = result[self._subcollection]
-        return result
-
-    async def contains(self, item):
-        return await self.collection.count_documents({"_id": item}) != 0
-
-    async def delete(self, job):
-        await self.collection.delete_one({"_id": job})
+        return inner
 
     async def unfiltered_iter(self):
-        async for x in self.collection.find({}, projection=[]):
-            yield x["_id"]
-
-    @job_getter
-    async def info(self, job):
-        """
-        The info of a mongo metadata repository is the literal value stored in the repository with identifier ``job``.
-        """
-        result = await self.collection.find_one({"_id": job})
-        if result is None:
-            result = {}
-        return result
-
-    async def info_all(self) -> Dict[str, Any]:
-        return {entry["_id"]: entry async for entry in self.collection.find({})}
-
-    @job_getter
-    async def dump(self, job, data):
-        if not self.is_valid_job_id(job):
-            raise KeyError(job)
-        await self.collection.replace_one({"_id": job}, data, upsert=True)
-
-
-class DockerRepository(Repository):
-    """
-    A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
-    on this repository.
-    """
-
-    def __init__(
-        self,
-        registry: Callable[[], docker_registry_client_async.DockerRegistryClientAsync],
-        domain: str,
-        repository: str,
-    ):
-        """
-        :param registry: A callable returning a
-                         `docker_registry_client_async <https://pypi.org/project/docker-registry-client-async/>`_
-                         client object with appropriate authentication information.
-        :param domain: The registry domain to connect to, e.g. ``index.docker.io``.
-        :param repository: The repository to store images in within the domain, e.g. ``myname/myrepo``.
-        """
-        self._registry = registry
-        self.domain = domain
-        self.repository = repository
-
-    @property
-    def registry(self) -> docker_registry_client_async.DockerRegistryClientAsync:
-        """
-        The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
-        """
-        return self._registry()
-
-    async def unfiltered_iter(self):
-        try:
-            image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
-            tags = (await self.registry.get_tags(image)).tags["tags"]
-            if tags is None:
-                return
-            for tag in tags:
-                yield tag
-        except aiohttp.client_exceptions.ClientResponseError as e:
-            if e.status != 404:
-                raise
-
-    def __repr__(self):
-        return f"<DockerRepository {self.domain}/{self.repository}:*>"
-
-    @job_getter
-    async def info(self, job):
-        """
-        The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
-
-        .. code::
-
-            { "withdomain": "docker.example.com/myname/myrepo:job", "withoutdomain": "myname/myrepo:job" }
-        """
-        return {
-            "withdomain": f"{self.domain}/{self.repository}:{job}",
-            "withoutdomain": f"{self.repository}:{job}",
-        }
-
-    def _dxf_auth(self, dxf_obj, response):
-        # what a fucking hack
-        for pattern, credentials in self.registry.credentials.items():
-            if pattern.fullmatch(self.domain):
-                result = credentials
-                break
-        else:
-            raise PermissionError("Missing credentials for %s" % self.domain)
-        if self.registry.ssl:
-            username, password = base64.b64decode(result).decode().split(":")
-            dxf_obj.authenticate(username, password, response)
-        else:
-            dxf_obj._headers = {"Authorization": "Basic " + result}
-
-    async def delete(self, job):
-        # if not await self.contains(job):
-        #    return
-
-        self._delete_inner(job)  # blocking! epic fail
-
-    def _delete_inner(self, job):
-        random_data = os.urandom(16)
-        random_digest = "sha256:" + hashlib.sha256(random_data).hexdigest()
-
-        d = dxf.DXF(
-            host=self.domain,
-            repo=self.repository,
-            auth=self._dxf_auth,
-            insecure=not self.registry.ssl,
-        )
-        d.push_blob(data=random_data, digest=random_digest)
-        d.set_alias(job, random_digest)
-        d.del_alias(job)
-
-
-class LiveKubeRepository(Repository):
-    """
-    A repository where keys translate to ``job`` labels on running kube pods. This repository is constructed
-    automatically by a `KubeTask` or subclass and is linked as the ``live`` repository. Do not construct this class
-    manually.
-    """
-
-    def __init__(self, task: "KubeTask"):
-        self.task = task
-
-    async def unfiltered_iter(self):
-        for pod in await self.pods():
-            yield pod.metadata.labels["job"]
-
-    async def contains(self, item):
-        return bool(await self.task.podman.query(task=self.task.name, job=item))
-
-    def __repr__(self):
-        return f"<LiveKubeRepository task={self.task.name}>"
-
-    @job_getter
-    async def info(self, job):
-        """
-        Cannot template with live kube info. Implement this if you have something in mind.
-        """
-        return None
-
-    async def pods(self) -> List[V1Pod]:
-        """
-        A list of live pod objects corresponding to this repository.
-        """
-        return await self.task.podman.query(task=self.task.name)
-
-    async def delete(self, job):
-        """
-        Deleting a job from this repository will delete the pod.
-        """
-        pods = await self.task.podman.query(job=job, task=self.task.name)
-        for pod in pods:  # there... really should be only one
-            await self.task.delete(pod)
-        # while await self.task.podman.query(job=job, task=self.task.name):
-        #    await asyncio.sleep(0.2)
-
+        base_contents = {x async for x in self.base_repository}
+        async for item in self.translator_repository:
+            basename = await self._lookup(item)
+            if basename is not None and basename in base_contents:
+                yield item
 
 class AggregateAndRepository(Repository):
     """
@@ -933,109 +588,6 @@ class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
 
     def __init__(self, basedir, extension=".yaml", case_insensitive=False):
         super().__init__(basedir, extension=extension, case_insensitive=case_insensitive)
-
-
-class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
-    """
-    A metadata repository based on a s3 bucket repository.
-    """
-
-    def __init__(self, client, bucket, prefix, suffix=".yaml", mimetype="text/yaml"):
-        super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)
-
-    @job_getter
-    async def info(self, job):
-        try:
-            return await super().info(job)
-        except botocore.exceptions.ClientError as e:
-            if "NoSuchKey" in str(e):
-                return {}
-            else:
-                raise
-
-
-class RelatedItemRepository(Repository):
-    """
-    A repository which returns items from another repository based on following a related-item lookup.
-    """
-
-    def __init__(
-        self,
-        base_repository: Repository,
-        translator_repository: Repository,
-        allow_deletes=False,
-        prefetch_lookup=True,
-    ):
-        """
-        :param base_repository: The repository from which to return results based on translated keys. The resulting
-                                repository will duck-type as the same type as the base.
-        :param translator_repository: A repository whose info() will be used to translate keys:
-                                      ``info(job) == translated_job``.
-        :param allow_deletes: Whether the delete operation on this repository does anything. If enabled, it will delete
-                              only from the base repository.
-        :param prefetch_lookup: Whether to cache the entirety of the translator repository in memory to improve
-                                performance.
-        """
-        self.base_repository = base_repository
-        self.translator_repository = translator_repository
-        self.allow_deletes = allow_deletes
-        self.prefetch_lookup_setting = prefetch_lookup
-        self.prefetch_lookup = None
-
-    def __repr__(self):
-        return f"<{type(self).__name__} {self.base_repository} by {self.translator_repository}>"
-
-    async def _lookup(self, item):
-        if self.prefetch_lookup is None and self.prefetch_lookup_setting:
-            self.prefetch_lookup = await self.translator_repository.info_all()
-        if self.prefetch_lookup:
-            return self.prefetch_lookup.get(item)
-        else:
-            return await self.translator_repository.info(item)
-
-    async def contains(self, item):
-        basename = await self._lookup(item)
-        if basename is None:
-            return False
-        return await self.base_repository.contains(basename)
-
-    async def delete(self, job):
-        if not self.allow_deletes:
-            return
-
-        basename = await self._lookup(job)
-        if basename is None:
-            return
-
-        await self.base_repository.delete(basename)
-
-    @job_getter
-    async def info(self, job):
-        basename = await self._lookup(job)
-        if basename is None:
-            raise LookupError(job)
-
-        return await self.base_repository.info(basename)
-
-    def __getattr__(self, item):
-        v = getattr(self.base_repository, item)
-        if not getattr(v, "is_job_getter", False):
-            return v
-
-        async def inner(job, *args, **kwargs):
-            basename = await self._lookup(job)
-            if basename is None:
-                raise LookupError(job)
-            return await v(basename, *args, **kwargs)
-
-        return inner
-
-    async def unfiltered_iter(self):
-        base_contents = {x async for x in self.base_repository}
-        async for item in self.translator_repository:
-            basename = await self._lookup(item)
-            if basename is not None and basename in base_contents:
-                yield item
 
 
 class ExecutorLiveRepo(Repository):
