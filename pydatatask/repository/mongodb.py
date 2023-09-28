@@ -1,20 +1,14 @@
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    Optional,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, overload
 
 import motor.core
 import motor.motor_asyncio
 
 from .base import MetadataRepository, job_getter
 
+
 class MongoMetadataRepository(MetadataRepository):
     """
-    A metadata repository using a MongoDB collection as the backing store.
+    A metadata repository using a mongodb collection as the backing store.
     """
 
     def __init__(

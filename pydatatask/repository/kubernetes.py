@@ -7,6 +7,7 @@ from .base import Repository, job_getter
 if TYPE_CHECKING:
     from ..task import ExecutorTask, KubeTask
 
+
 class LiveKubeRepository(Repository):
     """
     A repository where keys translate to ``job`` labels on running kube pods. This repository is constructed

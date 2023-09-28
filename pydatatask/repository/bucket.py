@@ -1,22 +1,12 @@
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    overload,
-)
-
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, overload
 import io
 
 from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 
-from .base import BlobRepository, YamlMetadataRepository, job_getter
-
 from pydatatask.utils import AReadText, AWriteText
+
+from .base import BlobRepository, YamlMetadataRepository, job_getter
 
 
 class S3BucketBinaryWriter:
@@ -214,6 +204,7 @@ class S3BucketRepository(BlobRepository):
 
     async def delete(self, job):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
+
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
     """

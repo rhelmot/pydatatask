@@ -27,9 +27,9 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 import inspect
+import io
 import logging
 import os
-import io
 import string
 
 import aiofiles.os
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 l = logging.getLogger(__name__)
 
 from ..utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
+
 
 # Helper Functions
 def job_getter(f):
@@ -302,7 +303,7 @@ class FileRepositoryBase(Repository, ABC):
         return str(self.fullpath(job))
 
 
-class FileRepository(FileRepositoryBase, BlobRepository): #BlobFileRepository?
+class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
     """
     A file repository whose members are files, treated as streamable blobs.
     """
@@ -446,6 +447,7 @@ class RelatedItemRepository(Repository):
             basename = await self._lookup(item)
             if basename is not None and basename in base_contents:
                 yield item
+
 
 class AggregateAndRepository(Repository):
     """

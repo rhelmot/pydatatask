@@ -1,15 +1,16 @@
 from typing import Callable
-import os
 import base64
 import hashlib
+import os
 
-import dxf
 import aiohttp.client_exceptions
 import docker_registry_client_async
+import dxf
 
 from .base import Repository, job_getter
 
-class DockerRepository(Repository):
+
+class dockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
@@ -17,7 +18,7 @@ class DockerRepository(Repository):
 
     def __init__(
         self,
-        registry: Callable[[], docker_registry_client_async.DockerRegistryClientAsync],
+        registry: Callable[[], docker_registry_client_async.dockerRegistryClientAsync],
         domain: str,
         repository: str,
     ):
@@ -33,7 +34,7 @@ class DockerRepository(Repository):
         self.repository = repository
 
     @property
-    def registry(self) -> docker_registry_client_async.DockerRegistryClientAsync:
+    def registry(self) -> docker_registry_client_async.dockerRegistryClientAsync:
         """
         The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
         """
@@ -52,7 +53,7 @@ class DockerRepository(Repository):
                 raise
 
     def __repr__(self):
-        return f"<DockerRepository {self.domain}/{self.repository}:*>"
+        return f"<dockerRepository {self.domain}/{self.repository}:*>"
 
     @job_getter
     async def info(self, job):
