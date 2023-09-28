@@ -10,7 +10,7 @@ import dxf
 from .base import Repository, job_getter
 
 
-class dockerRepository(Repository):
+class DockerRepository(Repository):
     """
     A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
     on this repository.
@@ -34,7 +34,7 @@ class dockerRepository(Repository):
         self.repository = repository
 
     @property
-    def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync: #Is this correct?
+    def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
         """
         The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
         """
