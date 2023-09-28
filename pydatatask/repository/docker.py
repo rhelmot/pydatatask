@@ -34,7 +34,7 @@ class dockerRepository(Repository):
         self.repository = repository
 
     @property
-    def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
+    def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync: #Is this correct?
         """
         The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
         """
