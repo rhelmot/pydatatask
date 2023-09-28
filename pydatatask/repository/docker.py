@@ -18,7 +18,7 @@ class dockerRepository(Repository):
 
     def __init__(
         self,
-        registry: Callable[[], docker_registry_client_async.dockerRegistryClientAsync],
+        registry: Callable[[], docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync],
         domain: str,
         repository: str,
     ):
@@ -34,7 +34,7 @@ class dockerRepository(Repository):
         self.repository = repository
 
     @property
-    def registry(self) -> docker_registry_client_async.dockerRegistryClientAsync:
+    def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
         """
         The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
         """
@@ -42,7 +42,7 @@ class dockerRepository(Repository):
 
     async def unfiltered_iter(self):
         try:
-            image = docker_registry_client_async.ImageName(self.repository, endpoint=self.domain)
+            image = docker_registry_client_async.imagename.ImageName(self.repository, endpoint=self.domain)
             tags = (await self.registry.get_tags(image)).tags["tags"]
             if tags is None:
                 return
