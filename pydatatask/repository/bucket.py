@@ -1,4 +1,8 @@
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Optional, overload
+"""
+This module contains repositories and other classes for interacting with S3-compatible bucket stores.
+"""
+
+from typing import Callable, Optional
 import io
 
 from types_aiobotocore_s3.client import S3Client

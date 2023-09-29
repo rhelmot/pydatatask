@@ -1,3 +1,7 @@
+"""
+This module contains repositories for viewing the current state of a kubernetes cluster as a data store.
+"""
+
 from typing import TYPE_CHECKING, List
 
 from kubernetes_asyncio.client import V1Pod
@@ -5,7 +9,7 @@ from kubernetes_asyncio.client import V1Pod
 from .base import Repository, job_getter
 
 if TYPE_CHECKING:
-    from ..task import ExecutorTask, KubeTask
+    from ..task import KubeTask
 
 
 class LiveKubeRepository(Repository):

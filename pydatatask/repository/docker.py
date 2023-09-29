@@ -1,3 +1,7 @@
+"""
+This module contains repositories for interacting with docker registries.
+"""
+
 from typing import Callable
 import base64
 import hashlib
