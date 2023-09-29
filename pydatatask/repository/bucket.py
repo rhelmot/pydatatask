@@ -195,7 +195,7 @@ class S3BucketRepository(BlobRepository):
         Return an `S3BucketInfo` corresponding to the given job.
         """
         return S3BucketInfo(
-            self.incluster_endpoint or self.client._endpoint.host, # type: ignore
+            self.incluster_endpoint or self.client._endpoint.host,  # type: ignore
             f"s3://{self.bucket}/{self.object_name(job)}",
             self.bucket,
             self.prefix,

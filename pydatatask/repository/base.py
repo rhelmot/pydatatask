@@ -312,7 +312,7 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
     async def open(self, job, mode="r"):
         if not self.is_valid_job_id(job):
             raise KeyError(job)
-        return aiofiles.open(self.fullpath(job), mode) # type: ignore
+        return aiofiles.open(self.fullpath(job), mode)  # type: ignore
 
     async def delete(self, job):
         try:
