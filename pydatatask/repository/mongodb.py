@@ -16,28 +16,25 @@ class MongoMetadataRepository(MetadataRepository):
 
     def __init__(
         self,
-        collection: Callable[[], motor.core.AgnosticCollection],
-        subcollection: Optional[str],
+        database: Callable[[], motor.core.AgnosticCollection],
+        collection: str,
     ):
         """
         :param collection: A callable returning a motor async collection.
         :param subcollection: Optional: the name of a subcollection within the collection in which to store data.
         """
+        self._database = database
         self._collection = collection
-        self._subcollection = subcollection
 
     def __repr__(self):
-        return f"<{type(self).__name__} {self._subcollection}>"
+        return f"<{type(self).__name__} {self._collection}>"
 
     @property
     def collection(self) -> motor.core.AgnosticCollection:
         """
         The motor async collection data will be stored in. If this is provided by an unopened session, raise an error.
         """
-        result = self._collection()
-        if self._subcollection is not None:
-            result = result[self._subcollection]
-        return result
+        return self._database()[self._collection]
 
     async def contains(self, item):
         return await self.collection.count_documents({"_id": item}) != 0

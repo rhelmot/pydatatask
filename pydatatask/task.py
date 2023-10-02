@@ -388,7 +388,7 @@ class KubeTask(Task):
     def __init__(
         self,
         name: str,
-        podman: Callable[[], PodManager],
+        cluster: Callable[[], PodManager],
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional[BlobRepository],
@@ -400,7 +400,7 @@ class KubeTask(Task):
     ):
         """
         :param name: The name of the task.
-        :param podman: A callable returning a PodManager to use to connect to the cluster.
+        :param cluster: A callable returning a PodManager to use to connect to the cluster.
         :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
         :param template: YAML markup for a pod manifest template, either as a string or a path to a file.
@@ -422,7 +422,7 @@ class KubeTask(Task):
 
         self.template = template
         self.resources = resources
-        self._podman = podman
+        self._podman = cluster
         self.logs = logs
         self.timeout = timeout
         self.done = done
@@ -1073,7 +1073,7 @@ class KubeFunctionTask(KubeTask):
     def __init__(
         self,
         name: str,
-        podman: Callable[[], PodManager],
+        cluster: Callable[[], PodManager],
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional[BlobRepository] = None,
@@ -1084,7 +1084,7 @@ class KubeFunctionTask(KubeTask):
     ):
         """
         :param name: The name of this task.
-        :param podman: A callable returning a PodManager to use to connect to the cluster.
+        :param cluster: A callable returning a PodManager to use to connect to the cluster.
         :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
         :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
@@ -1105,7 +1105,7 @@ class KubeFunctionTask(KubeTask):
         It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
         one link is present with ``inhibits_start``.
         """
-        super().__init__(name, podman, resources, template, logs, kube_done, env=env)
+        super().__init__(name, cluster, resources, template, logs, kube_done, env=env)
         self.func = func
         self.func_done = func_done
         if func_done is not None:

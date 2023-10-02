@@ -13,6 +13,7 @@ from typing import (
     Dict,
     Literal,
     Optional,
+    Union,
     overload,
 )
 from abc import ABC, abstractmethod
@@ -255,7 +256,7 @@ class FileRepositoryBase(Repository, ABC):
     to say about what is found at these filepaths.
     """
 
-    def __init__(self, basedir, extension="", case_insensitive=False):
+    def __init__(self, basedir: Union[str, Path], extension: str = "", case_insensitive: bool = False):
         self.basedir = Path(basedir)
         self.extension = extension
         self.case_insensitive = case_insensitive
@@ -579,7 +580,7 @@ class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
     A metadata repository based on a file blob repository.
     """
 
-    def __init__(self, basedir, extension=".yaml", case_insensitive=False):
+    def __init__(self, basedir: Union[str, Path], extension: str = ".yaml", case_insensitive: bool = False):
         super().__init__(basedir, extension=extension, case_insensitive=case_insensitive)
 
 
