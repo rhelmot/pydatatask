@@ -10,15 +10,24 @@ from kubernetes_asyncio.client import ApiClient, CoreV1Api, V1Pod
 from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
 
+from pydatatask.executor import Executor
+from pydatatask.executor.container_manager import KubeContainerManager
+
 l = logging.getLogger(__name__)
 
 __all__ = ("PodManager",)
 
 
-class PodManager:
+class PodManager(Executor):
     """
     A pod manager allows multiple tasks to share a connection to a kubernetes cluster and manage pods on it.
     """
+
+    def to_pod_manager(self) -> "PodManager":
+        return self
+
+    def to_container_manager(self):
+        return KubeContainerManager(self)
 
     def __init__(
         self,

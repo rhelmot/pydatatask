@@ -2,7 +2,7 @@
 This module contains parsing methods for transforming various dict and list schemas into Pipeline, Repository, Task,
 and other kinds of pydatatask classes.
 """
-from typing import Any, Dict, List, Optional, TypeVar
+from typing import Any, Awaitable, Dict, List, Optional, TypeVar
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from importlib.metadata import entry_points
@@ -16,11 +16,15 @@ import sys
 import traceback
 
 import aiobotocore.session
+import asyncssh
 import docker_registry_client_async
 import kubernetes_asyncio.config
 import motor.motor_asyncio
 
-from pydatatask.pod_manager import PodManager
+from pydatatask.executor import Executor
+from pydatatask.executor.container_manager import DockerContainerManager
+from pydatatask.executor.pod_manager import PodManager
+from pydatatask.executor.proc_manager import LocalLinuxManager, SSHLinuxManager
 from pydatatask.repository import (
     FileRepository,
     Repository,
@@ -36,6 +40,7 @@ from pydatatask.repository.bucket import YamlMetadataS3Repository
 from pydatatask.repository.docker import DockerRepository
 from pydatatask.repository.mongodb import MongoMetadataRepository
 from pydatatask.resource_manager import ResourceManager, Resources
+from pydatatask.session import Session
 from pydatatask.task import KubeTask, ProcessTask, Task
 import pydatatask
 
@@ -250,10 +255,30 @@ def _build_docker_connection(
     return docker
 
 
-async def _build_mongo_connection(url: str, database: str):
-    client = motor.motor_asyncio.AsyncIOMotorClient(url)
-    collection = client.get_database(database)
-    yield collection
+def _build_mongo_connection(url: str, database: str):
+    async def mongo():
+        client = motor.motor_asyncio.AsyncIOMotorClient(url)
+        collection = client.get_database(database)
+        yield collection
+
+    return mongo
+
+
+def _build_ssh_connection(
+    hostname: str, username: str, password: Optional[str] = None, key: Optional[str] = None, port: int = 22
+):
+    async def ssh():
+        async with asyncssh.connect(
+            hostname,
+            port=port,
+            username=username,
+            password=password,
+            known_hosts=None,
+            client_keys=asyncssh.load_keypairs(key) if key is not None else None,
+        ) as s:
+            yield s
+
+    return ssh
 
 
 _quota_constructor = make_constructor("quota", Resources.parse, {"cpu": str, "mem": str, "launches": str})
@@ -355,16 +380,62 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
     return make_dispatcher("Repository", kinds)
 
 
-def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
-    kinds = {
-        "KubernetesCluster": make_constructor(
-            "KubernetesCluster",
-            _build_podman,
+def build_executor_picker(session: Session, resources: Dict[str, Callable[[], Any]]) -> Callable[[Any], Executor]:
+    def _build_pod_manager(app: str, namespace: str, config_file: Optional[str], context: Optional[str]):
+        @session.resource
+        async def config():
+            yield await kubernetes_asyncio.config.load_kube_config(config_file, context)
+
+        return PodManager(app, namespace, config)
+
+    kinds: Dict[str, Callable[[Any], Executor]] = {
+        "LocalLinux": make_constructor(
+            "LocalLinuxManager",
+            LocalLinuxManager,
+            {
+                "app": str,
+                "local_path": str,
+            },
+        ),
+        "SSHLinux": make_constructor(
+            "SSHLinuxManager",
+            SSHLinuxManager,
+            {
+                "app": str,
+                "remote_path": str,
+                "ssh": make_picker("SSHConnection", resources),
+            },
+        ),
+        "Kubernetes": make_constructor(
+            "PodManager",
+            _build_pod_manager,
             {
                 "app": str,
                 "namespace": str,
+                "config_file": str,
+                "context": str,
             },
         ),
+        "Docker": make_constructor(
+            "DockerContainerManager",
+            DockerContainerManager,
+            {
+                "app": str,
+                "url": str,
+            },
+        ),
+    }
+    for ep in entry_points(group="pydatatask.repository_constructors"):
+        maker = ep.load()
+        try:
+            kinds |= maker(resources)
+        except TypeError:
+            traceback.print_exc(file=sys.stderr)
+    return make_dispatcher("Repository", kinds)
+
+
+def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
+    kinds = {
         "S3Connection": make_constructor(
             "S3Connection",
             _build_s3_connection,
@@ -391,6 +462,17 @@ def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
             {
                 "url": str,
                 "database": str,
+            },
+        ),
+        "SSHConnection": make_constructor(
+            "SSHConnection",
+            _build_ssh_connection,
+            {
+                "hostname": str,
+                "username": str,
+                "password": str,
+                "key": str,
+                "port": int,
             },
         ),
     }

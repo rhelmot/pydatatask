@@ -1,5 +1,17 @@
-from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Type
-from dataclasses import asdict, dataclass, field
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    get_args,
+    get_origin,
+)
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 import tempfile
 
@@ -16,45 +28,146 @@ from pydatatask.repository import Repository
 from pydatatask.resource_manager import ResourceManager, Resources
 from pydatatask.session import Session
 
+if TYPE_CHECKING:
+    dataclass_serial = dataclass
+else:
 
-@dataclass
+    def _reprocess(value, ty):
+        if is_dataclass(ty) and isinstance(value, dict):
+            return ty(**value)
+        elif get_origin(ty) is dict and isinstance(value, dict):
+            for k, v in value.items():
+                value[k] = _reprocess(v, get_args(ty)[1])
+        elif get_origin(ty) is list and isinstance(value, list):
+            for i, v in enumerate(value):
+                value[i] = _reprocess(v, get_args(ty)[1])
+        return value
+
+    def dataclass_serial(cls):
+        def __post_init__(self):
+            for myfield in myfields:
+                setattr(self, myfield.name, _reprocess(getattr(self, myfield.name), myfield.type))
+
+        cls.__post_init__ = __post_init__
+        dcls = dataclass(cls)
+        myfields = fields(dcls)
+        return dcls
+
+
+@dataclass_serial
 class Dispatcher:
     cls: str
     args: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass_serial
 class PriorityEntry:
     priority: int
     task: Optional[str] = None
     job: Optional[str] = None
 
 
-@dataclass
-class PipelineImport:
-    path: str
-    repos: Dict[str, str] = field(default_factory=dict)
+@dataclass_serial
+class LinkSpec:
+    repo: str
+    kind: str
+    key: Optional[str] = None
 
 
-@dataclass
+@dataclass_serial
+class TaskSpec:
+    executable: Dispatcher
+    executor: Optional[str] = None
+    done: Optional[str] = None
+    links: Dict[str, LinkSpec] = field(default_factory=dict)
+
+
+@dataclass_serial
+class PipelineChildSpec:
+    path: Optional[str] = None
+    repos: Dict[str, str] = field(default_factory=dict)  # {child's name: our name}
+    executors: Dict[str, str] = field(default_factory=dict)  # {task name: our executor's name}
+    imports: Dict[str, "PipelineChildSpec"] = field(default_factory=dict)
+
+
+@dataclass_serial
+class PipelineChildArgs:
+    repos: Dict[str, Dispatcher] = field(default_factory=dict)  # {child's name: dispatcher}
+    executors: Dict[str, Dispatcher] = field(default_factory=dict)  # {task name: our executor's name}
+    imports: Dict[str, "PipelineChildArgs"] = field(default_factory=dict)
+
+    def specify(self, prefix: str = "") -> Tuple[PipelineChildSpec, Dict[str, Dispatcher], Dict[str, Dispatcher]]:
+        result = PipelineChildSpec()
+        result_executors = {f"{prefix}{name}": value for name, value in self.executors.items()}
+        result_repos = {f"{prefix}{name}": value for name, value in self.repos.items()}
+        result.executors = {f"{name}": "{prefix}{name}" for name in self.executors}
+        result.repos = {f"{name}": "{prefix}{name}" for name in self.repos}
+        for imp_name, imp_args in self.imports.items():
+            subresult, subrepos, subexecutors = imp_args.specify(prefix=f"{imp_name}_{prefix}")
+            result.imports[imp_name] = subresult
+            result_executors |= subexecutors
+            result_repos |= subrepos
+        return result, result_repos, result_executors
+
+
+@dataclass_serial
+class PipelineChildArgsMissing:
+    repos: Dict[str, str] = field(default_factory=dict)  # {child's name: class name}
+    executors: Set[str] = field(default_factory=set)  # {task name}
+    imports: Dict[str, "PipelineChildArgsMissing"] = field(default_factory=dict)
+
+    def ready(self):
+        return not self.repos and not self.executors and all(child.ready() for child in self.imports.values())
+
+    def allocate(
+        self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Optional[Dispatcher]
+    ) -> PipelineChildArgs:
+        new_repos: Dict[str, Dispatcher] = {}
+        new_executors: Dict[str, Dispatcher] = {}
+        new_imports: Dict[str, PipelineChildArgs] = {}
+        for repo_name, repo_spec in self.repos.items():
+            if repo_spec not in repo_allocators:
+                raise ValueError(f"No allocator available for {repo_spec}")
+            new_repos[repo_name] = repo_allocators[repo_spec]()
+
+        for task_name in self.executors:
+            if default_executor is None:
+                raise ValueError("No default executor was provided")
+            new_executors[task_name] = default_executor
+
+        for imp_name, imp_missing in self.imports.items():
+            if imp_missing.ready():
+                continue
+            new_imports[imp_name] = imp_missing.allocate(repo_allocators, default_executor)
+
+        return PipelineChildArgs(new_repos, new_executors, new_imports)
+
+
+@dataclass_serial
 class PipelineSpec:
-    tasks: List[Dispatcher] = field(default_factory=list)
+    tasks: Dict[str, TaskSpec] = field(default_factory=dict)
+    executors: Dict[str, Dispatcher] = field(default_factory=dict)
     repos: Dict[str, Dispatcher] = field(default_factory=dict)
     repo_classes: Dict[str, str] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
     quotas: Dict[str, Resources] = field(default_factory=dict)
     resources: Dict[str, Dispatcher] = field(default_factory=dict)
-    imports: Dict[str, PipelineImport] = field(default_factory=dict)
+    imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass_serial
 class PipelineChild:
     pipeline: "PipelineStaging"
-    translation: Dict[str, str]  # {imp name: {our name: child's name}}
+    repo_translation: Dict[str, str] = field(default_factory=dict)  # {imp name: {our name: child's name}}
 
 
 class PipelineStaging:
-    def __init__(self, filepath: Optional[Path] = None, basedir: Optional[Path] = None):
+    def __init__(
+        self,
+        filepath: Optional[Path] = None,
+        basedir: Optional[Path] = None,
+        params: Optional[PipelineChildArgs] = None,
+    ):
         if filepath is None:
             if basedir is None:
                 raise TypeError("Must provide basedir if you don't provide filepath")
@@ -63,7 +176,6 @@ class PipelineStaging:
             self.basedir = basedir
             self.children = {}
             self.repos_fulfilled_by_parents = {}
-            self.repos_needed_by_children = {}
             self.spec = PipelineSpec()
         else:
             if basedir is not None:
@@ -74,56 +186,43 @@ class PipelineStaging:
 
             with open(filepath, "r") as fp:
                 spec_dict = yaml.safe_load(fp)
-            for i, p in enumerate(spec_dict.get("priorities", [])):
-                spec_dict["priorities"][i] = PriorityEntry(**p)
-            for i, q in spec_dict.get("quotas", {}).items():
-                spec_dict["quotas"][i] = Resources.parse(**q)
-            for i, m in enumerate(spec_dict.get("imports", {})):
-                spec_dict["imports"][i] = PipelineImport(**m)
-            for i, t in enumerate(spec_dict.get("tasks", [])):
-                spec_dict["tasks"][i] = Dispatcher(**t)
-            for i, r in spec_dict.get("repos", {}).items():
-                spec_dict["tasks"][i] = Dispatcher(**r)
-            for i, r in spec_dict.get("resources", {}).items():
-                spec_dict["resources"][i] = Dispatcher(**r)
             self.spec = PipelineSpec(**spec_dict)
 
-            self.children: Dict[str, PipelineChild] = {}
-            self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = {}  # {our name: Dispatcher}
-            self.repos_needed_by_children: Dict[str, str] = {}  # {our name: class name}
+            if params is None:
+                params = PipelineChildArgs()
+
+            self.children: Dict[str, PipelineStaging] = {}
+            self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = params.repos
+            self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = params.executors
 
             assert not (set(self.spec.repos) & set(self.spec.repo_classes))
 
             for imp_name, imp in self.spec.imports.items():
-                translation = {}
-                pipeline = PipelineStaging(self.basedir / imp.path)
-                parameters: Dict[str, Dispatcher] = {}
-                for param_name, sat_name in imp.repos.items():
-                    translation[sat_name] = param_name
-                    if param_name not in pipeline.spec.repo_classes and param_name not in pipeline.spec.repos:
-                        raise ValueError(f"Bad parameter name: {param_name}")
-                    if sat_name in self.spec.repos:
-                        # we satisfy our child
-                        parameters[param_name] = self.spec.repos[sat_name]
-                    elif sat_name in self.spec.repo_classes:
-                        # we display a dependency which will satisfy our child
-                        repo_cls = self.spec.repo_classes[sat_name]
-                        if pipeline.spec.repo_classes[param_name] != repo_cls:
-                            # TODO subclass relations
-                            raise ValueError(
-                                f"Bad parameter type: {param_name} is {pipeline.spec.repo_classes[param_name]} but {sat_name} is {self.spec.repo_classes[sat_name]}"
-                            )
-                    else:
-                        raise ValueError(f"Bad parameter: {sat_name}")
+                if imp.path is None:
+                    raise TypeError("Import clause must specify path to import")
+                child_params = PipelineChildArgs()
+                child_params.repos |= {
+                    param_name: self.spec.repos[sat_name]
+                    for param_name, sat_name in imp.repos.items()
+                    if sat_name in self.spec.repos
+                }
+                child_params.repos |= {
+                    param_name: self.repos_fulfilled_by_parents[sat_name]
+                    for param_name, sat_name in imp.repos.items()
+                    if sat_name in self.spec.repo_classes and sat_name in self.repos_fulfilled_by_parents
+                }
+                if imp_name in params.imports:
+                    child_params.repos |= params.imports[imp_name].repos
 
-                pipeline.parameterize(parameters)
-                for name, ty in pipeline.spec.repo_classes.items():
-                    if name not in imp.repos:
-                        subname = f"{imp_name}_{name}"
-                        translation[subname] = name
-                        self.repos_needed_by_children[subname] = ty
+                child_params.executors |= {
+                    param_name: self.spec.executors[sat_name]
+                    for param_name, sat_name in imp.executors.items()
+                    if sat_name in self.spec.executors
+                }
+                if imp_name in params.imports:
+                    child_params.executors |= params.imports[imp_name].executors
 
-                self.children[imp_name] = PipelineChild(pipeline, translation)
+                self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
 
     def get_priority(self, task: str, job: str) -> int:
         result = 0
@@ -132,21 +231,26 @@ class PipelineStaging:
                 result += directive.priority
         return result
 
-    def missing(self) -> Dict[str, str]:
-        result = self.spec.repo_classes | self.repos_needed_by_children
-        for gotten in self.repos_fulfilled_by_parents:
-            result.pop(gotten, None)
-        return result
+    def missing(self) -> PipelineChildArgsMissing:
+        return PipelineChildArgsMissing(
+            repos={name: cls for name, cls in self.spec.repo_classes if name not in self.repos_fulfilled_by_parents},
+            executors={
+                name
+                for name, tspec in self.spec.tasks.items()
+                if tspec.executor is None and name not in self.executors_fulfilled_by_parents
+            },
+            imports={name: child.missing() for name, child in self.children.items()},
+        )
 
     def _iter_children(self) -> Iterator["PipelineStaging"]:
         yield self
         for child in self.children.values():
-            yield from child.pipeline._iter_children()
+            yield from child._iter_children()
 
     def instantiate(self) -> Pipeline:
         missing = self.missing()
-        if missing:
-            raise ValueError(f"Cannot instantiate pipeline - missing definitions for repositories {' '.join(missing)}")
+        if not missing.ready():
+            raise ValueError("Cannot instantiate pipeline - missing definitions for repositories or executors")
 
         resource_constructor = build_resource_picker()
         repo_cache: Dict[int, Repository] = {}
@@ -172,34 +276,18 @@ class PipelineStaging:
             quotas = {name: ResourceManager(val) for name, val in staging.spec.quotas.items()}
             all_quotas.extend(quotas.values())
             task_constructor = build_task_picker(all_repos, quotas, resource_cache[staging])
-            all_tasks.extend(task_constructor(asdict(task_spec)) for task_spec in self.spec.tasks)
+            all_tasks.extend(task_constructor(asdict(task_spec)) for task_spec in self.spec.tasks.values())
 
         return Pipeline(all_tasks, session, all_quotas, self.get_priority)
 
-    def parameterize(self, parameters: Dict[str, Dispatcher]):
-        self.repos_fulfilled_by_parents.update(parameters)
-
-        for child in self.children.values():
-            child_parameters = {child.translation[repo_name]: repo for repo_name, repo in parameters.items()}
-            if child_parameters:
-                child.pipeline.parameterize(child_parameters)
-
-    def allocate(self, allocators: Dict[str, Callable[[], Dispatcher]]) -> "PipelineStaging":
-        new_repos: Dict[str, Dispatcher] = {}
-        missing = self.missing()
-        for repo_name, repo_spec in missing.items():
-            if repo_spec not in allocators:
-                raise ValueError(f"No allocator available for {repo_spec}")
-            new_repos[repo_name] = allocators[repo_spec]()
-
-        self.parameterize(new_repos)
+    def allocate(self, repo_allocators, default_executor):
+        spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
         result = PipelineStaging(basedir=self.basedir)
-        result.children["locked"] = PipelineChild(self, {name: name for name in new_repos})
-        result.repos_needed_by_children.update(missing)
-        result.spec.repos.update(new_repos)
-        result.spec.imports["locked"] = PipelineImport(
-            str(self.basedir / self.filename), {name: name for name in new_repos}
-        )
+        result.children["locked"] = self
+        result.spec.repos.update(repos)
+        result.spec.executors.update(executors)
+        result.spec.imports["locked"] = spec
+        spec.path = str(self.basedir / self.filename)
         return result
 
     def save(self):

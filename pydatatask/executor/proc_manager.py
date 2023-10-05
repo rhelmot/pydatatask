@@ -27,20 +27,26 @@ import aioshutil
 import asyncssh
 import psutil
 
-from .consts import STDOUT, _StderrIsStdout
+from pydatatask.executor import Executor
+from pydatatask.executor.container_manager import DockerContainerManager
+
+from ..consts import STDOUT, _StderrIsStdout
 
 if TYPE_CHECKING:
-    from .repository import AReadStream, AReadText, AWriteStream, AWriteText
+    from ..repository import AReadStream, AReadText, AWriteStream, AWriteText
 
 __all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
 
 
-class AbstractProcessManager:
+class AbstractProcessManager(Executor):
     """
     The base class for process managers.
 
     Processes are managed through arbitrary "process identifier" handle strings.
     """
+
+    def to_process_manager(self) -> "AbstractProcessManager":
+        return self
 
     @abstractmethod
     async def get_live_pids(self, hint: Set[str]) -> Set[str]:
@@ -125,6 +131,9 @@ class LocalLinuxManager(AbstractProcessManager):
     A process manager to run tasks on the local linux machine. By default, it will create a directory
     ``/tmp/pydatatask`` in which to store data.
     """
+
+    def to_container_manager(self):
+        return DockerContainerManager()
 
     def __init__(self, app: str, local_path: Union[Path, str] = "/tmp/pydatatask"):
         self.local_path = Path(local_path) / app

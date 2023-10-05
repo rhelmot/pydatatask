@@ -24,7 +24,9 @@ from typing import (
 )
 from abc import abstractmethod
 from asyncio import Future
-from concurrent.futures import FIRST_EXCEPTION, Executor, wait
+from concurrent.futures import FIRST_EXCEPTION
+from concurrent.futures import Executor as FuturesExecutor
+from concurrent.futures import wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
@@ -43,9 +45,15 @@ import jinja2.async_utils
 import jinja2.compiler
 import yaml
 
+from pydatatask.executor import Executor
+from pydatatask.executor.container_manager import (
+    ContainerManagerAbstract,
+    localhost_docker_manager,
+)
+
 from .consts import STDOUT, _StderrIsStdout
-from .pod_manager import PodManager
-from .proc_manager import AbstractProcessManager, localhost_manager
+from .executor.pod_manager import PodManager
+from .executor.proc_manager import AbstractProcessManager, localhost_manager
 from .repository import (
     AggregateAndRepository,
     AggregateOrRepository,
@@ -81,8 +89,8 @@ class RepoHandlingMode(Enum):
     """
     Mode for the `build_env` function.
 
-    LAZY = Build repositories and links into repository references
-    SMART = Build repositories and links into un-awaited `info` coroutines.
+    LAZY = Build repositories and links into un-awaited `info` coroutines.
+    SMART = Build repositories and links into repository references
     EAGER = Build repositories and links into awaited `info` values.
     """
 
@@ -388,7 +396,7 @@ class KubeTask(Task):
     def __init__(
         self,
         name: str,
-        cluster: Callable[[], PodManager],
+        executor: Callable[[], Executor],
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional[BlobRepository],
@@ -422,7 +430,8 @@ class KubeTask(Task):
 
         self.template = template
         self.resources = resources
-        self._podman = cluster
+        self._executor = executor
+        self._podman = None
         self.logs = logs
         self.timeout = timeout
         self.done = done
@@ -461,7 +470,9 @@ class KubeTask(Task):
         """
         The pod manager instance for this task. Will raise an error if the manager is provided by an unopened session.
         """
-        return self._podman()
+        if self._podman is None:
+            self._podman = self._executor().to_pod_manager()
+        return self._podman
 
     async def _get_load(self):
         usage = Resources()
@@ -596,7 +607,7 @@ class ProcessTask(Task):
         self,
         name: str,
         template: str,
-        manager: Callable[[], "AbstractProcessManager"] = lambda: localhost_manager,
+        executor: Callable[[], "Executor"] = lambda: localhost_manager,
         resource_manager: "ResourceManager" = localhost_resource_manager,
         job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
         pids: Optional[MetadataRepository] = None,
@@ -656,7 +667,8 @@ class ProcessTask(Task):
         self.job_resources = copy.copy(job_resources)
         self.job_resources.launches = 1
         self.resource_manager = resource_manager
-        self._manager = manager
+        self._executor = executor
+        self._manager = None
         self.warned = False
         self.window = window
 
@@ -677,7 +689,9 @@ class ProcessTask(Task):
         """
         The process manager for this task. Will raise an error if the manager comes from a session which is closed.
         """
-        return self._manager()
+        if self._manager is None:
+            self._manager = self._executor().to_process_manager()
+        return self._manager
 
     async def _get_load(self) -> "Resources":
         cutoff = datetime.now(tz=timezone.utc) - self.window
@@ -917,7 +931,7 @@ class ExecutorTask(Task):
     def __init__(
         self,
         name: str,
-        executor: Executor,
+        executor: FuturesExecutor,
         done: MetadataRepository,
         ready: Optional[Repository] = None,
         func: Optional[Callable] = None,
@@ -1073,7 +1087,7 @@ class KubeFunctionTask(KubeTask):
     def __init__(
         self,
         name: str,
-        cluster: Callable[[], PodManager],
+        executor: Callable[[], Executor],
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional[BlobRepository] = None,
@@ -1105,7 +1119,7 @@ class KubeFunctionTask(KubeTask):
         It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
         one link is present with ``inhibits_start``.
         """
-        super().__init__(name, cluster, resources, template, logs, kube_done, env=env)
+        super().__init__(name, executor, resources, template, logs, kube_done, env=env)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -1164,3 +1178,118 @@ class KubeFunctionTask(KubeTask):
         result["end_time"] = datetime.now(tz=timezone.utc)
         if self.metadata:
             await self.func_done.dump(job, result)
+
+
+class ContainerTask(Task):
+    """
+    A task that runs a container.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        image: str,
+        template: str,
+        entrypoint: Iterable[str] = ("/bin/sh", "-c"),
+        executor: Callable[[], Executor] = lambda: localhost_docker_manager,
+        resource_manager: "ResourceManager" = localhost_resource_manager,
+        job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
+        window: timedelta = timedelta(minutes=1),
+        environ: Optional[Dict[str, str]] = None,
+        done: Optional[MetadataRepository] = None,
+        logs: Optional[BlobRepository] = None,
+        ready: Optional[Repository] = None,
+    ):
+        """
+        :param name: The name of this task.
+        :param image: The name of the docker image to use to run this task.
+        :param manager: A callable returning a ContainerManagerAbstract instance configured to be able to launch and
+                        manage container. Defaults to a local Docker install.
+        :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
+                                 if they would break the quota.
+        :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
+                              is currently **not enforced** target-side, so jobs may actually take up more resources
+                              than assigned.
+        :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
+        :param environ: Additional environment variables to set on the target container before running the task.
+        :param window: How recently a container must have been launched in order to contribute to the container
+                       rate-limiting.
+        :param done: Optional: A metadata repository in which to dump some information about the container's lifetime
+                               and termination on completion. Linked as "done" with
+                               ``inhibits_start, required_for_output, is_status``.
+        :param logs: Optional: A blob repository into which to dump the container's logs. Linked as "logs" with
+                               ``is_output``.
+        :param ready:  Optional: A repository from which to read task-ready status.
+
+        It is highly recommended to provide at least one of ``done`` or ``logs`` so that at least one
+        link is present with ``inhibits_start``.
+        """
+        super().__init__(name, ready=ready)
+
+        self.template = template
+        self.entrypoint = entrypoint
+        self.image = image
+        self.environ = environ or {}
+        self.done = done
+        self.logs = logs
+        self.job_resources = copy.copy(job_resources)
+        self.job_resources.launches = 1
+        self.resource_manager = resource_manager
+        self._executor = executor
+        self._manager = None
+        self.warned = False
+        self.window = window
+
+        self.resource_manager.register(self._get_load)
+
+        if logs is not None:
+            self.link("logs", logs, is_output=True)
+        if done is not None:
+            self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
+
+    @property
+    def manager(self) -> ContainerManagerAbstract:
+        """
+        The process manager for this task. Will raise an error if the manager comes from a session which is closed.
+        """
+        if self._manager is None:
+            self._manager = self._executor().to_container_manager()
+        return self._manager
+
+    async def _get_load(self) -> "Resources":
+        cutoff = datetime.now(tz=timezone.utc) - self.window
+        containers = await self.manager.live(self.name)
+        count = len(containers)
+        recent = sum(c > cutoff for c in containers.values())
+        return self.job_resources * count - Resources(launches=count - recent)
+
+    async def update(self):
+        has_any, reaped = await self.manager.update(self.name)
+        for job, (log, done) in reaped.items():
+            if self.logs is not None:
+                async with await self.logs.open(job, "wb") as fp:
+                    await fp.write(log)
+            if self.done is not None:
+                await self.done.dump(job, done)
+        return has_any
+
+    async def launch(self, job):
+        limit = await self.resource_manager.reserve(self.job_resources)
+        if limit is not None:
+            if not self.warned:
+                l.warning("Cannot launch %s: %s limit", self, limit)
+                self.warned = True
+            return
+
+        env_src: Dict[str, Any] = dict(self.links)
+        env_src["job"] = job
+        env_src["task"] = self.name
+        env = await build_env(env_src, job, RepoHandlingMode.LAZY)
+        exe_txt = await render_template(self.template, env)
+        for item in env.values():
+            if asyncio.iscoroutine(item):
+                item.close()
+
+        await self.manager.launch(
+            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_resources
+        )
