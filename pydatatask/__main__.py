@@ -20,7 +20,7 @@ def _main() -> Optional[int]:
         spec = PipelineStaging(lockfile)
     else:
         spec = PipelineStaging(cfgpath)
-    if spec.missing():
+    if not spec.missing().ready():
         raise ValueError(
             "Cannot start this pipeline - it has unsatisfied dependencies. Try locking it with `python -m pydatatask.lock`"
         )

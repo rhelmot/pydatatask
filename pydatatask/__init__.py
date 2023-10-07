@@ -8,8 +8,8 @@ from .pipeline import *
 from .session import *
 from .main import *
 from .resource_manager import *
-from .pod_manager import *
-from .proc_manager import *
+from .executor import *
+from .host import *
 
 __version__ = "0.4.8-dev.1"
 released_version = "0.4.7"

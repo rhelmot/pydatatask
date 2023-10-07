@@ -18,11 +18,13 @@ import tempfile
 import yaml
 
 from pydatatask.declarative import (
+    build_executor_picker,
     build_repository_picker,
     build_resource_picker,
     build_task_picker,
     make_list_parser,
 )
+from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
 from pydatatask.repository import Repository
 from pydatatask.resource_manager import ResourceManager, Resources
@@ -100,8 +102,8 @@ class PipelineChildArgs:
         result = PipelineChildSpec()
         result_executors = {f"{prefix}{name}": value for name, value in self.executors.items()}
         result_repos = {f"{prefix}{name}": value for name, value in self.repos.items()}
-        result.executors = {f"{name}": "{prefix}{name}" for name in self.executors}
-        result.repos = {f"{name}": "{prefix}{name}" for name in self.repos}
+        result.executors = {f"{name}": f"{prefix}{name}" for name in self.executors}
+        result.repos = {f"{name}": f"{prefix}{name}" for name in self.repos}
         for imp_name, imp_args in self.imports.items():
             subresult, subrepos, subexecutors = imp_args.specify(prefix=f"{imp_name}_{prefix}")
             result.imports[imp_name] = subresult
@@ -233,7 +235,9 @@ class PipelineStaging:
 
     def missing(self) -> PipelineChildArgsMissing:
         return PipelineChildArgsMissing(
-            repos={name: cls for name, cls in self.spec.repo_classes if name not in self.repos_fulfilled_by_parents},
+            repos={
+                name: cls for name, cls in self.spec.repo_classes.items() if name not in self.repos_fulfilled_by_parents
+            },
             executors={
                 name
                 for name, tspec in self.spec.tasks.items()
@@ -255,6 +259,7 @@ class PipelineStaging:
         resource_constructor = build_resource_picker()
         repo_cache: Dict[int, Repository] = {}
         resource_cache: Dict["PipelineStaging", Dict[str, Callable[[], Any]]] = {}
+        executor_cache: Dict[int, Executor] = {}
         all_tasks = []
         all_quotas = []
         session = Session()
@@ -268,19 +273,34 @@ class PipelineStaging:
             repos = {name: repo_constructor(asdict(value)) for name, value in staging.spec.repos.items()}
             repo_cache.update({id(staging.spec.repos[name]): repo for name, repo in repos.items()})
 
+            executor_constructor = build_executor_picker(session, resources)
+            executors = {name: executor_constructor(asdict(value)) for name, value in staging.spec.executors.items()}
+            executor_cache.update({id(staging.spec.executors[name]): executor for name, executor in executors.items()})
+
         for staging in self._iter_children():
             all_repos = {name: repo_cache[id(dispatch)] for name, dispatch in staging.spec.repos.items()}
             all_repos.update(
                 {name: repo_cache[id(dispatch)] for name, dispatch in staging.repos_fulfilled_by_parents.items()}
             )
             quotas = {name: ResourceManager(val) for name, val in staging.spec.quotas.items()}
+            all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
+            all_executors.update(
+                {
+                    name: executor_cache[id(dispatch)]
+                    for name, dispatch in staging.executors_fulfilled_by_parents.items()
+                }
+            )
             all_quotas.extend(quotas.values())
-            task_constructor = build_task_picker(all_repos, quotas, resource_cache[staging])
-            all_tasks.extend(task_constructor(asdict(task_spec)) for task_spec in self.spec.tasks.values())
+            task_constructor = build_task_picker(all_repos, all_executors, quotas, resource_cache[staging])
+            for task_name, task_spec in staging.spec.tasks.items():
+                dict_spec = asdict(task_spec)
+                if task_name in staging.executors_fulfilled_by_parents:
+                    dict_spec["executor"] = task_name
+                all_tasks.append(task_constructor(task_name, dict_spec))
 
         return Pipeline(all_tasks, session, all_quotas, self.get_priority)
 
-    def allocate(self, repo_allocators, default_executor):
+    def allocate(self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Dispatcher):
         spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
         result = PipelineStaging(basedir=self.basedir)
         result.children["locked"] = self
@@ -305,11 +325,13 @@ def allocate_temp_blob() -> Dispatcher:
 
 
 def allocate_local_meta() -> Dispatcher:
+    Path("/tmp/pydatatask").mkdir(exist_ok=True)
     basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
     return Dispatcher("YamlFile", {"basedir": basedir})
 
 
 def allocate_local_blob() -> Dispatcher:
+    Path("/tmp/pydatatask").mkdir(exist_ok=True)
     basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
     return Dispatcher("File", {"basedir": basedir})
 

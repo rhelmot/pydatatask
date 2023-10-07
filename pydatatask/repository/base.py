@@ -7,9 +7,9 @@ from typing import (
     Any,
     AsyncGenerator,
     AsyncIterable,
+    AsyncIterator,
     Awaitable,
     Callable,
-    Coroutine,
     Dict,
     Literal,
     Optional,
@@ -18,6 +18,8 @@ from typing import (
 )
 from abc import ABC, abstractmethod
 from collections import Counter
+from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 import inspect
 import io
@@ -29,10 +31,10 @@ import aiofiles.os
 import aioshutil
 import yaml
 
-from ..utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
+from pydatatask.host import LOCAL_HOST
 
-if TYPE_CHECKING:
-    from ..task import ExecutorTask
+from .. import task as taskmodule
+from ..utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
 
 l = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ class Repository(ABC):
             and job[-1] in cls.CHARSET_START_END
         )
 
-    async def filter_jobs(self, iterator: AsyncIterable[str]) -> AsyncIterable[str]:
+    async def filter_jobs(self, iterator: AsyncIterable[str]) -> AsyncIterator[str]:
         """
         Apply `is_valid_job_id` as a filter to an async iterator.
         """
@@ -94,27 +96,26 @@ class Repository(ABC):
                 return True
         return False
 
-    def __aiter__(self):
+    def __aiter__(self) -> AsyncIterator[str]:
         return self.filter_jobs(self.unfiltered_iter())
 
     @abstractmethod
-    async def unfiltered_iter(self) -> AsyncGenerator[str, None]:
+    def unfiltered_iter(self) -> AsyncGenerator[str, None]:
         """
         The core method of Repository. Implement this to produce an iterable of every string which could potentially
         be a job identifier present in this repository. When the repository is iterated directly, this will be filtered
         by `filter_jobs`.
         """
         raise NotImplementedError
-        # noinspection PyUnreachableCode
-        yield None  # pylint: disable=unreachable
 
-    @abstractmethod
-    async def info(self, job) -> Any:
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
         """
         Returns an arbitrary piece of data related to job. Notably, this is used during templating.
         This should do something meaningful even if the repository does not contain the requested job.
         """
-        raise NotImplementedError
+        if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
+            return taskmodule.TemplateInfo(job)
+        raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
     async def delete(self, job):
@@ -122,13 +123,6 @@ class Repository(ABC):
         Delete the given job from the repository. This should succeed even if the job is not present in this repository.
         """
         raise NotImplementedError
-
-    async def info_all(self) -> Dict[str, Any]:
-        """
-        Produce a mapping from every job present in the repository to its corresponding info. The default implementation
-        is somewhat inefficient; please override it if there is a more effective way to load all info.
-        """
-        return {job: await self.info(job) async for job in self}
 
     async def validate(self):
         """
@@ -153,7 +147,7 @@ class MapRepository(Repository):
     def __init__(
         self,
         base: Repository,
-        func: Callable[[Any], Coroutine[None, None, Any]],
+        func: Callable[[taskmodule.TemplateInfo], Awaitable[taskmodule.TemplateInfo]],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
     ):
@@ -183,20 +177,8 @@ class MapRepository(Repository):
             if self.filter is None or await self.filter(item):
                 yield item
 
-    async def info(self, job):
-        return await self.func(await self.base.info(job))
-
-    async def info_all(self) -> Dict[str, Any]:
-        result = await self.base.info_all()
-        to_remove = []
-        for k, v in result.items():
-            if self.filter is None or await self.filter(k):
-                result[k] = await self.func(v)
-            else:
-                to_remove.append(k)
-        for k in to_remove:
-            result.pop(k)
-        return result
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+        return await self.func(await self.base.template(job, task, kind))
 
 
 class MetadataRepository(Repository, ABC):
@@ -205,12 +187,25 @@ class MetadataRepository(Repository, ABC):
     the structured data from the `info` method.
     """
 
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+        if kind != taskmodule.LinkKind.InputMetadata:
+            return await super().template(job, task, kind)
+        info = await self.info(job)
+        return taskmodule.TemplateInfo(info)
+
     @abstractmethod
-    async def info(self, job):
+    async def info(self, job: str) -> Any:
         """
         Retrieve the data with key ``job`` from the repository.
         """
         raise NotImplementedError
+
+    async def info_all(self) -> Dict[str, Any]:
+        """
+        Produce a mapping from every job present in the repository to its corresponding info. The default implementation
+        is somewhat inefficient; please override it if there is a more effective way to load all info.
+        """
+        return {job: await self.info(job) async for job in self}
 
     @abstractmethod
     async def dump(self, job, data):
@@ -226,18 +221,22 @@ class BlobRepository(Repository, ABC):
     """
 
     @overload
+    @abstractmethod
     async def open(self, job: str, mode: Literal["r"]) -> AReadText:
         ...
 
     @overload
+    @abstractmethod
     async def open(self, job: str, mode: Literal["rb"]) -> AReadStream:
         ...
 
     @overload
+    @abstractmethod
     async def open(self, job: str, mode: Literal["w"]) -> AWriteText:
         ...
 
     @overload
+    @abstractmethod
     async def open(self, job: str, mode: Literal["wb"]) -> AWriteStream:
         ...
 
@@ -288,11 +287,14 @@ class FileRepositoryBase(Repository, ABC):
         return self.basedir / (job + self.extension)
 
     @job_getter
-    async def info(self, job):
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
         """
         The templating info provided by a file repository is the full path to the corresponding file as a string.
         """
-        return str(self.fullpath(job))
+        if kind in (taskmodule.LinkKind.InputFilepath, taskmodule.LinkKind.OutputFilepath) and task.host == LOCAL_HOST:
+            info = str(self.fullpath(job))
+            return taskmodule.TemplateInfo(info, file_host=LOCAL_HOST)
+        return await super().template(job, task, kind)
 
 
 class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
@@ -365,7 +367,7 @@ class RelatedItemRepository(Repository):
     def __init__(
         self,
         base_repository: Repository,
-        translator_repository: Repository,
+        translator_repository: MetadataRepository,
         allow_deletes=False,
         prefetch_lookup=True,
     ):
@@ -414,6 +416,7 @@ class RelatedItemRepository(Repository):
 
     @job_getter
     async def info(self, job):
+        assert isinstance(self.base_repository, MetadataRepository)
         basename = await self._lookup(job)
         if basename is None:
             raise LookupError(job)
@@ -463,13 +466,6 @@ class AggregateAndRepository(Repository):
                 return False
         return True
 
-    @job_getter
-    async def info(self, job):
-        """
-        The info provided by an aggregate And repository is a dict mapping each child's name to that child's info.
-        """
-        return {name: await child.info(job) for name, child in self.children.items()}
-
     async def delete(self, job):
         """
         Deleting a job from an aggregate And repository deletes the job from all of its children.
@@ -502,13 +498,6 @@ class AggregateOrRepository(Repository):
                 return True
         return False
 
-    @job_getter
-    async def info(self, job):
-        """
-        The info provided by an aggregate Or repository is a dict mapping each child's name to that child's info.
-        """
-        return {name: await child.info(job) for name, child in self.children.items()}
-
     async def delete(self, job):
         """
         Deleting a job from an aggregate Or repository deletes the job from all of its children.
@@ -535,7 +524,7 @@ class BlockingRepository(Repository):
         else:
             blocked = None
         async for item in self.source.unfiltered_iter():
-            if self.enumerate_unless and item in blocked:
+            if blocked is not None and item in blocked:
                 continue
             if not self.enumerate_unless and self.unless.contains(item):
                 continue
@@ -543,10 +532,6 @@ class BlockingRepository(Repository):
 
     async def contains(self, item):
         return await self.source.contains(item) and not await self.unless.contains(item)
-
-    @job_getter
-    async def info(self, job):
-        return await self.source.info(job)
 
     async def delete(self, job):
         await self.source.delete(job)
@@ -590,7 +575,7 @@ class ExecutorLiveRepo(Repository):
     and is linked as the ``live`` repository. Do not construct this class manually.
     """
 
-    def __init__(self, task: "ExecutorTask"):
+    def __init__(self, task: "taskmodule.ExecutorTask"):
         self.task = task
 
     def __repr__(self):

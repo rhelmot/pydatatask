@@ -7,6 +7,7 @@ from kubernetes_asyncio.client import V1Pod
 import aiodocker.containers
 
 from pydatatask.executor import Executor
+from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.resource_manager import Resources
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ class ContainerManagerAbstract(ABC, Executor):
         cmd: str,
         environ: Dict[str, str],
         resources: Resources,
+        mounts: List[Tuple[str, str]],
     ):
         raise NotImplementedError
 
@@ -44,9 +46,14 @@ class ContainerManagerAbstract(ABC, Executor):
 
 
 class DockerContainerManager(ContainerManagerAbstract):
-    def __init__(self, app: str = "pydatatask", url: Optional[str] = None):
+    def __init__(self, app: str = "pydatatask", url: Optional[str] = None, host: Host = LOCAL_HOST):
         self.docker = aiodocker.Docker(url)
         self.app = app
+        self._host = host
+
+    @property
+    def host(self):
+        return self._host
 
     def name_to_id(self, task: str, name: str) -> Optional[str]:
         name = name.strip("/")
@@ -67,6 +74,7 @@ class DockerContainerManager(ContainerManagerAbstract):
         cmd: str,
         environ: Dict[str, str],
         resources: Resources,
+        mounts: List[Tuple[str, str]],
     ):
         await self.docker.containers.run(
             {
@@ -79,6 +87,9 @@ class DockerContainerManager(ContainerManagerAbstract):
                 "Entrypoint": entrypoint,
                 "Cmd": cmd,
                 "Env": [f"{key}={val}" for key, val in environ.items()],
+                "HostConfig": {
+                    "Binds": [f"{a}:{b}" for a, b in mounts],
+                },
             },
             name=self.id_to_name(task, job),
         )
@@ -124,8 +135,12 @@ class DockerContainerManager(ContainerManagerAbstract):
 
 
 class KubeContainerManager(ContainerManagerAbstract):
-    def __init__(self, cluster: PodManager):
+    def __init__(self, cluster: "PodManager"):
         self.cluster = cluster
+
+    @property
+    def host(self):
+        return self.cluster.host
 
     async def launch(
         self,
@@ -136,7 +151,10 @@ class KubeContainerManager(ContainerManagerAbstract):
         cmd: str,
         environ: Dict[str, str],
         resources: Resources,
+        mounts: List[Tuple[str, str]],
     ):
+        if mounts:
+            raise ValueError("Cannot do mounts from a container on a kube cluster")
         await self.cluster.launch(
             job,
             task,

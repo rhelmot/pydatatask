@@ -14,6 +14,7 @@ from typing import (
     Optional,
     Set,
     Union,
+    overload,
 )
 from abc import abstractmethod
 from pathlib import Path
@@ -29,6 +30,7 @@ import psutil
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
+from pydatatask.host import LOCAL_HOST, Host
 
 from ..consts import STDOUT, _StderrIsStdout
 
@@ -99,6 +101,26 @@ class AbstractProcessManager(Executor):
         """
         raise NotImplementedError
 
+    @overload
+    @abstractmethod
+    async def open(self, path: Path, mode: Literal["r"]) -> "AReadText":
+        ...
+
+    @overload
+    @abstractmethod
+    async def open(self, path: Path, mode: Literal["w"]) -> "AWriteText":
+        ...
+
+    @overload
+    @abstractmethod
+    async def open(self, path: Path, mode: Literal["rb"]) -> "AReadStream":
+        ...
+
+    @overload
+    @abstractmethod
+    async def open(self, path: Path, mode: Literal["wb"]) -> "AWriteStream":
+        ...
+
     @abstractmethod
     async def open(
         self, path: Path, mode: Literal["r", "rb", "w", "wb"]
@@ -139,6 +161,10 @@ class LocalLinuxManager(AbstractProcessManager):
         self.local_path = Path(local_path) / app
 
     @property
+    def host(self) -> Host:
+        return LOCAL_HOST
+
+    @property
     def basedir(self) -> Path:
         return self.local_path
 
@@ -156,7 +182,7 @@ class LocalLinuxManager(AbstractProcessManager):
             stdout = shlex.quote(stdout)
         if stderr is None:
             stderr = "/dev/null"
-        elif stderr is STDOUT:
+        elif isinstance(stderr, _StderrIsStdout):
             stderr = "&1"
         else:
             stderr = shlex.quote(stderr)
@@ -176,6 +202,7 @@ class LocalLinuxManager(AbstractProcessManager):
             cwd=cwd,
             env=environ,
         )
+        assert p.stdout is not None
         pid = await p.stdout.readline()
         return pid.strip()
 
@@ -214,6 +241,7 @@ class SSHLinuxFile:
         return self.fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        # TODO why error
         await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
         await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
@@ -247,10 +275,16 @@ class SSHLinuxManager(AbstractProcessManager):
         self,
         app: str,
         ssh: Callable[[], asyncssh.SSHClientConnection],
+        host: Host,
         remote_path: Union[Path, str] = "/tmp/pydatatask",
     ):
         self.remote_path = Path(remote_path) / app
         self._ssh = ssh
+        self._host = host
+
+    @property
+    def host(self):
+        return self._host
 
     @property
     def ssh(self) -> asyncssh.SSHClientConnection:
@@ -280,6 +314,7 @@ class SSHLinuxManager(AbstractProcessManager):
 
     async def get_live_pids(self, hint):
         p = await self.ssh.run("ls /proc")
+        assert p.stdout is not None
         return {x for x in p.stdout.split() if x.isdigit()}
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
@@ -293,7 +328,7 @@ class SSHLinuxManager(AbstractProcessManager):
             stdout = shlex.quote(stdout)
         if stderr is None:
             stderr = "/dev/null"
-        elif stderr is STDOUT:
+        elif isinstance(stderr, _StderrIsStdout):
             stderr = "&1"
         else:
             stderr = shlex.quote(stderr)

@@ -29,6 +29,7 @@ dependencies = [
     "psutil",
     "asyncssh",
     "aiodocker",
+    "sonyflake-py",
 ]
 
 [project.optional-dependencies]

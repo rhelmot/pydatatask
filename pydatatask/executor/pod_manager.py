@@ -12,6 +12,7 @@ from kubernetes_asyncio.stream import WsApiClient
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import KubeContainerManager
+from pydatatask.host import Host
 
 l = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class PodManager(Executor):
 
     def __init__(
         self,
+        host: Host,
         app: str,
         namespace: str,
         config: Optional[Callable[[], Configuration]] = None,
@@ -42,6 +44,7 @@ class PodManager(Executor):
                                  to use the "default" configuration, i.e. what is available after calling
                                  ``await kubernetes_asyncio.config.load_kube_config()``.
         """
+        self._host = host
         self.app = app
         self.namespace = namespace
         self._config = config
@@ -50,6 +53,10 @@ class PodManager(Executor):
         self._api_ws: Optional[WsApiClient] = None
         self._v1 = None
         self._v1_ws = None
+
+    @property
+    def host(self):
+        return self._host
 
     @property
     def api(self):

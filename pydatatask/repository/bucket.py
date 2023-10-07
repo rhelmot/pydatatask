@@ -2,12 +2,14 @@
 This module contains repositories and other classes for interacting with S3-compatible bucket stores.
 """
 
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 import io
 
 from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 
+from pydatatask import task as taskmodule
+from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.utils import AReadText, AWriteText
 
 from .base import BlobRepository, YamlMetadataRepository, job_getter
@@ -115,7 +117,7 @@ class S3BucketRepository(BlobRepository):
         prefix: str = "",
         suffix: str = "",
         mimetype: str = "application/octet-stream",
-        incluster_endpoint: Optional[str] = None,
+        endpoints: Optional[Dict[Host, str]] = None,
     ):
         """
         :param client: A callable returning an aiobotocore S3 client connected and authenticated to the server you wish
@@ -134,7 +136,7 @@ class S3BucketRepository(BlobRepository):
         self.prefix = prefix
         self.suffix = suffix
         self.mimetype = mimetype
-        self.incluster_endpoint = incluster_endpoint
+        self.endpoints = endpoints or {}
 
     @property
     def client(self):
@@ -176,6 +178,14 @@ class S3BucketRepository(BlobRepository):
         """
         return f"{self.prefix}{job}{self.suffix}"
 
+    def get_endpoint(self, host: Host) -> str:
+        if host == LOCAL_HOST:
+            return self.client._endpoint.host  # type: ignore
+        endpoint = self.endpoints.get(host, None)
+        if endpoint is None:
+            raise ValueError(f"No endpoint specified from host {host}")
+        return endpoint
+
     @job_getter
     async def open(self, job, mode="r"):
         if not self.is_valid_job_id(job):
@@ -193,21 +203,25 @@ class S3BucketRepository(BlobRepository):
         else:
             raise ValueError(mode)
 
-    @job_getter
-    async def info(self, job):
-        """
-        Return an `S3BucketInfo` corresponding to the given job.
-        """
-        return S3BucketInfo(
-            self.incluster_endpoint or self.client._endpoint.host,  # type: ignore
-            f"s3://{self.bucket}/{self.object_name(job)}",
-            self.bucket,
-            self.prefix,
-            self.suffix,
-        )
-
     async def delete(self, job):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
+
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+        if kind == taskmodule.LinkKind.InputFilepath:
+            input_filepath = task.mktemp(job)
+            endpoint = self.get_endpoint(task.host)
+            preamble = task.mk_http_get(
+                input_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={TODO: TODO}
+            )
+            return taskmodule.TemplateInfo(input_filepath, preamble=preamble)
+        if kind == taskmodule.LinkKind.OutputFilepath:
+            output_filepath = task.host.mktemp(job)
+            endpoint = self.get_endpoint(task.host)
+            epilogue = task.mk_http_post(
+                output_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={TODO: TODO}
+            )
+            return taskmodule.TemplateInfo(output_filepath, epilogue=epilogue)
+        return await super().template(job, task, kind)
 
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):

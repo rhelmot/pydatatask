@@ -1,7 +1,10 @@
+from dataclasses import asdict
 import sys
 
 from pydatatask.declarative import find_config
+from pydatatask.host import LOCAL_HOST
 from pydatatask.staging import (
+    Dispatcher,
     PipelineStaging,
     default_allocators_local,
     default_allocators_temp,
@@ -20,7 +23,7 @@ def main():
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
     spec = PipelineStaging(cfgpath)
-    locked = spec.allocate(allocators)
+    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": "pydatatask"}))
     locked.filename = cfgpath.with_suffix(".lock").name
     locked.save()
     print(locked.basedir / locked.filename)
