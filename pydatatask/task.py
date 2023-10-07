@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Protocol,
+    Set,
     Tuple,
     Union,
 )
@@ -118,6 +119,10 @@ class LinkKind(Enum):
     OutputId = auto()
     OutputYamlMetadataFilepath = auto()
     OutputFilepath = auto()
+
+
+INPUT_KINDS: Set[LinkKind] = {LinkKind.InputId, LinkKind.InputMetadata, LinkKind.InputFilepath}
+OUTPUT_KINDS: Set[LinkKind] = {LinkKind.OutputId, LinkKind.OutputYamlMetadataFilepath, LinkKind.OutputFilepath}
 
 
 @dataclass
@@ -410,9 +415,8 @@ class Task(ABC):
 
         return result, preamble, epilogue
 
-    @abstractmethod
-    def _instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind):
-        raise NotImplementedError
+    def _instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind) -> TemplateInfo:
+        return arg
 
 
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
@@ -458,7 +462,7 @@ class KubeTask(Task):
     def __init__(
         self,
         name: str,
-        executor: Callable[[], Executor],
+        executor: Executor,
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"],
@@ -470,7 +474,7 @@ class KubeTask(Task):
     ):
         """
         :param name: The name of the task.
-        :param cluster: A callable returning a PodManager to use to connect to the cluster.
+        :param executor: The executor to use for this task.
         :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
         :param template: YAML markup for a pod manifest template, either as a string or a path to a file.
@@ -537,7 +541,7 @@ class KubeTask(Task):
         The pod manager instance for this task. Will raise an error if the manager is provided by an unopened session.
         """
         if self._podman is None:
-            self._podman = self._executor().to_pod_manager()
+            self._podman = self._executor.to_pod_manager()
         return self._podman
 
     async def _get_load(self):
@@ -675,7 +679,7 @@ class ProcessTask(Task):
         self,
         name: str,
         template: str,
-        executor: Callable[[], "Executor"] = lambda: localhost_manager,
+        executor: "Executor" = localhost_manager,
         resource_manager: "ResourceManager" = localhost_resource_manager,
         job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
         pids: Optional["repomodule.MetadataRepository"] = None,
@@ -689,7 +693,7 @@ class ProcessTask(Task):
     ):
         """
         :param name: The name of this task.
-        :param manager: A callable returnint the process manager with control over the target execution environment.
+        :param executor: The executor to use for this task.
         :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
                                  if they would break the quota.
         :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
@@ -756,16 +760,13 @@ class ProcessTask(Task):
     def host(self):
         return self.manager.host
 
-    def _instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind):
-        return
-
     @property
     def manager(self) -> "AbstractProcessManager":
         """
         The process manager for this task. Will raise an error if the manager comes from a session which is closed.
         """
         if self._manager is None:
-            self._manager = self._executor().to_process_manager()
+            self._manager = self._executor.to_process_manager()
         return self._manager
 
     async def _get_load(self) -> "Resources":
@@ -1175,7 +1176,7 @@ class KubeFunctionTask(KubeTask):
     def __init__(
         self,
         name: str,
-        executor: Callable[[], Executor],
+        executor: Executor,
         resources: ResourceManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"] = None,
@@ -1186,7 +1187,7 @@ class KubeFunctionTask(KubeTask):
     ):
         """
         :param name: The name of this task.
-        :param cluster: A callable returning a PodManager to use to connect to the cluster.
+        :param executor: The executor to use for this task.
         :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
         :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
@@ -1284,7 +1285,7 @@ class ContainerTask(Task):
         image: str,
         template: str,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
-        executor: Callable[[], Executor] = lambda: localhost_docker_manager,
+        executor: Executor = localhost_docker_manager,
         resource_manager: "ResourceManager" = localhost_resource_manager,
         job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
         window: timedelta = timedelta(minutes=1),
@@ -1296,8 +1297,7 @@ class ContainerTask(Task):
         """
         :param name: The name of this task.
         :param image: The name of the docker image to use to run this task.
-        :param manager: A callable returning a ContainerManagerAbstract instance configured to be able to launch and
-                        manage container. Defaults to a local Docker install.
+        :param executor: The executor to use for this task.
         :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
                                  if they would break the quota.
         :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
@@ -1351,7 +1351,7 @@ class ContainerTask(Task):
         The process manager for this task. Will raise an error if the manager comes from a session which is closed.
         """
         if self._manager is None:
-            self._manager = self._executor().to_container_manager()
+            self._manager = self._executor.to_container_manager()
         return self._manager
 
     async def _get_load(self) -> "Resources":

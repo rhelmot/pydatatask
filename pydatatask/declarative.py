@@ -43,7 +43,16 @@ from pydatatask.repository.docker import DockerRepository
 from pydatatask.repository.mongodb import MongoMetadataRepository
 from pydatatask.resource_manager import ResourceManager, Resources
 from pydatatask.session import Session
-from pydatatask.task import ContainerTask, KubeTask, Link, LinkKind, ProcessTask, Task
+from pydatatask.task import (
+    INPUT_KINDS,
+    OUTPUT_KINDS,
+    ContainerTask,
+    KubeTask,
+    Link,
+    LinkKind,
+    ProcessTask,
+    Task,
+)
 import pydatatask
 
 _T = TypeVar("_T")
@@ -70,8 +79,10 @@ def parse_bool(thing: Any) -> bool:
 _E = TypeVar("_E", bound=Enum)
 
 
-def make_enum_constructor(cls: Type[_E]) -> Callable[[Any], _E]:
+def make_enum_constructor(cls: Type[_E]) -> Callable[[Any], Optional[_E]]:
     def inner(thing):
+        if thing is None:
+            return None
         if not isinstance(thing, str):
             raise ValueError(f"{cls} must be instantiated by a string")
         return getattr(cls, thing)
@@ -84,7 +95,15 @@ def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str
     Generate a constructor function, or a function which will take a dict of parameters, validate them, and call a
     function with them as keywords.
     """
+    tdc = make_typeddict_constructor(name, schema)
 
+    def inner(thing):
+        return constructor(**tdc(thing))
+
+    return inner
+
+
+def make_typeddict_constructor(name: str, schema: Dict[str, Any]) -> Callable[[Any], Dict[str, Any]]:
     def inner(thing):
         if not isinstance(thing, dict):
             raise ValueError(f"{name} must be followed by a mapping")
@@ -94,7 +113,7 @@ def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str
             if k not in schema:
                 raise ValueError(f"Invalid argument to {name}: {k}")
             kwargs[k] = schema[k](v)
-        return constructor(**kwargs)
+        return kwargs
 
     return inner
 
@@ -399,13 +418,13 @@ def build_executor_picker(session: Session, resources: Dict[str, Callable[[], An
             },
         ),
     }
-    for ep in entry_points(group="pydatatask.repository_constructors"):
+    for ep in entry_points(group="pydatatask.executor_constructors"):
         maker = ep.load()
         try:
             kinds |= maker(resources)
         except TypeError:
             traceback.print_exc(file=sys.stderr)
-    return make_dispatcher("Repository", kinds)
+    return make_dispatcher("Executor", kinds)
 
 
 def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
@@ -467,18 +486,20 @@ def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
     return make_dispatcher("Resource", kinds)
 
 
+link_kind_constructor = make_enum_constructor(LinkKind)
+
+
 def build_task_picker(
     repos: Dict[str, Repository],
     executors: Dict[str, Executor],
     quotas: Dict[str, ResourceManager],
     resources: Dict[str, Callable[[], Any]],
 ) -> Callable[[str, Any], Task]:
-    link_constructor = make_constructor(
+    link_constructor = make_typeddict_constructor(
         "Link",
-        Link,
         {
             "repo": make_picker("Repository", repos),
-            "kind": make_enum_constructor(LinkKind),
+            "kind": link_kind_constructor,
             "key": lambda thing: None if thing is None else str(thing),
             "is_input": parse_bool,
             "is_output": parse_bool,
@@ -489,6 +510,7 @@ def build_task_picker(
             "required_for_output": parse_bool,
         },
     )
+    links_constructor = make_dict_parser("links", str, link_constructor)
     kinds = {
         "Process": make_constructor(
             "ProcessTask",
@@ -509,7 +531,7 @@ def build_task_picker(
                 if thing == "STDOUT"
                 else make_picker("Repository", repos)(thing),
                 "ready": make_picker("Repository", repos),
-                "links": make_dict_parser("links", str, link_constructor),
+                "links": links_constructor,
             },
         ),
         "Kubernetes": make_constructor(
@@ -526,7 +548,7 @@ def build_task_picker(
                 "timeout": _timedelta_constructor,
                 "env": make_dict_parser("environ", str, str),
                 "ready": make_picker("Repository", repos),
-                "links": make_dict_parser("links", str, link_constructor),
+                "links": links_constructor,
             },
         ),
         "Container": make_constructor(
@@ -545,7 +567,7 @@ def build_task_picker(
                 "logs": make_picker("Repository", repos),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
-                "links": make_dict_parser("links", str, link_constructor),
+                "links": links_constructor,
             },
         ),
     }
@@ -561,9 +583,14 @@ def build_task_picker(
         executable = thing.pop("executable")
         executable["args"] |= thing
         executable["args"]["name"] = name
-        links = executable["args"].pop("links", {}) or {}
+        links = links_constructor(executable["args"].pop("links", {}) or {})
         task = dispatcher(executable)
-        task.links.update(links)
+        for name, link in links.items():
+            if link["kind"] in INPUT_KINDS:
+                link["is_input"] = True
+            if link["kind"] in OUTPUT_KINDS:
+                link["is_output"] = True
+            task.link(name, **link)
         return task
 
     return constructor

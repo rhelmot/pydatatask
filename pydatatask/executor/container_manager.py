@@ -100,7 +100,7 @@ class DockerContainerManager(ContainerManagerAbstract):
         live = [
             (info, self.name_to_id(task, info["Name"]))
             for info in infos
-            if not info["Status"]["Dead"] and not info["Status"]["OOMKilled"]
+            if not info["State"]["Dead"] and not info["State"]["OOMKilled"]
         ]
         return {
             name: datetime.fromisoformat(info["State"]["StartedAt"])
@@ -121,7 +121,7 @@ class DockerContainerManager(ContainerManagerAbstract):
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
-            if not info["Status"]["Dead"] and not info["Status"]["OOMKilled"] and name is not None
+            if not info["State"]["Dead"] and not info["State"]["OOMKilled"] and name is not None
         ]
         results = await asyncio.gather(*(self.cleanup(container, info) for info, container, _ in dead))
         return activity, {name: result for (_, _, name), result in zip(dead, results)}
