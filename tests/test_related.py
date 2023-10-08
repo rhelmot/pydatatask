@@ -17,8 +17,6 @@ class TestRelated(unittest.IsolatedAsyncioTestCase):
         assert await related1.contains("456")
         assert not await related1.contains("lksfdlkfd")
         with self.assertRaises(LookupError):
-            await related1.info("lkjfdslkj")
-        with self.assertRaises(LookupError):
             await related1.open("lkjfdslkj", "w")
 
         base2 = pydatatask.InProcessMetadataRepository({"123": "weh!"})

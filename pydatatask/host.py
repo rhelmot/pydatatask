@@ -1,3 +1,9 @@
+"""This module houses classes and instances related to host tracking.
+
+Pydatatask needs to be able to know how to make resources accessible regardless of where they are. To this end, there
+can be e.g. dicts of urls keyed on Hosts, indicating that a given target resource needs to be accessed through a
+different url depending on which host is accessing it.
+"""
 from typing import Dict
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -7,21 +13,27 @@ import string
 
 
 class HostOS(Enum):
+    """The operating system provided by a host."""
+
     Linux = auto()
 
 
 @dataclass(frozen=True)
 class Host:
+    """A descriptor of a host."""
+
     name: str
     os: HostOS
 
     def mktemp(self, identifier: str) -> str:
+        """Generate a temporary filepath for the host system."""
         if self.os == HostOS.Linux:
             return f'/tmp/pydatatask-{"".join(random.choice(string.ascii_lowercase) for _ in range(8))}-{identifier}'
         else:
             raise TypeError(self.os)
 
     def mk_http_get(self, filename: str, url: str, headers: Dict[str, str]) -> str:
+        """Generate a shell script to perform an http download for the host system."""
         if self.os == HostOS.Linux:
             headers_str = " ".join(f'--header "{key}={val}"' for key, val in headers.items())
             return f"""
@@ -33,6 +45,7 @@ class Host:
             raise TypeError(self.os)
 
     def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> str:
+        """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
             headers_str = " ".join(f'--header "{key}={val}"' for key, val in headers.items())
             return f"""

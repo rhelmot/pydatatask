@@ -135,7 +135,9 @@ disable = [
     "too-many-statements",
     "unidiomatic-typecheck",
     "consider-using-f-string",
+    "cyclic-import",
     "broad-exception-raised",  # TODO fix
+    "invalid-overridden-method",  # complains about the sync/async problem with abstract methods
 ]
 
 [tool.coverage.report]
@@ -161,3 +163,10 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 120
+
+[tool.docformatter]
+style = "sphinx"
+recursive = true
+pre-summary-space = true
+wrap-descriptions = 120
+wrap-summaries = 116

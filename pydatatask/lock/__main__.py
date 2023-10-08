@@ -1,14 +1,43 @@
-from dataclasses import asdict
+from typing import Callable, Dict
+from pathlib import Path
 import sys
+import tempfile
 
-from pydatatask.declarative import find_config
-from pydatatask.host import LOCAL_HOST
-from pydatatask.staging import (
-    Dispatcher,
-    PipelineStaging,
-    default_allocators_local,
-    default_allocators_temp,
-)
+from pydatatask.staging import Dispatcher, PipelineStaging, find_config
+
+
+def _allocate_temp_meta() -> Dispatcher:
+    return Dispatcher("InProcessMetadata", {})
+
+
+def _allocate_temp_blob() -> Dispatcher:
+    return Dispatcher("InProcessBlob", {})
+
+
+def _allocate_local_meta() -> Dispatcher:
+    Path("/tmp/pydatatask").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    return Dispatcher("YamlFile", {"basedir": basedir})
+
+
+def _allocate_local_blob() -> Dispatcher:
+    Path("/tmp/pydatatask").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    return Dispatcher("File", {"basedir": basedir})
+
+
+def default_allocators_temp() -> Dict[str, Callable[[], Dispatcher]]:
+    return {
+        "MetadataRepository": _allocate_temp_meta,
+        "BlobRepository": _allocate_temp_blob,
+    }
+
+
+def default_allocators_local() -> Dict[str, Callable[[], Dispatcher]]:
+    return {
+        "MetadataRepository": _allocate_local_meta,
+        "BlobRepository": _allocate_local_blob,
+    }
 
 
 def main():

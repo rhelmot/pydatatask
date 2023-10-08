@@ -4,6 +4,7 @@ import unittest
 
 import aiofiles.os
 
+from pydatatask.task import LinkKind
 import pydatatask
 
 
@@ -23,18 +24,14 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
             repo0.data[str(i)] = i
 
         @pydatatask.InProcessSyncTask("task", done)
-        async def task(
-            job,
-            repo0: pydatatask.MetadataRepository,
-            repo1: pydatatask.BlobRepository,
-        ):
+        async def task(job: str, repo0: pydatatask.MetadataRepository, repo1: pydatatask.BlobRepository, **kwargs):
             async with aiofiles.open("/dev/urandom", "rb") as fp:
                 data = await fp.read(await repo0.info(job))
             async with await repo1.open(job, "w") as fp:
                 await fp.write(data.hex()[: len(data)])
 
-        task.link("repo0", repo0, is_input=True)
-        task.link("repo1", repo1, is_output=True)
+        task.link("repo0", repo0, kind=LinkKind.InputRepo)
+        task.link("repo1", repo1, kind=LinkKind.OutputRepo)
 
         pipeline = pydatatask.Pipeline([task], session, [])
         async with pipeline:

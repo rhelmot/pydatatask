@@ -1,6 +1,5 @@
-"""
-The top-level script you write using pydatatask should call `pydatatask.main.main` in its ``if __name__ == '__main__'``
-block. This will parse ``sys.argv`` and display the administration interface for the pipeline.
+"""The top-level script you write using pydatatask should call `pydatatask.main.main` in its ``if __name__ ==
+'__main__'`` block. This will parse ``sys.argv`` and display the administration interface for the pipeline.
 
 The help screen should look something like this:
 
@@ -70,9 +69,8 @@ def main(
     pipeline: Pipeline,
     instrument: Optional[Callable[[argparse._SubParsersAction], None]] = None,
 ):
-    """
-    The pydatatask main function! Call this with the pipeline you've constructed to parse ``sys.argv`` and display the
-    pipeline administration interface.
+    """The pydatatask main function! Call this with the pipeline you've constructed to parse ``sys.argv`` and
+    display the pipeline administration interface.
 
     If you like, you can pass as the ``instrument`` argument a function which will add additional commands to the menu.
     """

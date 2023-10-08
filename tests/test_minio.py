@@ -7,6 +7,7 @@ import unittest
 
 import aiobotocore.session
 
+from pydatatask.host import LOCAL_HOST
 import pydatatask
 
 
@@ -68,7 +69,10 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
         ).__aenter__()
 
     async def test_minio(self):
-        repo = pydatatask.S3BucketRepository(lambda: self.client, self.bucket, prefix="weh/", suffix=".weh")
+        assert self.client is not None
+        assert self.minio_endpoint is not None
+        client = self.client
+        repo = pydatatask.S3BucketRepository(lambda: client, self.bucket, prefix="weh/", suffix=".weh")
         repo_yaml = pydatatask.YamlMetadataS3Repository(lambda: self.client, self.bucket, prefix="weh/")
         assert repr(repo)
         await repo.validate()
@@ -88,9 +92,7 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
         assert await repo.contains("foo")
         assert not await repo.contains("bar")
 
-        info = await repo.info("bar")
-        assert str(info) == f"s3://{self.bucket}/weh/bar.weh"
-        assert info.endpoint == "http://" + self.minio_endpoint
+        assert repo.get_endpoint(LOCAL_HOST) == "http://" + self.minio_endpoint
 
         await repo.delete("foo")
         assert [ident async for ident in repo] == []
@@ -115,7 +117,7 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
             await self.client.delete_bucket(Bucket=self.bucket)
             await self.client.close()
 
-        if self.docker_name is not None:
+        if self.docker_name is not None and self.docker_path is not None:
             p = await asyncio.create_subprocess_exec(
                 self.docker_path,
                 "kill",

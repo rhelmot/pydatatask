@@ -53,17 +53,11 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
         assert not await mapped.contains("bar")
         assert not await mapped.contains("weh")
 
-        assert await mapped.info("foo") == "INFO"
-        assert await mapped.info("bar") == "INFO"
-        assert await mapped.info("weh") == "INFO"
-
         with self.assertLogs(logging.root, "DEBUG") as cl:
             await mapped.delete("foo")
             await mapped.delete("bar")
             await mapped.delete("weh")
         assert [record.message for record in cl.records] == ["deleting foo", "deleting bar", "deleting weh"]
-
-        assert await mapped.info_all() == {"foo": "INFO"}
 
 
 if __name__ == "__main__":

@@ -1,8 +1,6 @@
-"""
-This module contains parsing methods for transforming various dict and list schemas into Pipeline, Repository, Task,
-and other kinds of pydatatask classes.
-"""
-from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
+"""This module contains parsing methods for transforming various dict and list schemas into Repository, Task, and
+other kinds of pydatatask classes."""
+from typing import Any, Dict, List, Optional, Type, TypeVar
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from enum import Enum
@@ -11,7 +9,6 @@ import base64
 import gc
 import json
 import os
-import pathlib
 import socket
 import sys
 import traceback
@@ -19,14 +16,14 @@ import traceback
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async
-import kubernetes_asyncio.config
 import motor.motor_asyncio
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
-from pydatatask.executor.pod_manager import PodManager
+from pydatatask.executor.pod_manager import PodManager, kube_connect
 from pydatatask.executor.proc_manager import LocalLinuxManager, SSHLinuxManager
 from pydatatask.host import Host, HostOS
+from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import (
     FileRepository,
     Repository,
@@ -41,18 +38,8 @@ from pydatatask.repository.base import (
 from pydatatask.repository.bucket import YamlMetadataS3Repository
 from pydatatask.repository.docker import DockerRepository
 from pydatatask.repository.mongodb import MongoMetadataRepository
-from pydatatask.resource_manager import ResourceManager, Resources
-from pydatatask.session import Session
-from pydatatask.task import (
-    INPUT_KINDS,
-    OUTPUT_KINDS,
-    ContainerTask,
-    KubeTask,
-    Link,
-    LinkKind,
-    ProcessTask,
-    Task,
-)
+from pydatatask.session import Ephemeral
+from pydatatask.task import ContainerTask, KubeTask, LinkKind, ProcessTask, Task
 import pydatatask
 
 _T = TypeVar("_T")
@@ -60,9 +47,7 @@ _K = TypeVar("_K", bound=Task)
 
 
 def parse_bool(thing: Any) -> bool:
-    """
-    Parse a string, int, or bool into a bool.
-    """
+    """Parse a string, int, or bool into a bool."""
     if isinstance(thing, bool):
         return thing
     if isinstance(thing, int):
@@ -80,6 +65,8 @@ _E = TypeVar("_E", bound=Enum)
 
 
 def make_enum_constructor(cls: Type[_E]) -> Callable[[Any], Optional[_E]]:
+    """Parse a string into an enum."""
+
     def inner(thing):
         if thing is None:
             return None
@@ -91,10 +78,8 @@ def make_enum_constructor(cls: Type[_E]) -> Callable[[Any], Optional[_E]]:
 
 
 def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str, Any]) -> Callable[[Any], _T]:
-    """
-    Generate a constructor function, or a function which will take a dict of parameters, validate them, and call a
-    function with them as keywords.
-    """
+    """Generate a constructor function, or a function which will take a dict of parameters, validate them, and call
+    a function with them as keywords."""
     tdc = make_typeddict_constructor(name, schema)
 
     def inner(thing):
@@ -104,6 +89,9 @@ def make_constructor(name: str, constructor: Callable[..., _T], schema: Dict[str
 
 
 def make_typeddict_constructor(name: str, schema: Dict[str, Any]) -> Callable[[Any], Dict[str, Any]]:
+    """Generate a dict constructor function, or a function which will take a dict of parameters, validate and
+    transform them according to a schema, and return that dict."""
+
     def inner(thing):
         if not isinstance(thing, dict):
             raise ValueError(f"{name} must be followed by a mapping")
@@ -119,9 +107,9 @@ def make_typeddict_constructor(name: str, schema: Dict[str, Any]) -> Callable[[A
 
 
 def make_dispatcher(name: str, mapping: Dict[str, Callable[[Any], _T]]) -> Callable[[Any], _T]:
-    """
-    Generate a dispatcher function, or a function which accepts a mapping of two keys: cls and args. cls should be one
-    keys in the provided mapping, and args are the arguments to the function pulled out of mapping.
+    """Generate a dispatcher function, or a function which accepts a mapping of two keys: cls and args.
+
+    cls should be one keys in the provided mapping, and args are the arguments to the function pulled out of mapping.
     Should be used for situations where you need to pick from one of many implementations of something.
     """
 
@@ -143,10 +131,8 @@ def make_dispatcher(name: str, mapping: Dict[str, Callable[[Any], _T]]) -> Calla
 def make_dict_parser(
     name: str, key_parser: Callable[[str], str], value_parser: Callable[[Any], _T]
 ) -> Callable[[Any], Dict[str, _T]]:
-    """
-    Generate a dict parser function, or a function which validates and transforms the keys and values of a dict into
-    another dict.
-    """
+    """Generate a dict parser function, or a function which validates and transforms the keys and values of a dict
+    into another dict."""
 
     def inner(thing):
         if not isinstance(thing, dict):
@@ -157,10 +143,8 @@ def make_dict_parser(
 
 
 def make_list_parser(name: str, value_parser: Callable[[Any], _T]) -> Callable[[Any], List[_T]]:
-    """
-    Generate a list parser function, or a function which validates and transforms the members of a list into another
-    list.
-    """
+    """Generate a list parser function, or a function which validates and transforms the members of a list into
+    another list."""
 
     def inner(thing):
         if not isinstance(thing, list):
@@ -171,10 +155,8 @@ def make_list_parser(name: str, value_parser: Callable[[Any], _T]) -> Callable[[
 
 
 def make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], Optional[_T]]:
-    """
-    Generate a picker function, or a function which takes a string and returns one of the members of the provided
-    options dict.
-    """
+    """Generate a picker function, or a function which takes a string and returns one of the members of the provided
+    options dict."""
 
     def inner(thing):
         if thing is None:
@@ -204,13 +186,6 @@ def _build_s3_connection(endpoint: str, username: str, password: str):
     return minio
 
 
-def _build_host(name: str, os: HostOS):
-    async def host():
-        yield Host(name, os)
-
-    return host
-
-
 def _build_docker_connection(
     domain: str,
     username: Optional[str] = None,
@@ -221,7 +196,7 @@ def _build_docker_connection(
     if default_config_file:
         config_file = os.path.expanduser("~/.docker/config.json")
     if config_file is not None:
-        with open(config_file, "r") as fp:
+        with open(config_file, "r", encoding="utf-8") as fp:
             docker_config = json.load(fp)
         username, password = base64.b64decode(docker_config["auths"][domain]["auth"]).decode().split(":")
     else:
@@ -271,15 +246,19 @@ def _build_ssh_connection(
     return ssh
 
 
-_quota_constructor = make_constructor("quota", Resources.parse, {"cpu": str, "mem": str, "launches": str})
-_timedelta_constructor = make_constructor(
+quota_constructor = make_constructor("quota", Quota.parse, {"cpu": str, "mem": str, "launches": str})
+timedelta_constructor = make_constructor(
     "timedelta",
     timedelta,
     {"days": int, "seconds": int, "microseconds": int, "milliseconds": int, "minutes": int, "hours": int, "weeks": int},
 )
 
 
-def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
+def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
+    """Generate a function which will dispatch a dict into all known repository constructors.
+
+    This function can be extended through the ``pydatatask.repository_constructors`` entrypoint.
+    """
     kinds: Dict[str, Callable[[Any], Repository]] = {
         "InProcessMetadata": make_constructor(
             "InProcessMetadataRepository",
@@ -323,7 +302,7 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
             "S3BucketRepository",
             S3BucketRepository,
             {
-                "client": make_picker("S3Connection", resources),
+                "client": make_picker("S3Connection", ephemerals),
                 "bucket": str,
                 "prefix": str,
                 "suffix": str,
@@ -335,7 +314,7 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
             "YamlMetadataS3Repository",
             YamlMetadataS3Repository,
             {
-                "client": make_picker("S3Connection", resources),
+                "client": make_picker("S3Connection", ephemerals),
                 "bucket": str,
                 "prefix": str,
                 "suffix": str,
@@ -347,7 +326,7 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
             "DockerRepository",
             DockerRepository,
             {
-                "registry": make_picker("DockerRegistry", resources),
+                "registry": make_picker("DockerRegistry", ephemerals),
                 "domain": str,
                 "repository": str,
             },
@@ -356,7 +335,7 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
             "MongoMetadataRepository",
             MongoMetadataRepository,
             {
-                "database": make_picker("MongoDatabase", resources),
+                "database": make_picker("MongoDatabase", ephemerals),
                 "collection": str,
             },
         ),
@@ -364,20 +343,17 @@ def build_repository_picker(resources: Dict[str, Callable[[], Any]]) -> Callable
     for ep in entry_points(group="pydatatask.repository_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(resources)
+            kinds |= maker(ephemerals)
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     return make_dispatcher("Repository", kinds)
 
 
-def build_executor_picker(session: Session, resources: Dict[str, Callable[[], Any]]) -> Callable[[Any], Executor]:
-    def _build_pod_manager(host: Host, app: str, namespace: str, config_file: Optional[str], context: Optional[str]):
-        @session.resource
-        async def config():
-            yield await kubernetes_asyncio.config.load_kube_config(config_file, context)
+def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemeral[Any]]) -> Callable[[Any], Executor]:
+    """Generate a function which will dispatch a dict into all known executor constructors.
 
-        return PodManager(host, app, namespace, config)
-
+    This function can be extended through the ``pydatatask.executor_constructors`` entrypoint.
+    """
     kinds: Dict[str, Callable[[Any], Executor]] = {
         "LocalLinux": make_constructor(
             "LocalLinuxManager",
@@ -391,28 +367,27 @@ def build_executor_picker(session: Session, resources: Dict[str, Callable[[], An
             "SSHLinuxManager",
             SSHLinuxManager,
             {
-                "host": make_picker("Host", resources),
+                "host": make_picker("Host", hosts),
                 "app": str,
                 "remote_path": str,
-                "ssh": make_picker("SSHConnection", resources),
+                "ssh": make_picker("SSHConnection", ephemerals),
             },
         ),
         "Kubernetes": make_constructor(
             "PodManager",
-            _build_pod_manager,
+            PodManager,
             {
-                "host": make_picker("Host", resources),
+                "host": make_picker("Host", hosts),
                 "app": str,
                 "namespace": str,
-                "config_file": str,
-                "context": str,
+                "connection": make_picker("KubeConnection", ephemerals),
             },
         ),
         "Docker": make_constructor(
             "DockerContainerManager",
             DockerContainerManager,
             {
-                "host": make_picker("Host", resources),
+                "host": make_picker("Host", hosts),
                 "app": str,
                 "url": str,
             },
@@ -421,22 +396,28 @@ def build_executor_picker(session: Session, resources: Dict[str, Callable[[], An
     for ep in entry_points(group="pydatatask.executor_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(resources)
+            kinds |= maker(ephemerals)
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     return make_dispatcher("Executor", kinds)
 
 
-def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
+host_constructor = make_constructor(
+    "Host",
+    Host,
+    {
+        "name": str,
+        "os": make_enum_constructor(HostOS),
+    },
+)
+
+
+def build_ephemeral_picker() -> Callable[[Any], Ephemeral[Any]]:
+    """Generate a function which will dispatch a dict into all known ephemeral constructors.
+
+    This function can be extended through the ``pydatatask.ephemeral_constructors`` entrypoint.
+    """
     kinds = {
-        "Host": make_constructor(
-            "Host",
-            _build_host,
-            {
-                "name": str,
-                "os": make_enum_constructor(HostOS),
-            },
-        ),
         "S3Connection": make_constructor(
             "S3Connection",
             _build_s3_connection,
@@ -476,14 +457,22 @@ def build_resource_picker() -> Callable[[Any], Callable[[], Any]]:
                 "port": int,
             },
         ),
+        "KubeConnection": make_constructor(
+            "KubeConnection",
+            kube_connect,
+            {
+                "config_file": str,
+                "context": str,
+            },
+        ),
     }
-    for ep in entry_points(group="pydatatask.resource_constructors"):
+    for ep in entry_points(group="pydatatask.ephemeral_constructors"):
         maker = ep.load()
         try:
             kinds |= maker()
         except TypeError:
             traceback.print_exc(file=sys.stderr)
-    return make_dispatcher("Resource", kinds)
+    return make_dispatcher("Ephemeral", kinds)
 
 
 link_kind_constructor = make_enum_constructor(LinkKind)
@@ -492,9 +481,13 @@ link_kind_constructor = make_enum_constructor(LinkKind)
 def build_task_picker(
     repos: Dict[str, Repository],
     executors: Dict[str, Executor],
-    quotas: Dict[str, ResourceManager],
-    resources: Dict[str, Callable[[], Any]],
+    quotas: Dict[str, QuotaManager],
+    ephemerals: Dict[str, Callable[[], Any]],
 ) -> Callable[[str, Any], Task]:
+    """Generate a function which will dispatch a dict into all known task constructors.
+
+    This function can be extended through the ``pydatatask.task_constructors`` entrypoint.
+    """
     link_constructor = make_typeddict_constructor(
         "Link",
         {
@@ -519,10 +512,10 @@ def build_task_picker(
                 "name": str,
                 "template": str,
                 "executor": make_picker("Executor", executors),
-                "resource_manager": make_picker("ResourceManager", quotas),
-                "job_resources": _quota_constructor,
+                "quota_manager": make_picker("QuotaManager", quotas),
+                "job_quota": quota_constructor,
                 "pids": make_picker("Repository", repos),
-                "window": _timedelta_constructor,
+                "window": timedelta_constructor,
                 "environ": make_dict_parser("environ", str, str),
                 "done": make_picker("Repository", repos),
                 "stdin": make_picker("Repository", repos),
@@ -540,12 +533,12 @@ def build_task_picker(
             {
                 "name": str,
                 "executor": make_picker("Executor", executors),
-                "resources": make_picker("ResourceManager", quotas),
+                "quota_manager": make_picker("QuotaManager", quotas),
                 "template": str,
                 "logs": make_picker("Repository", repos),
                 "done": make_picker("Repository", repos),
-                "window": _timedelta_constructor,
-                "timeout": _timedelta_constructor,
+                "window": timedelta_constructor,
+                "timeout": timedelta_constructor,
                 "env": make_dict_parser("environ", str, str),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
@@ -560,9 +553,9 @@ def build_task_picker(
                 "template": str,
                 "executor": make_picker("Executor", executors),
                 "entrypoint": make_list_parser("entrypoint", str),
-                "resource_manager": make_picker("ResourceManager", quotas),
-                "job_resources": _quota_constructor,
-                "window": _timedelta_constructor,
+                "quota_manager": make_picker("QuotaManager", quotas),
+                "job_quota": quota_constructor,
+                "window": timedelta_constructor,
                 "environ": make_dict_parser("environ", str, str),
                 "logs": make_picker("Repository", repos),
                 "done": make_picker("Repository", repos),
@@ -574,7 +567,7 @@ def build_task_picker(
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(repos, quotas, resources)
+            kinds |= maker(repos, quotas, ephemerals)
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     dispatcher = make_dispatcher("Task", kinds)
@@ -585,29 +578,8 @@ def build_task_picker(
         executable["args"]["name"] = name
         links = links_constructor(executable["args"].pop("links", {}) or {})
         task = dispatcher(executable)
-        for name, link in links.items():
-            if link["kind"] in INPUT_KINDS:
-                link["is_input"] = True
-            if link["kind"] in OUTPUT_KINDS:
-                link["is_output"] = True
-            task.link(name, **link)
+        for linkname, link in links.items():
+            task.link(linkname, **link)
         return task
 
     return constructor
-
-
-def find_config() -> Optional[pathlib.Path]:
-    thing = os.getenv("PIPELINE_YAML")
-    if thing is not None:
-        return pathlib.Path(thing)
-
-    root = pathlib.Path.cwd()
-    while True:
-        pth = root / "pipeline.yaml"
-        if pth.exists():
-            return pth
-        newroot = root.parent
-        if newroot == root:
-            return None
-        else:
-            root = newroot

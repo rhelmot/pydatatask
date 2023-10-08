@@ -91,12 +91,14 @@ class RepoDir(Directory):
 
     def metadata_builder(self, job: str):
         async def content():
+            assert isinstance(self.repo, MetadataRepository)
             if not await self.repo.contains(job):
                 return bytearray()
             data = await self.repo.info(job)
             return bytearray(yaml.safe_dump(data).encode())
 
         async def writeback(data_bytes):
+            assert isinstance(self.repo, MetadataRepository)
             if not data_bytes:
                 # we are PROBABLY doing open(x, O_TRUNC)
                 # do not sync this. nobody wants the empty string to be valid yaml. fuck you
@@ -120,12 +122,14 @@ class RepoDir(Directory):
 
     def blob_builder(self, job: str):
         async def content():
+            assert isinstance(self.repo, BlobRepository)
             if not await self.repo.contains(job):
                 return bytearray()
             async with await self.repo.open(job, "rb") as fp:
                 return bytearray(await fp.read())
 
         async def writeback(data):
+            assert isinstance(self.repo, BlobRepository)
             async with await self.repo.open(job, "wb") as fp:
                 await fp.write(data)
 
@@ -153,11 +157,11 @@ class RepoDir(Directory):
 
     async def create(self, name: str, mode, flags) -> File:
         if isinstance(self.repo, MetadataRepository):
-            return self.job_builder(name)
+            return self.job_builder(name)  # type: ignore
         elif isinstance(self.repo, FileRepositoryBase):
             raise FSInvalidError()
         else:
-            return self.job_builder(name)
+            return self.job_builder(name)  # type: ignore
 
     async def unlink_child(self, name: str):
         await self.repo.delete(name)

@@ -1,8 +1,6 @@
-"""
-This module contains repositories and other classes for interacting with S3-compatible bucket stores.
-"""
+"""This module contains repositories and other classes for interacting with S3-compatible bucket stores."""
 
-from typing import Callable, Dict, Optional
+from typing import Dict, Literal, Optional, overload
 import io
 
 from types_aiobotocore_s3.client import S3Client
@@ -10,15 +8,14 @@ import botocore.exceptions
 
 from pydatatask import task as taskmodule
 from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.session import Ephemeral
 from pydatatask.utils import AReadText, AWriteText
 
 from .base import BlobRepository, YamlMetadataRepository, job_getter
 
 
 class S3BucketBinaryWriter:
-    """
-    A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`.
-    """
+    """A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`."""
 
     def __init__(self, repo: "S3BucketRepository", job: str):
         self.repo = repo
@@ -33,9 +30,7 @@ class S3BucketBinaryWriter:
         await self.close()
 
     async def close(self):
-        """
-        Close and flush the data to the bucket.
-        """
+        """Close and flush the data to the bucket."""
         self.buffer.seek(0, io.SEEK_END)
         size = self.buffer.tell()
         self.buffer.seek(0, io.SEEK_SET)
@@ -48,29 +43,24 @@ class S3BucketBinaryWriter:
         )
 
     async def write(self, data: bytes):
-        """
-        Write some data to the stream.
-        """
+        """Write some data to the stream."""
         self.buffer.write(data)
 
 
 class S3BucketReader:
-    """
-    A class for streaming byte data from an `S3BucketRepository`.
-    """
+    """A class for streaming byte data from an `S3BucketRepository`."""
 
     def __init__(self, body):
         self.body = body
 
     async def close(self):
-        """
-        Close and release the stream.
-        """
+        """Close and release the stream."""
         self.body.close()
 
     async def read(self, n=None):  # pylint: disable=unused-argument :(
-        """
-        Read the entire body of the blob. Due to API limitations, we can't read less than that at once...
+        """Read the entire body of the blob.
+
+        Due to API limitations, we can't read less than that at once...
         """
         return await self.body.read()
 
@@ -83,8 +73,7 @@ class S3BucketReader:
 
 
 class S3BucketInfo:
-    """
-    The data structure returned from :meth:`S3BucketRepository.info`.
+    """The data structure returned from :meth:`S3BucketRepository.info`.
 
     :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
                return this.
@@ -106,18 +95,19 @@ class S3BucketInfo:
 
 
 class S3BucketRepository(BlobRepository):
-    """
-    A repository where keys are paths in a S3 bucket. Provides a streaming interface to the corresponding blobs.
+    """A repository where keys are paths in a S3 bucket.
+
+    Provides a streaming interface to the corresponding blobs.
     """
 
     def __init__(
         self,
-        client: Callable[[], S3Client],
+        client: Ephemeral[S3Client],
         bucket: str,
         prefix: str = "",
         suffix: str = "",
         mimetype: str = "application/octet-stream",
-        endpoints: Optional[Dict[Host, str]] = None,
+        endpoints: Optional[Dict[Optional[Host], str]] = None,
     ):
         """
         :param client: A callable returning an aiobotocore S3 client connected and authenticated to the server you wish
@@ -140,8 +130,9 @@ class S3BucketRepository(BlobRepository):
 
     @property
     def client(self):
-        """
-        The aiobotocore S3 client. This will raise an error if the client comes from a session which is not opened.
+        """The aiobotocore S3 client.
+
+        This will raise an error if the client comes from a session which is not opened.
         """
         return self._client()
 
@@ -173,18 +164,35 @@ class S3BucketRepository(BlobRepository):
                 raise
 
     def object_name(self, job):
-        """
-        Return the object name for the given job.
-        """
+        """Return the object name for the given job."""
         return f"{self.prefix}{job}{self.suffix}"
 
     def get_endpoint(self, host: Host) -> str:
+        """Given a host, return the endpoint that makes sense."""
         if host == LOCAL_HOST:
             return self.client._endpoint.host  # type: ignore
         endpoint = self.endpoints.get(host, None)
         if endpoint is None:
+            endpoint = self.endpoints.get(None, None)
+        if endpoint is None:
             raise ValueError(f"No endpoint specified from host {host}")
         return endpoint
+
+    @overload
+    async def open(self, job: str, mode: Literal["r"]) -> AReadText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["w"]) -> AWriteText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["rb"]) -> S3BucketReader:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["wb"]) -> S3BucketBinaryWriter:
+        ...
 
     @job_getter
     async def open(self, job, mode="r"):
@@ -211,23 +219,21 @@ class S3BucketRepository(BlobRepository):
             input_filepath = task.mktemp(job)
             endpoint = self.get_endpoint(task.host)
             preamble = task.mk_http_get(
-                input_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={TODO: TODO}
-            )
+                input_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={}
+            )  # BT: Fix the headers
             return taskmodule.TemplateInfo(input_filepath, preamble=preamble)
         if kind == taskmodule.LinkKind.OutputFilepath:
             output_filepath = task.host.mktemp(job)
             endpoint = self.get_endpoint(task.host)
             epilogue = task.mk_http_post(
-                output_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={TODO: TODO}
-            )
+                output_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={}
+            )  # BT: fix the headers
             return taskmodule.TemplateInfo(output_filepath, epilogue=epilogue)
         return await super().template(job, task, kind)
 
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
-    """
-    A metadata repository based on a s3 bucket repository.
-    """
+    """A metadata repository based on a s3 bucket repository."""
 
     def __init__(self, client, bucket, prefix, suffix=".yaml", mimetype="text/yaml"):
         super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)

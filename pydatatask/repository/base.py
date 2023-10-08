@@ -1,9 +1,7 @@
-"""
-This module contains repository base classes as well as repository combinators and the simple filesystem repositories.
-"""
+"""This module contains repository base classes as well as repository combinators and the simple filesystem
+repositories."""
 
 from typing import (
-    TYPE_CHECKING,
     Any,
     AsyncGenerator,
     AsyncIterable,
@@ -18,8 +16,6 @@ from typing import (
 )
 from abc import ABC, abstractmethod
 from collections import Counter
-from dataclasses import dataclass
-from enum import Enum, auto
 from pathlib import Path
 import inspect
 import io
@@ -41,9 +37,9 @@ l = logging.getLogger(__name__)
 
 # Helper Functions
 def job_getter(f):
-    """
-    Use this function to annotate non-abstract methods which take a job identifier as their first parameter. This is
-    used by RelatedItemRepository to automatically translate job identifiers to related ones.
+    """Use this function to annotate non-abstract methods which take a job identifier as their first parameter.
+
+    This is used by RelatedItemRepository to automatically translate job identifiers to related ones.
     """
     if not inspect.iscoroutinefunction(f):
         raise TypeError("only async functions can be job_getters")
@@ -53,9 +49,8 @@ def job_getter(f):
 
 # Base Classes
 class Repository(ABC):
-    """
-    A repository is a key-value store where the keys are names of jobs. Since the values have unspecified semantics, the
-    only operations you can do on a generic repository are query for keys.
+    """A repository is a key-value store where the keys are names of jobs. Since the values have unspecified
+    semantics, the only operations you can do on a generic repository are query for keys.
 
     A repository can be async-iterated to get a listing of its members.
     """
@@ -64,10 +59,8 @@ class Repository(ABC):
 
     @classmethod
     def is_valid_job_id(cls, job: str):
-        """
-        Determine whether the given job identifier is valid, i.e. that it contains only valid characters
-        (numbers and letters by default).
-        """
+        """Determine whether the given job identifier is valid, i.e. that it contains only valid characters (numbers
+        and letters by default)."""
         return (
             0 < len(job) < 64
             and all(c in cls.CHARSET for c in job)
@@ -76,9 +69,7 @@ class Repository(ABC):
         )
 
     async def filter_jobs(self, iterator: AsyncIterable[str]) -> AsyncIterator[str]:
-        """
-        Apply `is_valid_job_id` as a filter to an async iterator.
-        """
+        """Apply `is_valid_job_id` as a filter to an async iterator."""
         async for job in iterator:
             if self.is_valid_job_id(job):
                 yield job
@@ -86,8 +77,7 @@ class Repository(ABC):
                 l.warning("Skipping %s %s - not a valid job id", self, repr(job))
 
     async def contains(self, item):
-        """
-        Determine whether the given job identifier is present in this repository.
+        """Determine whether the given job identifier is present in this repository.
 
         The default implementation is quite inefficient; please override this if possible.
         """
@@ -101,48 +91,49 @@ class Repository(ABC):
 
     @abstractmethod
     def unfiltered_iter(self) -> AsyncGenerator[str, None]:
-        """
-        The core method of Repository. Implement this to produce an iterable of every string which could potentially
-        be a job identifier present in this repository. When the repository is iterated directly, this will be filtered
-        by `filter_jobs`.
+        """The core method of Repository.
+
+        Implement this to produce an iterable of every string which could potentially be a job identifier present in
+        this repository. When the repository is iterated directly, this will be filtered by `filter_jobs`.
         """
         raise NotImplementedError
 
     async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        """
-        Returns an arbitrary piece of data related to job. Notably, this is used during templating.
-        This should do something meaningful even if the repository does not contain the requested job.
+        """Returns an arbitrary piece of data related to job.
+
+        Notably, this is used during templating. This should do something meaningful even if the repository does not
+        contain the requested job.
         """
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
+        if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
+            return taskmodule.TemplateInfo(self)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
     async def delete(self, job):
-        """
-        Delete the given job from the repository. This should succeed even if the job is not present in this repository.
+        """Delete the given job from the repository.
+
+        This should succeed even if the job is not present in this repository.
         """
         raise NotImplementedError
 
     async def validate(self):
-        """
-        Override this method to raise an exception if for any reason the repository is misconfigured. This will be
-        automatically called by the pipeline on opening.
+        """Override this method to raise an exception if for any reason the repository is misconfigured.
+
+        This will be automatically called by the pipeline on opening.
         """
 
     def map(
         self, func: Callable, filt: Optional[Callable[[str], Awaitable[bool]]] = None, allow_deletes=False
     ) -> "MapRepository":
-        """
-        Generate a :class:`MapRepository` based on this repository and the given parameters.
-        """
+        """Generate a :class:`MapRepository` based on this repository and the given parameters."""
         return MapRepository(self, func, filt, allow_deletes=allow_deletes)
 
 
 class MapRepository(Repository):
-    """
-    A MapRepository is a repository which uses arbitrary functions to map and filter results from a base repository.
-    """
+    """A MapRepository is a repository which uses arbitrary functions to map and filter results from a base
+    repository."""
 
     def __init__(
         self,
@@ -152,7 +143,7 @@ class MapRepository(Repository):
         allow_deletes=False,
     ):
         """
-        :param func: The function to use to translate the base repository's `info` results into the mapped `info`
+        :param func: The function to use to translate the base repository's info results into the mapped info
                      results.
         :param filt: Optional: An async function to use to determine whether a given key should be considered part of
                      the mapped repository.
@@ -182,10 +173,8 @@ class MapRepository(Repository):
 
 
 class MetadataRepository(Repository, ABC):
-    """
-    A metadata repository has values which are small, structured data, and loads them entirely into memory, returning
-    the structured data from the `info` method.
-    """
+    """A metadata repository has values which are small, structured data, and loads them entirely into memory,
+    returning the structured data from the `info` method."""
 
     async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
@@ -195,39 +184,29 @@ class MetadataRepository(Repository, ABC):
 
     @abstractmethod
     async def info(self, job: str) -> Any:
-        """
-        Retrieve the data with key ``job`` from the repository.
-        """
+        """Retrieve the data with key ``job`` from the repository."""
         raise NotImplementedError
 
     async def info_all(self) -> Dict[str, Any]:
-        """
-        Produce a mapping from every job present in the repository to its corresponding info. The default implementation
-        is somewhat inefficient; please override it if there is a more effective way to load all info.
+        """Produce a mapping from every job present in the repository to its corresponding info.
+
+        The default implementation is somewhat inefficient; please override it if there is a more effective way to load
+        all info.
         """
         return {job: await self.info(job) async for job in self}
 
     @abstractmethod
     async def dump(self, job, data):
-        """
-        Insert ``data`` into the repository with key ``job``.
-        """
+        """Insert ``data`` into the repository with key ``job``."""
         raise NotImplementedError
 
 
 class BlobRepository(Repository, ABC):
-    """
-    A blob repository has values which are flat data blobs that can be streamed for reading or writing.
-    """
+    """A blob repository has values which are flat data blobs that can be streamed for reading or writing."""
 
     @overload
     @abstractmethod
     async def open(self, job: str, mode: Literal["r"]) -> AReadText:
-        ...
-
-    @overload
-    @abstractmethod
-    async def open(self, job: str, mode: Literal["rb"]) -> AReadStream:
         ...
 
     @overload
@@ -237,22 +216,26 @@ class BlobRepository(Repository, ABC):
 
     @overload
     @abstractmethod
+    async def open(self, job: str, mode: Literal["rb"]) -> AReadStream:
+        ...
+
+    @overload
+    @abstractmethod
     async def open(self, job: str, mode: Literal["wb"]) -> AWriteStream:
         ...
 
     @abstractmethod
     async def open(self, job, mode="r"):
-        """
-        Open the given job's value as a stream for reading or writing, in text or binary mode.
-        """
+        """Open the given job's value as a stream for reading or writing, in text or binary mode."""
         raise NotImplementedError
 
 
 class FileRepositoryBase(Repository, ABC):
-    """
-    A file repository is a local directory where each job identifier is a filename, optionally suffixed with an
-    extension before hitting the filesystem. This is an abstract base class for other file repositories which have more
-    to say about what is found at these filepaths.
+    """A file repository is a local directory where each job identifier is a filename, optionally suffixed with an
+    extension before hitting the filesystem.
+
+    This is an abstract base class for other file repositories which have more to say about what is found at these
+    filepaths.
     """
 
     def __init__(self, basedir: Union[str, Path], extension: str = "", case_insensitive: bool = False):
@@ -281,16 +264,13 @@ class FileRepositoryBase(Repository, ABC):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
     def fullpath(self, job) -> Path:
-        """
-        Construct the full local path of the file corresponding to ``job``.
-        """
+        """Construct the full local path of the file corresponding to ``job``."""
         return self.basedir / (job + self.extension)
 
     @job_getter
     async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        """
-        The templating info provided by a file repository is the full path to the corresponding file as a string.
-        """
+        """The templating info provided by a file repository is the full path to the corresponding file as a
+        string."""
         if kind in (taskmodule.LinkKind.InputFilepath, taskmodule.LinkKind.OutputFilepath) and task.host == LOCAL_HOST:
             info = str(self.fullpath(job))
             return taskmodule.TemplateInfo(info, file_host=LOCAL_HOST)
@@ -298,9 +278,7 @@ class FileRepositoryBase(Repository, ABC):
 
 
 class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
-    """
-    A file repository whose members are files, treated as streamable blobs.
-    """
+    """A file repository whose members are files, treated as streamable blobs."""
 
     @job_getter
     async def open(self, job, mode="r"):
@@ -316,9 +294,7 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
 
 
 class DirectoryRepository(FileRepositoryBase):
-    """
-    A file repository whose members are directories.
-    """
+    """A file repository whose members are directories."""
 
     def __init__(self, *args, discard_empty=False, **kwargs):
         """
@@ -330,8 +306,9 @@ class DirectoryRepository(FileRepositoryBase):
 
     @job_getter
     async def mkdir(self, job):
-        """
-        Create an empty directory corresponding to ``job``. Do nothing if the directory already exists.
+        """Create an empty directory corresponding to ``job``.
+
+        Do nothing if the directory already exists.
         """
         try:
             await aiofiles.os.mkdir(self.fullpath(job))
@@ -360,9 +337,7 @@ class DirectoryRepository(FileRepositoryBase):
 
 
 class RelatedItemRepository(Repository):
-    """
-    A repository which returns items from another repository based on following a related-item lookup.
-    """
+    """A repository which returns items from another repository based on following a related-item lookup."""
 
     def __init__(
         self,
@@ -416,6 +391,10 @@ class RelatedItemRepository(Repository):
 
     @job_getter
     async def info(self, job):
+        """Perform the info lookup for the base repository.
+
+        This only works if the base repository is a metadata repository.
+        """
         assert isinstance(self.base_repository, MetadataRepository)
         basename = await self._lookup(job)
         if basename is None:
@@ -445,9 +424,7 @@ class RelatedItemRepository(Repository):
 
 
 class AggregateAndRepository(Repository):
-    """
-    A repository which is said to contain a job if all its children also contain that job
-    """
+    """A repository which is said to contain a job if all its children also contain that job."""
 
     def __init__(self, **children: Repository):
         assert children
@@ -467,17 +444,13 @@ class AggregateAndRepository(Repository):
         return True
 
     async def delete(self, job):
-        """
-        Deleting a job from an aggregate And repository deletes the job from all of its children.
-        """
+        """Deleting a job from an aggregate And repository deletes the job from all of its children."""
         for child in self.children.values():
             await child.delete(job)
 
 
 class AggregateOrRepository(Repository):
-    """
-    A repository which is said to contain a job if any of its children also contain that job
-    """
+    """A repository which is said to contain a job if any of its children also contain that job."""
 
     def __init__(self, **children: Repository):
         assert children
@@ -499,17 +472,13 @@ class AggregateOrRepository(Repository):
         return False
 
     async def delete(self, job):
-        """
-        Deleting a job from an aggregate Or repository deletes the job from all of its children.
-        """
+        """Deleting a job from an aggregate Or repository deletes the job from all of its children."""
         for child in self.children.values():
             await child.delete(job)
 
 
 class BlockingRepository(Repository):
-    """
-    A class that is said to contain a job if ``source`` contains it and ``unless`` does not contain it
-    """
+    """A class that is said to contain a job if ``source`` contains it and ``unless`` does not contain it."""
 
     def __init__(self, source: Repository, unless: Repository, enumerate_unless=True):
         self.source = source
@@ -538,8 +507,7 @@ class BlockingRepository(Repository):
 
 
 class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
-    """
-    A metadata repository based on a blob repository. When info is accessed, it will **load the target file into
+    """A metadata repository based on a blob repository. When info is accessed, it will **load the target file into
     memory**, parse it as yaml, and return the resulting object.
 
     This is a base class, and must be overridden to implement the blob loading portion.
@@ -561,18 +529,17 @@ class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
 
 
 class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
-    """
-    A metadata repository based on a file blob repository.
-    """
+    """A metadata repository based on a file blob repository."""
 
     def __init__(self, basedir: Union[str, Path], extension: str = ".yaml", case_insensitive: bool = False):
         super().__init__(basedir, extension=extension, case_insensitive=case_insensitive)
 
 
 class ExecutorLiveRepo(Repository):
-    """
-    A repository where keys translate to running jobs in an ExecutorTask. This repository is constructed automatically
-    and is linked as the ``live`` repository. Do not construct this class manually.
+    """A repository where keys translate to running jobs in an ExecutorTask.
+
+    This repository is constructed automatically and is linked as the ``live`` repository. Do not construct this class
+    manually.
     """
 
     def __init__(self, task: "taskmodule.ExecutorTask"):
@@ -589,23 +556,13 @@ class ExecutorLiveRepo(Repository):
         return item in self.task.rev_jobs
 
     async def delete(self, job):
-        """
-        Deleting a job from the repository will cancel the corresponding task.
-        """
+        """Deleting a job from the repository will cancel the corresponding task."""
         await self.task.cancel(job)
-
-    async def info(self, job):
-        """
-        There is no templating info for an `ExecutorLiveRepo`.
-        """
-        return None
 
 
 class InProcessMetadataRepository(MetadataRepository):
-    """
-    An incredibly simple metadata repository which stores all its values in a dict, and will let them vanish when the
-    process terminates.
-    """
+    """An incredibly simple metadata repository which stores all its values in a dict, and will let them vanish when
+    the process terminates."""
 
     def __init__(self, data: Optional[Dict[str, Any]] = None):
         self.data: Dict[str, Any] = data if data is not None else {}
@@ -635,8 +592,9 @@ class InProcessMetadataRepository(MetadataRepository):
 
 
 class InProcessBlobStream:
-    """
-    A stream returned from an `BlobRepository.open` call from `InProcessBlobRepository`. Do not construct this manually.
+    """A stream returned from an `BlobRepository.open` call from `InProcessBlobRepository`.
+
+    Do not construct this manually.
     """
 
     def __init__(self, repo: "InProcessBlobRepository", job: str):  # pylint: disable=missing-function-docstring
@@ -645,21 +603,15 @@ class InProcessBlobStream:
         self.data = io.BytesIO(repo.data.get(job, b""))
 
     async def read(self, n: Optional[int] = None) -> bytes:
-        """
-        Read up to ``n`` bytes from the stream.
-        """
+        """Read up to ``n`` bytes from the stream."""
         return self.data.read(n)
 
     async def write(self, data: bytes):
-        """
-        Write ``data`` to the stream.
-        """
+        """Write ``data`` to the stream."""
         self.data.write(data)
 
     async def close(self):
-        """
-        Close and release the stream, syncing the data back to the repository.
-        """
+        """Close and release the stream, syncing the data back to the repository."""
         self.repo.data[self.job] = self.data.getvalue()
 
     async def __aenter__(self):
@@ -670,10 +622,8 @@ class InProcessBlobStream:
 
 
 class InProcessBlobRepository(BlobRepository):
-    """
-    An incredibly simple blob repository which stores all its values in a dict, and will let them vanish when the
-    process terminates.
-    """
+    """An incredibly simple blob repository which stores all its values in a dict, and will let them vanish when the
+    process terminates."""
 
     def __init__(self, data: Optional[Dict[str, bytes]] = None):
         self.data = data if data is not None else {}
@@ -681,12 +631,21 @@ class InProcessBlobRepository(BlobRepository):
     def __repr__(self):
         return f"<{type(self).__name__}>"
 
-    @job_getter
-    async def info(self, job):
-        """
-        There is no templating info for an `InProcessBlobRepository`.
-        """
-        return None
+    @overload
+    async def open(self, job: str, mode: Literal["r"]) -> AReadText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["w"]) -> AWriteText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["rb"]) -> InProcessBlobStream:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["wb"]) -> InProcessBlobStream:
+        ...
 
     @job_getter
     async def open(self, job, mode="r"):

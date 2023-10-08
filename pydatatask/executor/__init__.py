@@ -1,29 +1,28 @@
-"""
-An executor is an environment in which a task can run.
+"""An executor is an environment in which a task can run.
 
 Each executor should be able to host a variety of tasks.
 """
 
-from typing import TYPE_CHECKING
+__all__ = (
+    "Executor",
+    "PodManager",
+    "AbstractProcessManager",
+    "LocalLinuxManager",
+    "localhost_manager",
+    "AbstractContainerManager",
+    "DockerContainerManager",
+    "KubeContainerManager",
+    "localhost_docker_manager",
+    "SSHLinuxFile",
+    "SSHLinuxManager",
+)
 
-from pydatatask.host import Host
-
-if TYPE_CHECKING:
-    from .proc_manager import AbstractProcessManager
-    from .pod_manager import PodManager
-    from .container_manager import ContainerManagerAbstract
-
-
-class Executor:
-    def to_process_manager(self) -> "AbstractProcessManager":
-        raise NotImplementedError(f"{type(self)} cannot host a bare process")
-
-    def to_pod_manager(self) -> "PodManager":
-        raise NotImplementedError(f"{type(self)} cannot host a kubernetes pod")
-
-    def to_container_manager(self) -> "ContainerManagerAbstract":
-        raise NotImplementedError(f"{type(self)} cannot host a linux container")
-
-    @property
-    def host(self) -> Host:
-        raise NotImplementedError
+from .base import Executor
+from .pod_manager import PodManager
+from .proc_manager import AbstractProcessManager, LocalLinuxManager, localhost_manager, SSHLinuxFile, SSHLinuxManager
+from .container_manager import (
+    AbstractContainerManager,
+    DockerContainerManager,
+    KubeContainerManager,
+    localhost_docker_manager,
+)

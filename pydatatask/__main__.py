@@ -1,13 +1,12 @@
-"""
-This module is called when you run `python -m pydatatask`. Its whole purpose is to parse pipeline.yaml files and then
-feed the result into pydatatask.main.main().
+"""This module is called when you run `python -m pydatatask`.
+
+Its whole purpose is to parse pipeline.yaml files and then feed the result into pydatatask.main.main().
 """
 from typing import Optional
 import sys
 
-from pydatatask.declarative import find_config
 from pydatatask.main import main as real_main
-from pydatatask.staging import PipelineStaging
+from pydatatask.staging import PipelineStaging, find_config
 
 
 def _main() -> Optional[int]:
@@ -22,7 +21,8 @@ def _main() -> Optional[int]:
         spec = PipelineStaging(cfgpath)
     if not spec.missing().ready():
         raise ValueError(
-            "Cannot start this pipeline - it has unsatisfied dependencies. Try locking it with `python -m pydatatask.lock`"
+            "Cannot start this pipeline - it has unsatisfied dependencies. "
+            "Try locking it with `python -m pydatatask.lock`"
         )
 
     pipeline = spec.instantiate()

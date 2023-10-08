@@ -9,6 +9,8 @@ import unittest
 import aioshutil
 import asyncssh
 
+from pydatatask.host import Host, HostOS
+from pydatatask.task import LinkKind
 import pydatatask
 
 
@@ -26,12 +28,7 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
 
     async def test_local_process(self):
         session = pydatatask.Session()
-
-        @session.resource
-        async def localhost():
-            yield pydatatask.LocalLinuxManager(self.app, local_path=self.dir)
-
-        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1, 99999))
+        quota = pydatatask.QuotaManager(pydatatask.Quota.parse(1, 1, 99999))
 
         repo_input = pydatatask.FileRepository(self.dir / "input")
         await repo_input.validate()
@@ -51,17 +48,16 @@ echo bye >&2
         task = pydatatask.ProcessTask(
             "task",
             template,
-            localhost,
-            quota,
-            pydatatask.Resources.parse("100m", "100m"),
-            repo_pids,
+            quota_manager=quota,
+            job_quota=pydatatask.Quota.parse("100m", "100m"),
+            pids=repo_pids,
             environ={},
             done=repo_done,
             stdin=None,
             stdout=repo_stdout,
             stderr=pydatatask.STDOUT,
         )
-        task.link("input", repo_input, is_input=True)
+        task.link("input", repo_input, LinkKind.InputFilepath)
 
         pipeline = pydatatask.Pipeline([task], session, [quota])
 
@@ -124,7 +120,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
     async def test_ssh_process(self):
         session = pydatatask.Session()
 
-        @session.resource
+        @session.ephemeral
         async def ssh():
             async with asyncssh.connect(
                 "localhost",
@@ -136,11 +132,9 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
             ) as s:
                 yield s
 
-        @session.resource
-        async def procman():
-            yield pydatatask.SSHLinuxManager(self.test_id, ssh)
+        procman = pydatatask.SSHLinuxManager(self.test_id, ssh, Host("remote", HostOS.Linux))
 
-        quota = pydatatask.ResourceManager(pydatatask.Resources.parse(1, 1, 99999))
+        quota = pydatatask.QuotaManager(pydatatask.Quota.parse(1, 1, 99999))
 
         repo_stdin = pydatatask.InProcessBlobRepository({str(i): str(i).encode() for i in range(self.n)})
         repo_stdout = pydatatask.InProcessBlobRepository()
@@ -160,7 +154,7 @@ echo 'goodbye world!' >&2
             template,
             procman,
             quota,
-            pydatatask.Resources.parse("100m", "100m"),
+            pydatatask.Quota.parse("100m", "100m"),
             repo_pids,
             environ={},
             done=repo_done,
@@ -189,7 +183,7 @@ echo 'goodbye world!' >&2
             assert repo_done.data[str(i)]["return_code"] == 0
 
     async def asyncTearDown(self):
-        if self.docker_name is not None:
+        if self.docker_name is not None and self.docker_path is not None:
             p = await asyncio.create_subprocess_exec(
                 self.docker_path,
                 "kill",

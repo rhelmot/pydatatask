@@ -1,7 +1,5 @@
-"""
-This module contains repositories for interacting with MongoDB as a data store.
-"""
-from typing import Any, Callable, Dict, Optional
+"""This module contains repositories for interacting with MongoDB as a data store."""
+from typing import Any, Callable, Dict
 
 import motor.core
 import motor.motor_asyncio
@@ -10,9 +8,7 @@ from .base import MetadataRepository, job_getter
 
 
 class MongoMetadataRepository(MetadataRepository):
-    """
-    A metadata repository using a mongodb collection as the backing store.
-    """
+    """A metadata repository using a mongodb collection as the backing store."""
 
     def __init__(
         self,
@@ -31,8 +27,9 @@ class MongoMetadataRepository(MetadataRepository):
 
     @property
     def collection(self) -> motor.core.AgnosticCollection:
-        """
-        The motor async collection data will be stored in. If this is provided by an unopened session, raise an error.
+        """The motor async collection data will be stored in.
+
+        If this is provided by an unopened session, raise an error.
         """
         return self._database()[self._collection]
 
@@ -48,9 +45,8 @@ class MongoMetadataRepository(MetadataRepository):
 
     @job_getter
     async def info(self, job):
-        """
-        The info of a mongo metadata repository is the literal value stored in the repository with identifier ``job``.
-        """
+        """The info of a mongo metadata repository is the literal value stored in the repository with identifier
+        ``job``."""
         result = await self.collection.find_one({"_id": job})
         if result is None:
             result = {}

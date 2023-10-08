@@ -1,7 +1,5 @@
-"""
-Repositories are arbitrary key-value stores. They are the data part of pydatatask.
-You can store your data in any way you desire and as long as you can write a Repository class to describe it, it can be
-used to drive a pipeline.
+"""Repositories are arbitrary key-value stores. They are the data part of pydatatask. You can store your data in any
+way you desire and as long as you can write a Repository class to describe it, it can be used to drive a pipeline.
 
 The notion of the "value" part of the key-value store abstraction is defined very, very loosely. The repository base
 class doesn't have an interface to get or store values, only to query for and delete keys. Instead, you have to know

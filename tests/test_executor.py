@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 
+from pydatatask.host import LOCAL_HOST
 import pydatatask
 
 

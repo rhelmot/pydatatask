@@ -1,11 +1,10 @@
-"""
-A Task is a unit of execution which can act on multiple repositories.
+"""A Task is a unit of execution which can act on multiple repositories.
 
 You define a task by instantiating a Task subclass and passing it to a Pipeline object.
 
-Tasks are related to Repositories by Links. Links are created by
-``Task.link("my_link_name", my_repository, **disposition)``. The main disposition kwargs you'll want to use are
-``is_input`` and ``is_output``. See `Task.link` for more information.
+Tasks are related to Repositories by Links. Links are created by ``Task.link("my_link_name", my_repository,
+**disposition)``. The main disposition kwargs you'll want to use are ``is_input`` and ``is_output``. See `Task.link` for
+more information.
 
 For a shortcut for linking the output of one task as the input of another task, see `Task.plug`.
 
@@ -29,7 +28,7 @@ from collections import defaultdict
 from concurrent.futures import FIRST_EXCEPTION
 from concurrent.futures import Executor as FuturesExecutor
 from concurrent.futures import Future as ConcurrentFuture
-from concurrent.futures import wait
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
@@ -51,7 +50,7 @@ import yaml
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import (
-    ContainerManagerAbstract,
+    AbstractContainerManager,
     localhost_docker_manager,
 )
 from pydatatask.host import LOCAL_HOST, Host
@@ -60,7 +59,7 @@ from . import repository as repomodule
 from .consts import STDOUT, _StderrIsStdout
 from .executor.pod_manager import PodManager
 from .executor.proc_manager import AbstractProcessManager, localhost_manager
-from .resource_manager import ResourceManager, Resources, localhost_resource_manager
+from .quota import Quota, QuotaManager, localhost_quota_manager
 from .utils import async_copyfile
 
 l = logging.getLogger(__name__)
@@ -81,6 +80,8 @@ __all__ = (
 
 @dataclass
 class TemplateInfo:
+    """The data necessary to assemble a template including a link argument."""
+
     arg: Any
     preamble: Optional[Any] = None
     epilogue: Optional[Any] = None
@@ -91,12 +92,11 @@ idgen = sonyflake.SonyFlake()
 
 
 async def render_template(template, env: Dict[str, Any]):
-    """
-    Given a template and an environment, use jinja2 to parameterize the template with the environment.
+    """Given a template and an environment, use jinja2 to parameterize the template with the environment.
 
-    :param template:  A template string, or a path to a local template file.
-    :param env:       A mapping from environment key names to values.
-    :return:          The rendered template, as a string.
+    :param template: A template string, or a path to a local template file.
+    :param env: A mapping from environment key names to values.
+    :return: The rendered template, as a string.
     """
     j = jinja2.Environment(
         enable_async=True,
@@ -113,23 +113,32 @@ async def render_template(template, env: Dict[str, Any]):
 
 
 class LinkKind(Enum):
+    """The way a given link should be made available as a template parameter."""
+
+    InputRepo = auto()
     InputId = auto()
     InputMetadata = auto()
     InputFilepath = auto()
+    OutputRepo = auto()
     OutputId = auto()
     OutputYamlMetadataFilepath = auto()
     OutputFilepath = auto()
 
 
-INPUT_KINDS: Set[LinkKind] = {LinkKind.InputId, LinkKind.InputMetadata, LinkKind.InputFilepath}
-OUTPUT_KINDS: Set[LinkKind] = {LinkKind.OutputId, LinkKind.OutputYamlMetadataFilepath, LinkKind.OutputFilepath}
+INPUT_KINDS: Set[LinkKind] = {LinkKind.InputId, LinkKind.InputMetadata, LinkKind.InputFilepath, LinkKind.InputRepo}
+OUTPUT_KINDS: Set[LinkKind] = {
+    LinkKind.OutputId,
+    LinkKind.OutputYamlMetadataFilepath,
+    LinkKind.OutputFilepath,
+    LinkKind.OutputRepo,
+}
 
 
 @dataclass
 class Link:
-    """
-    The dataclass for holding linked repositories and their disposition metadata. Don't create these manually, instead
-    use `Task.link`.
+    """The dataclass for holding linked repositories and their disposition metadata.
+
+    Don't create these manually, instead use `Task.link`.
     """
 
     repo: "repomodule.Repository"
@@ -145,9 +154,7 @@ class Link:
 
 
 class Task(ABC):
-    """
-    The Task base class.
-    """
+    """The Task base class."""
 
     def __init__(self, name: str, ready: Optional["repomodule.Repository"] = None, disabled: bool = False):
         self.name = name
@@ -163,21 +170,35 @@ class Task(ABC):
     @property
     @abstractmethod
     def host(self) -> Host:
+        """Return the host which will eventually execute the task.
+
+        This is used to determine what resources will and will not be available locally during task execution.
+        """
         raise NotImplementedError
 
     def mktemp(self, identifier: str) -> str:
+        """Generate a temporary filepath for the task host system."""
         return self.host.mktemp(identifier)
 
-    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str]) -> str:
+    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str]) -> Any:
+        """Generate logic to perform an http download for the task host system.
+
+        For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
+        """
         return self.host.mk_http_get(filename, url, headers)
 
-    def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> str:
+    def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> Any:
+        """Generate logic to perform an http upload for the task host system.
+
+        For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
+        """
         return self.host.mk_http_post(filename, url, headers)
 
     @property
     def ready(self):
-        """
-        Return the repository whose job membership is used to determine whether a task instance should be launched.
+        """Return the repository whose job membership is used to determine whether a task instance should be
+        launched.
+
         If an override is provided to the constructor, this is that, otherwise it is
         ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
         """
@@ -194,16 +215,15 @@ class Task(ABC):
         repo: "repomodule.Repository",
         kind: Optional[LinkKind] = None,
         key: Optional[str] = None,
-        is_input: bool = False,
-        is_output: bool = False,
+        is_input: Optional[bool] = None,
+        is_output: Optional[bool] = None,
         is_status: bool = False,
         inhibits_start: bool = False,
         required_for_start: Optional[bool] = None,
         inhibits_output: bool = False,
         required_for_output: Optional[bool] = None,
     ):
-        """
-        Create a link between this task and a repository.
+        """Create a link between this task and a repository.
 
         :param name: The name of the link. Used during templating.
         :param repo: The repository to link.
@@ -213,14 +233,18 @@ class Task(ABC):
         :param is_output: Whether this repository is populated by the task. Default False.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
         :param inhibits_start: Whether membership in this repository should be used in the default ``ready`` repository
-                               to prevent jobs for being launched. Default False.
+            to prevent jobs for being launched. Default False.
         :param required_for_start: Whether membership in this repository should be used in the default ``ready``
-                                   repository to allow jobs to be launched. If unspecified, defaults to ``is_input``.
-        :param inhibits_output:     Whether this repository should become ``inhibits_start`` in tasks this task is
-                                    plugged into. Default False.
+            repository to allow jobs to be launched. If unspecified, defaults to ``is_input``.
+        :param inhibits_output: Whether this repository should become ``inhibits_start`` in tasks this task is plugged
+            into. Default False.
         :param required_for_output: Whether this repository should become `required_for_start` in tasks this task is
-                                    plugged into. If unspecified, defaults to ``is_output``.
+            plugged into. If unspecified, defaults to ``is_output``.
         """
+        if is_input is None:
+            is_input = kind in INPUT_KINDS
+        if is_output is None:
+            is_output = kind in OUTPUT_KINDS
         if required_for_start is None:
             required_for_start = is_input
         if required_for_output is None:
@@ -248,19 +272,18 @@ class Task(ABC):
         translate_allow_deletes=False,
         translate_prefetch_lookup=True,
     ):
-        """
-        Link the output repositories from `output` as inputs to this task.
+        """Link the output repositories from `output` as inputs to this task.
 
-        :param output:  The task to plug into this one.
+        :param output: The task to plug into this one.
         :param output_links: Optional: An iterable allowlist of links to only use.
         :param meta: Whether to transfer repository inhibit- and required_for- dispositions. Default True.
         :param translator: Optional: A repository used to transform job identifiers. If this is provided, a job will be
-                           said to be present in the resulting linked repository if the source repository contains the
-                           key ``await translator.info(job)``.
-        :param translate_allow_deletes:  If translator is provided, this controls whether attempts to delete from the
-                                         translated repository will do anything. Default False.
+            said to be present in the resulting linked repository if the source repository contains the key ``await
+            translator.info(job)``.
+        :param translate_allow_deletes: If translator is provided, this controls whether attempts to delete from the
+            translated repository will do anything. Default False.
         :param translate_prefetch_lookup: If translator is provided, this controls whether the translated repository
-                                          will pre-fetch the list of translations on first access. Default True.
+            will pre-fetch the list of translations on first access. Default True.
         """
         for name, link in output.links.items():
             link_attrs = {}
@@ -281,68 +304,54 @@ class Task(ABC):
                         allow_deletes=translate_allow_deletes,
                         prefetch_lookup=translate_prefetch_lookup,
                     )
-                self.link(name, repo, **link_attrs)
+                self.link(name, repo, link.kind, link.key, **link_attrs)
 
     @property
     def input(self):
-        """
-        A mapping from link name to repository for all links marked ``is_input``.
-        """
+        """A mapping from link name to repository for all links marked ``is_input``."""
         return {name: link.repo for name, link in self.links.items() if link.is_input}
 
     @property
     def output(self):
-        """
-        A mapping from link name to repository for all links marked ``is_output``.
-        """
+        """A mapping from link name to repository for all links marked ``is_output``."""
         return {name: link.repo for name, link in self.links.items() if link.is_output}
 
     @property
     def status(self):
-        """
-        A mapping from link name to repository for all links marked ``is_status``.
-        """
+        """A mapping from link name to repository for all links marked ``is_status``."""
         return {name: link.repo for name, link in self.links.items() if link.is_status}
 
     @property
     def inhibits_start(self):
-        """
-        A mapping from link name to repository for all links marked ``inhibits_start``.
-        """
+        """A mapping from link name to repository for all links marked ``inhibits_start``."""
         return {name: link.repo for name, link in self.links.items() if link.inhibits_start}
 
     @property
     def required_for_start(self):
-        """
-        A mapping from link name to repository for all links marked ``required_for_start``.
-        """
+        """A mapping from link name to repository for all links marked ``required_for_start``."""
         return {name: link.repo for name, link in self.links.items() if link.required_for_start}
 
     @property
     def inhibits_output(self):
-        """
-        A mapping from link name to repository for all links marked ``inhibits_output``.
-        """
+        """A mapping from link name to repository for all links marked ``inhibits_output``."""
         return {name: link.repo for name, link in self.links.items() if link.inhibits_output}
 
     @property
     def required_for_output(self):
-        """
-        A mapping from link name to repository for all links marked ``required_for_output``.
-        """
+        """A mapping from link name to repository for all links marked ``required_for_output``."""
         return {name: link.repo for name, link in self.links.items() if link.required_for_output}
 
     async def validate(self):
-        """
-        Raise an exception if for any reason the task is misconfigured. This is guaranteed to be called exactly once per
-        pipeline, so it is safe to use for setup and initialization in an async context.
+        """Raise an exception if for any reason the task is misconfigured.
+
+        This is guaranteed to be called exactly once per pipeline, so it is safe to use for setup and initialization in
+        an async context.
         """
 
     @abstractmethod
     async def update(self) -> bool:
-        """
-        Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set of
-        live tasks. Typically, this entails reaping finished processes.
+        """Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set
+        of live tasks. Typically, this entails reaping finished processes.
 
         Returns True if literally anything interesting happened, or if there are any live tasks.
         """
@@ -350,12 +359,19 @@ class Task(ABC):
 
     @abstractmethod
     async def launch(self, job):
-        """
-        Launch a job. Override this to begin execution of the provided job. Error handling will be done for you.
+        """Launch a job.
+
+        Override this to begin execution of the provided job. Error handling will be done for you.
         """
         raise NotImplementedError
 
     async def build_env(self, env_src: Dict[str, Any], orig_job: str) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
+        """Transform an environment source into an environment according to Links.
+
+        Returns the environment, a list of preambles, and a list of epilogues. These may be of any type depending on the
+        task type.
+        """
+
         def supergetattr(item, key):
             try:
                 return getattr(item, key)
@@ -367,15 +383,15 @@ class Task(ABC):
             for i, subkey in enumerate(items[1:]):
                 try:
                     src = supergetattr(src, subkey)
-                except KeyError:
-                    raise Exception(f"Cannot access {'.'.join(items[:i+2])} during link subkeying")
+                except KeyError as e:
+                    raise Exception(f"Cannot access {'.'.join(items[:i+2])} during link subkeying") from e
             return src
 
         preamble = []
         epilogue = []
 
         result = {}
-        pending = defaultdict(list)
+        pending: defaultdict[str, List[Tuple[str, Link]]] = defaultdict(list)
         for env_name, link in env_src.items():
             if not isinstance(link, Link):
                 result[env_name] = link
@@ -395,7 +411,7 @@ class Task(ABC):
                         pending[items[0]].append((env_name, link))
                         continue
 
-            arg = self._instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
+            arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
             result[env_name] = arg.arg
             if arg.preamble is not None:
                 preamble.append(arg.preamble)
@@ -403,8 +419,10 @@ class Task(ABC):
                 epilogue.append(arg.epilogue)
             if env_name in pending:
                 for env_name2, link in pending[env_name]:
+                    assert link.key is not None
+                    assert link.kind is not None
                     subjob = subkey(link.key.split("."))
-                    arg = self._instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
+                    arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
                     result[env_name2] = arg.arg
                     preamble.append(arg.preamble)
                     epilogue.append(arg.epilogue)
@@ -415,14 +433,19 @@ class Task(ABC):
 
         return result, preamble, epilogue
 
-    def _instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind) -> TemplateInfo:
+    # pylint: disable=unused-argument
+    def instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind) -> TemplateInfo:
+        """Do any task-specific processing on a template argument.
+
+        This is called during build_env on each link, after Repository.template() runs on it.
+        """
         return arg
 
 
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
-    """
-    A class to instrument jinja2 to be more aggressive about awaiting objects and to cache their results. Probably
-    don't use this directly.
+    """A class to instrument jinja2 to be more aggressive about awaiting objects and to cache their results.
+
+    Probably don't use this directly.
     """
 
     def write_commons(self):
@@ -452,10 +475,9 @@ class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
 
 
 class KubeTask(Task):
-    """
-    A task which runs a kubernetes pod.
+    """A task which runs a kubernetes pod.
 
-    Will automatically link a `repomodule.LiveKubeRepository` as "live" with
+    Will automatically link a `LiveKubeRepository` as "live" with
     ``inhibits_start, inhibits_output, is_status``
     """
 
@@ -463,7 +485,7 @@ class KubeTask(Task):
         self,
         name: str,
         executor: Executor,
-        resources: ResourceManager,
+        quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"],
         done: Optional["repomodule.MetadataRepository"],
@@ -475,17 +497,17 @@ class KubeTask(Task):
         """
         :param name: The name of the task.
         :param executor: The executor to use for this task.
-        :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
-                          would break the quota.
+        :param quota: A QuotaManager instance. Tasks launched will contribute to its quota and be denied if they would
+            break the quota.
         :param template: YAML markup for a pod manifest template, either as a string or a path to a file.
-        :param logs: Optional: A repomodule.BlobRepository to dump pod logs to on completion. Linked as "logs" with
-                               ``inhibits_start, required_for_output, is_status``.
-        :param done: A repomodule.MetadataRepository in which to dump some information about the pod's lifetime and termination on
-                     completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
+        :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
+            ``inhibits_start, required_for_output, is_status``.
+        :param done: A MetadataRepository in which to dump some information about the pod's lifetime and
+            termination on completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
         :param window:  Optional: How far back into the past to look in order to determine whether we have recently
-                        launched too many pods too quickly.
-        :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it will
-                        be timed out and stopped. The method `handle_timeout` will be called in-process.
+            launched too many pods too quickly.
+        :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it
+            will be timed out and stopped. The method `handle_timeout` will be called in-process.
         :param env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
 
@@ -495,9 +517,9 @@ class KubeTask(Task):
         super().__init__(name, ready)
 
         self.template = template
-        self.resources = resources
+        self.quota_manager = quota_manager
         self._executor = executor
-        self._podman = None
+        self._podman: Optional[PodManager] = None
         self.logs = logs
         self.timeout = timeout
         self.done = done
@@ -505,7 +527,7 @@ class KubeTask(Task):
         self.warned = False
         self.window = window
 
-        self.resources.register(self._get_load)
+        self.quota_manager.register(self._get_load)
 
         self.link(
             "live",
@@ -537,25 +559,24 @@ class KubeTask(Task):
 
     @property
     def podman(self) -> PodManager:
-        """
-        The pod manager instance for this task. Will raise an error if the manager is provided by an unopened session.
+        """The pod manager instance for this task.
+
+        Will raise an error if the manager is provided by an unopened session.
         """
         if self._podman is None:
             self._podman = self._executor.to_pod_manager()
         return self._podman
 
     async def _get_load(self):
-        usage = Resources()
+        usage = Quota()
         cutoff = datetime.now(tz=timezone.utc) - self.window
 
         try:
             for pod in await self.podman.query(task=self.name):
                 if pod.metadata.creation_timestamp > cutoff:
-                    usage += Resources(launches=1)
+                    usage += Quota(launches=1)
                 for container in pod.spec.containers:
-                    usage += Resources.parse(
-                        container.resources.requests["cpu"], container.resources.requests["memory"], 0
-                    )
+                    usage += Quota.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
         except ApiException as e:
             if e.reason != "Forbidden":
                 raise
@@ -581,20 +602,20 @@ class KubeTask(Task):
         spec = manifest["spec"]
         spec["restartPolicy"] = "Never"
 
-        request = Resources(launches=1)
+        request = Quota(launches=1)
         for container in spec["containers"]:
-            request += Resources.parse(
+            request += Quota.parse(
                 container["resources"]["requests"]["cpu"],
                 container["resources"]["requests"]["memory"],
                 0,
             )
 
-        limit = await self.resources.reserve(request)
+        limit = await self.quota_manager.reserve(request)
         if limit is None:
             try:
                 await self.podman.launch(job, self.name, manifest)
             except:
-                await self.resources.relinquish(request)
+                await self.quota_manager.relinquish(request)
                 raise
         elif not self.warned:
             l.warning("Cannot launch %s: %s limit", self, limit)
@@ -622,14 +643,12 @@ class KubeTask(Task):
         await self.delete(pod)
 
     async def delete(self, pod: V1Pod):
-        """
-        Kill a pod and relinquish its resources without marking the task as complete.
-        """
-        request = Resources(launches=1)
+        """Kill a pod and relinquish its resources without marking the task as complete."""
+        request = Quota(launches=1)
         for container in pod.spec.containers:
-            request += Resources.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
+            request += Quota.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
         await self.podman.delete(pod)
-        await self.resources.relinquish(request)
+        await self.quota_manager.relinquish(request)
 
     async def update(self):
         self.warned = False
@@ -663,16 +682,17 @@ class KubeTask(Task):
             l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
 
     async def handle_timeout(self, pod: V1Pod):
-        """
-        You may override this method in a subclass, and it will be called whenever a pod times out. You can use this
-        method to e.g. scrape in-progress data out of the pod via an exec.
+        """You may override this method in a subclass, and it will be called whenever a pod times out.
+
+        You can use this method to e.g. scrape in-progress data out of the pod via an exec.
         """
 
 
 class ProcessTask(Task):
-    """
-    A task that runs a script. The interpreter is specified by the shebang, or the default shell if none present.
-    The execution environment for the task is defined by the ProcessManager instance provided as an argument.
+    """A task that runs a script.
+
+    The interpreter is specified by the shebang, or the default shell if none present. The execution environment for the
+    task is defined by the ProcessManager instance provided as an argument.
     """
 
     def __init__(
@@ -680,8 +700,8 @@ class ProcessTask(Task):
         name: str,
         template: str,
         executor: "Executor" = localhost_manager,
-        resource_manager: "ResourceManager" = localhost_resource_manager,
-        job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
+        quota_manager: "QuotaManager" = localhost_quota_manager,
+        job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
         pids: Optional["repomodule.MetadataRepository"] = None,
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
@@ -694,9 +714,9 @@ class ProcessTask(Task):
         """
         :param name: The name of this task.
         :param executor: The executor to use for this task.
-        :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
+        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied
                                  if they would break the quota.
-        :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
+        :param job_quota: The amount of resources an individual job should contribute to the quota. Note that this
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
         :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
@@ -736,15 +756,15 @@ class ProcessTask(Task):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self.job_resources = copy.copy(job_resources)
-        self.job_resources.launches = 1
-        self.resource_manager = resource_manager
+        self.job_quota = copy.copy(job_quota)
+        self.job_quota.launches = 1
+        self.quota_manager = quota_manager
         self._executor = executor
-        self._manager = None
+        self._manager: Optional[AbstractProcessManager] = None
         self.warned = False
         self.window = window
 
-        self.resource_manager.register(self._get_load)
+        self.quota_manager.register(self._get_load)
 
         self.link("pids", pids, is_status=True, inhibits_start=True, inhibits_output=True)
         if stdin is not None:
@@ -762,14 +782,15 @@ class ProcessTask(Task):
 
     @property
     def manager(self) -> "AbstractProcessManager":
-        """
-        The process manager for this task. Will raise an error if the manager comes from a session which is closed.
+        """The process manager for this task.
+
+        Will raise an error if the manager comes from a session which is closed.
         """
         if self._manager is None:
             self._manager = self._executor.to_process_manager()
         return self._manager
 
-    async def _get_load(self) -> "Resources":
+    async def _get_load(self) -> "Quota":
         cutoff = datetime.now(tz=timezone.utc) - self.window
         count = 0
         recent = 0
@@ -779,13 +800,11 @@ class ProcessTask(Task):
             if v["start_time"] > cutoff:
                 recent += 1
 
-        return self.job_resources * count - Resources(launches=count - recent)
+        return self.job_quota * count - Quota(launches=count - recent)
 
     @property
     def stderr(self) -> Optional["repomodule.BlobRepository"]:
-        """
-        The repository into which stderr will be dumped, or None if it will go to the null device.
-        """
+        """The repository into which stderr will be dumped, or None if it will go to the null device."""
         if isinstance(self._stderr, repomodule.BlobRepository):
             return self._stderr
         else:
@@ -797,9 +816,7 @@ class ProcessTask(Task):
 
     @property
     def basedir(self) -> Path:
-        """
-        The path in the target environment that will be used to store information about this task.
-        """
+        """The path in the target environment that will be used to store information about this task."""
         return self.manager.basedir / self.name
 
     async def update(self):
@@ -821,8 +838,8 @@ class ProcessTask(Task):
             await asyncio.gather(*coros)
         return bool(expected_live)
 
-    async def launch(self, job):
-        limit = await self.resource_manager.reserve(self.job_resources)
+    async def launch(self, job: str):
+        limit = await self.quota_manager.reserve(self.job_quota)
         if limit is not None:
             if not self.warned:
                 l.warning("Cannot launch %s: %s limit", self, limit)
@@ -836,14 +853,14 @@ class ProcessTask(Task):
             cwd = self.basedir / job / "cwd"
             await self.manager.mkdir(cwd)  # implicitly creates basedir / task / job
             dirmade = True
-            stdin = None
+            stdin: Optional[str] = None
             if self.stdin is not None:
-                stdin = self.basedir / job / "stdin"
-                async with await self.stdin.open(job, "rb") as fpr, await self.manager.open(stdin, "wb") as fpw:
+                stdin = str(self.basedir / job / "stdin")
+                async with await self.stdin.open(job, "rb") as fpr, await self.manager.open(Path(stdin), "wb") as fpw:
                     await async_copyfile(fpr, fpw)
                 stdin = str(stdin)
             stdout = None if self.stdout is None else str(self.basedir / job / "stdout")
-            stderr = STDOUT
+            stderr: Optional[Union[str, Path, _StderrIsStdout]] = STDOUT
             if not isinstance(self._stderr, _StderrIsStdout):
                 stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
             env_src: Dict[str, Any] = dict(self.links)
@@ -868,7 +885,7 @@ class ProcessTask(Task):
                 await self.pids.dump(job, {"pid": pid, "start_time": datetime.now(tz=timezone.utc)})
         except:  # CLEAN UP YOUR MESS
             try:
-                await self.resource_manager.relinquish(self.job_resources)
+                await self.quota_manager.relinquish(self.job_quota)
             except:
                 pass
             try:
@@ -903,28 +920,25 @@ class ProcessTask(Task):
                 )
             await self.manager.rmtree(self.basedir / job)
             await self.pids.delete(job)
-            await self.resource_manager.relinquish(self.job_resources)
+            await self.quota_manager.relinquish(self.job_quota)
         except Exception:
             l.error("Could not reap process for %s:%s", self, job, exc_info=True)
 
 
 class FunctionTaskProtocol(Protocol):
-    """
-    The protocol which is expected by the tasks which take a python function to execute.
-    """
+    """The protocol which is expected by the tasks which take a python function to execute."""
 
     def __call__(self, job: str, **kwargs) -> Awaitable[None]:
         ...
 
 
 class InProcessSyncTask(Task):
-    """
-    A task which runs in-process. Typical usage of this task might look like the following:
+    """A task which runs in-process. Typical usage of this task might look like the following:
 
     .. code:: python
 
         @pydatatask.InProcessSyncTask("my_task", done_repo)
-        async def my_task(job: str, inp: pydatatask.repomodule.MetadataRepository, out: pydatatask.MetadataRepository):
+        async def my_task(job: str, inp: pydatatask.MetadataRepository, out: pydatatask.MetadataRepository):
             await out.dump(job, await inp.info(job))
 
         my_task.link("inp", repo_input, is_input=True)
@@ -953,6 +967,10 @@ class InProcessSyncTask(Task):
         self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
         self._env: Dict[str, Any] = {}
 
+    @property
+    def host(self):
+        return LOCAL_HOST
+
     def __call__(self, f: FunctionTaskProtocol) -> "InProcessSyncTask":
         self.func = f
         return self
@@ -961,25 +979,24 @@ class InProcessSyncTask(Task):
         if self.func is None:
             raise ValueError("InProcessSyncTask.func is None")
 
-        sig = inspect.signature(self.func, follow_wrapped=True)
-        for name in sig.parameters.keys():
-            if name == "job":
-                self._env[name] = None
-            elif name in self.links:
-                self._env[name] = self.links[name].repo
-            else:
-                raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+        # sig = inspect.signature(self.func, follow_wrapped=True)
+        # for name in sig.parameters.keys():
+        #    if name == "job":
+        #        self._env[name] = None
+        #    elif name in self.links:
+        #        self._env[name] = self.links[name].repo
+        #    else:
+        #        raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def update(self):
         pass
 
-    async def launch(self, job):
+    async def launch(self, job: str):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching in-process %s:%s...", self.name, job)
-        args = dict(self._env)
-        if "job" in args:
-            args["job"] = job
+        args: Dict[str, Any] = dict(self.links)
+        args["job"] = job
         args, preamble, epilogue = await self.build_env(args, job)
         try:
             for p in preamble:
@@ -1004,9 +1021,8 @@ class InProcessSyncTask(Task):
 
 
 class ExecutorTask(Task):
-    """
-    A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been tested on
-    anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
+    """A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been
+    tested on anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
 
     See `InProcessSyncTask` for information on how to use instances of this class as decorators for their bodies.
 
@@ -1018,6 +1034,7 @@ class ExecutorTask(Task):
         name: str,
         executor: FuturesExecutor,
         done: "repomodule.MetadataRepository",
+        host: Optional[Host] = None,
         ready: Optional["repomodule.Repository"] = None,
         func: Optional[Callable] = None,
     ):
@@ -1032,7 +1049,17 @@ class ExecutorTask(Task):
         """
         super().__init__(name, ready)
 
+        if host is None:
+            if isinstance(executor, ThreadPoolExecutor):
+                host = LOCAL_HOST
+            else:
+                raise ValueError(
+                    "Can't figure out what host this task runs on automatically - "
+                    "please provide ExecutorTask with the host parameter"
+                )
+
         self.executor = executor
+        self._host = host
         self.func = func
         self.jobs: Dict[ConcurrentFuture[datetime], Tuple[str, datetime]] = {}
         self.rev_jobs: Dict[str, ConcurrentFuture[datetime]] = {}
@@ -1051,6 +1078,10 @@ class ExecutorTask(Task):
     def __call__(self, f: Callable) -> "ExecutorTask":
         self.func = f
         return self
+
+    @property
+    def host(self):
+        return self._host
 
     async def update(self):
         result = bool(self.jobs)
@@ -1110,9 +1141,7 @@ class ExecutorTask(Task):
             self.rev_jobs[job] = running_job
 
     async def cancel(self, job):
-        """
-        Stop the current job from running, or do nothing if it is not running.
-        """
+        """Stop the current job from running, or do nothing if it is not running."""
         future = self.rev_jobs.pop(job)
         if future is not None:
             future.cancel()
@@ -1130,9 +1159,10 @@ class ExecutorTask(Task):
 
 
 class KubeFunctionTask(KubeTask):
-    """
-    A task which runs a python function on a kubernetes cluster. Requires a pod template which will execute a python
-    script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job] --sync``.
+    """A task which runs a python function on a kubernetes cluster. Requires a pod template which will execute a.
+
+    python script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job]
+    --sync``.
 
     Sample usage:
 
@@ -1177,7 +1207,7 @@ class KubeFunctionTask(KubeTask):
         self,
         name: str,
         executor: Executor,
-        resources: ResourceManager,
+        quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"] = None,
         kube_done: Optional["repomodule.MetadataRepository"] = None,
@@ -1188,16 +1218,16 @@ class KubeFunctionTask(KubeTask):
         """
         :param name: The name of this task.
         :param executor: The executor to use for this task.
-        :param resources: A ResourceManager instance. Tasks launched will contribute to its quota and be denied if they
+        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied if they
                           would break the quota.
         :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
                          ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
-        :param logs: Optional: A repomodule.BlobRepository to dump pod logs to on completion. Linked as "logs" with
+        :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
                                ``inhibits_start, required_for_output, is_status``.
-        :param kube_done: Optional: A repomodule.MetadataRepository in which to dump some information about the pod's lifetime and
+        :param kube_done: Optional: A MetadataRepository in which to dump some information about the pod's lifetime and
                           termination on completion. Linked as "done" with
                           ``inhibits_start, required_for_output, is_status``.
-        :param func_done: Optional: A repomodule.MetadataRepository in which to dump some information about the function's lifetime
+        :param func_done: Optional: A MetadataRepository in which to dump some information about the function's lifetime
                           and termination on completion. Linked as "func_done" with
                           ``inhibits_start, required_for_output, is_status``.
         :param env:     Optional: Additional keys to add to the template environment.
@@ -1208,7 +1238,7 @@ class KubeFunctionTask(KubeTask):
         It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
         one link is present with ``inhibits_start``.
         """
-        super().__init__(name, executor, resources, template, logs, kube_done, env=env)
+        super().__init__(name, executor, quota_manager, template, logs, kube_done, env=env)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -1238,13 +1268,13 @@ class KubeFunctionTask(KubeTask):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
-    async def launch(self, job):
+    async def launch(self, job: str):
         if self.synchronous:
             await self._launch_sync(job)
         else:
             await super().launch(job)
 
-    async def _launch_sync(self, job):
+    async def _launch_sync(self, job: str):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching --sync %s:%s...", self.name, job)
@@ -1275,9 +1305,7 @@ class KubeFunctionTask(KubeTask):
 
 
 class ContainerTask(Task):
-    """
-    A task that runs a container.
-    """
+    """A task that runs a container."""
 
     def __init__(
         self,
@@ -1286,8 +1314,8 @@ class ContainerTask(Task):
         template: str,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
         executor: Executor = localhost_docker_manager,
-        resource_manager: "ResourceManager" = localhost_resource_manager,
-        job_resources: "Resources" = Resources.parse(1, "256Mi", 1),
+        quota_manager: "QuotaManager" = localhost_quota_manager,
+        job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
         done: Optional["repomodule.MetadataRepository"] = None,
@@ -1298,9 +1326,9 @@ class ContainerTask(Task):
         :param name: The name of this task.
         :param image: The name of the docker image to use to run this task.
         :param executor: The executor to use for this task.
-        :param resource_manager: A ResourceManager instance. Tasks launched will contribute to its quota and be denied
+        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied
                                  if they would break the quota.
-        :param job_resources: The amount of resources an individual job should contribute to the quota. Note that this
+        :param job_quota: The amount of resources an individual job should contribute to the quota. Note that this
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
@@ -1325,16 +1353,16 @@ class ContainerTask(Task):
         self.environ = environ or {}
         self.done = done
         self.logs = logs
-        self.job_resources = copy.copy(job_resources)
-        self.job_resources.launches = 1
-        self.resource_manager = resource_manager
+        self.job_quota = copy.copy(job_quota)
+        self.job_quota.launches = 1
+        self.quota_manager = quota_manager
         self._executor = executor
-        self._manager = None
+        self._manager: Optional[AbstractContainerManager] = None
         self.warned = False
         self.window = window
-        self.mount_directives = defaultdict(list)
+        self.mount_directives: defaultdict[str, List[Tuple[str, str]]] = defaultdict(list)
 
-        self.resource_manager.register(self._get_load)
+        self.quota_manager.register(self._get_load)
 
         if logs is not None:
             self.link("logs", logs, is_output=True)
@@ -1346,22 +1374,23 @@ class ContainerTask(Task):
         return self.manager.host
 
     @property
-    def manager(self) -> ContainerManagerAbstract:
-        """
-        The process manager for this task. Will raise an error if the manager comes from a session which is closed.
+    def manager(self) -> AbstractContainerManager:
+        """The process manager for this task.
+
+        Will raise an error if the manager comes from a session which is closed.
         """
         if self._manager is None:
             self._manager = self._executor.to_container_manager()
         return self._manager
 
-    async def _get_load(self) -> "Resources":
+    async def _get_load(self) -> "Quota":
         cutoff = datetime.now(tz=timezone.utc) - self.window
         containers = await self.manager.live(self.name)
         count = len(containers)
         recent = sum(c > cutoff for c in containers.values())
-        return self.job_resources * count - Resources(launches=count - recent)
+        return self.job_quota * count - Quota(launches=count - recent)
 
-    async def update(self):
+    async def update(self) -> bool:
         has_any, reaped = await self.manager.update(self.name)
         for job, (log, done) in reaped.items():
             if self.logs is not None:
@@ -1371,8 +1400,8 @@ class ContainerTask(Task):
                 await self.done.dump(job, done)
         return has_any
 
-    async def launch(self, job):
-        limit = await self.resource_manager.reserve(self.job_resources)
+    async def launch(self, job: str):
+        limit = await self.quota_manager.reserve(self.job_quota)
         if limit is not None:
             if not self.warned:
                 l.warning("Cannot launch %s: %s limit", self, limit)
@@ -1391,10 +1420,10 @@ class ContainerTask(Task):
 
         mounts = self.mount_directives.pop(job, [])
         await self.manager.launch(
-            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_resources, mounts
+            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts
         )
 
-    def _instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind):
+    def instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind):
         if kind in (LinkKind.InputFilepath, LinkKind.OutputFilepath) and arg.file_host == LOCAL_HOST:
             internal_filepath = self.host.mktemp(job)
             self.mount_directives[job].append((arg.arg, internal_filepath))

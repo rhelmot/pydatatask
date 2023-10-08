@@ -9,6 +9,9 @@ import warnings
 
 import kubernetes_asyncio
 
+from pydatatask.executor.pod_manager import PodManager, kube_connect
+from pydatatask.host import Host, HostOS
+from pydatatask.task import LinkKind
 import pydatatask
 
 
@@ -25,6 +28,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         self.kube_context = os.getenv("PYDATATASK_TEST_KUBE_CONTEXT")
         self.kube_namespace = os.getenv("PYDATATASK_TEST_KUBE_NAMESPACE", "default")
         self.test_id = rid()
+        self.kube_host = Host("kube", HostOS.Linux)
 
     async def asyncSetUp(self):
         if self.kube_context is None:
@@ -55,16 +59,15 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
 
-        cluster_quota = pydatatask.ResourceManager(pydatatask.Resources.parse("1", "1Gi", 99999))
+        cluster_quota = pydatatask.QuotaManager(pydatatask.Quota.parse("1", "1Gi", 99999))
 
-        @session.resource
-        async def podman():
-            podman = pydatatask.PodManager(
-                f"test-{self.test_id}",
-                self.kube_namespace,
-            )
-            yield podman
-            await podman.close()
+        kube = session.ephemeral(kube_connect())
+        podman = pydatatask.PodManager(
+            self.kube_host,
+            f"test-{self.test_id}",
+            self.kube_namespace,
+            kube,
+        )
 
         repo0 = pydatatask.InProcessMetadataRepository({str(i): f"weh-{i}" for i in range(50)})
         repoDone = pydatatask.InProcessMetadataRepository()
@@ -108,7 +111,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             logs=repoLogs,
             done=repoDone,
         )
-        task.link("repo0", repo0, is_input=True)
+        task.link("repo0", repo0, LinkKind.InputMetadata)
 
         pipeline = pydatatask.Pipeline([task], session, [cluster_quota])
 
@@ -145,7 +148,7 @@ Goodbye world!
             )
 
     async def asyncTearDown(self):
-        if self.minikube_profile is not None:
+        if self.minikube_profile is not None and self.minikube_path is not None:
             p = await asyncio.create_subprocess_exec(
                 self.minikube_path,
                 "delete",

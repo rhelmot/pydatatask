@@ -1,6 +1,6 @@
-"""
-A pipeline is just an unordered collection of tasks. Relationships between the tasks are implicit, defined by which
-repositories they share.
+"""A pipeline is just an unordered collection of tasks.
+
+Relationships between the tasks are implicit, defined by which repositories they share.
 """
 
 from typing import Callable, Dict, Iterable, Optional, Set, Tuple, Union
@@ -10,8 +10,8 @@ import logging
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
 
+from .quota import QuotaManager, localhost_quota_manager
 from .repository import Repository
-from .resource_manager import ResourceManager, localhost_resource_manager
 from .session import Session
 from .task import Task
 
@@ -21,21 +21,19 @@ __all__ = ("Pipeline",)
 
 
 class Pipeline:
-    """
-    The pipeline class.
-    """
+    """The pipeline class."""
 
     def __init__(
         self,
         tasks: Iterable[Task],
         session: Session,
-        resources: Iterable[ResourceManager],
+        quota_managers: Iterable[QuotaManager],
         priority: Optional[Callable[[str, str], int]] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
         :param session: The session to open while this pipeline is active.
-        :param resources: Any resource managers in use. You need to provide these so the pipeline can reset the
+        :param quota_managers: Any quota managers in use. You need to provide these so the pipeline can reset the
                           rate-limiting at each update.
         :param priority: Optional: A function which takes a task and job name and returns an integer priority. No jobs
                          will be scheduled unless all higher-priority jobs (larger numbers) have already been scheduled.
@@ -43,15 +41,14 @@ class Pipeline:
         self.tasks: Dict[str, Task] = {task.name: task for task in tasks}
         self._opened = False
         self.session = session
-        self.resources = list(resources)
+        self.quota_managers = list(quota_managers)
         self.priority = priority
 
     def settings(self, synchronous=False, metadata=True):
-        """
-        This method can be called to set properties of the current run.
+        """This method can be called to set properties of the current run.
 
-        :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before
-                            a launch phase succeeds.
+        :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
+            launch phase succeeds.
         :param metadata: Whether jobs will store their completion metadata.
         """
         for task in self.tasks.values():
@@ -72,9 +69,9 @@ class Pipeline:
         await self.open()
 
     async def open(self):
-        """
-        Opens the pipeline and its associated resource session. This will be automatically when entering an
-        ``async with pipeline:`` block.
+        """Opens the pipeline and its associated session.
+
+        This will be automatically when entering an ``async with pipeline:`` block.
         """
         if self._opened:
             raise Exception("Pipeline is alredy used")
@@ -88,16 +85,15 @@ class Pipeline:
         await self.close()
 
     async def close(self):
-        """
-        Closes the pipeline and its associated resource session. This will be automatically called when exiting an
-        ``async with pipeline:`` block.
+        """Closes the pipeline and its associated session.
+
+        This will be automatically called when exiting an ``async with pipeline:`` block.
         """
         await self.session.close()
 
     async def update(self) -> bool:
-        """
-        Perform one round of pipeline maintenance, running the update phase and then the launch phase. The pipeline must
-        be opened for this function to run.
+        """Perform one round of pipeline maintenance, running the update phase and then the launch phase. The
+        pipeline must be opened for this function to run.
 
         :return: Whether there is any activity in the pipeline.
         """
@@ -110,9 +106,8 @@ class Pipeline:
         return result
 
     async def update_only_update(self) -> bool:
-        """
-        Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this function to
-        run.
+        """Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this
+        function to run.
 
         :return: Whether there were any live jobs.
         """
@@ -121,15 +116,14 @@ class Pipeline:
 
         to_gather = [task.update() for task in self.tasks.values()]
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
-        for res in self.resources:
+        for res in self.quota_managers:
             await res.flush()
-        await localhost_resource_manager.flush()
+        await localhost_quota_manager.flush()
         return any(gathered)
 
     async def update_only_launch(self) -> bool:
-        """
-        Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this function to
-        run.
+        """Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this
+        function to run.
 
         :return: Whether there were any jobs launched or ready to launch.
         """
@@ -185,14 +179,12 @@ class Pipeline:
             l.debug("Launching jobs of priority %s", prio_queue[0][0])
             await asyncio.gather(leader(prio_queue), *[worker() for _ in range(N_WORKERS)])
 
-        for res in self.resources:
+        for res in self.quota_managers:
             await res.flush()
         return True
 
     async def gather_ready_jobs(self, task: Task) -> Set[str]:
-        """
-        Collect all jobs that are ready to be launched for a given task.
-        """
+        """Collect all jobs that are ready to be launched for a given task."""
         result: Set[str] = set()
         if task.disabled:
             l.debug("%s is disabled - no jobs will be scheduled", task.name)
@@ -202,9 +194,9 @@ class Pipeline:
         return result
 
     def graph(self) -> "networkx.classes.digraph.DiGraph":
-        """
-        Generate the dependency graph for a pipeline. This is a directed graph containing both repositories and tasks
-        as nodes.
+        """Generate the dependency graph for a pipeline.
+
+        This is a directed graph containing both repositories and tasks as nodes.
         """
         result: networkx.classes.digraph.DiGraph = networkx.classes.digraph.DiGraph()
         for task in self.tasks.values():
@@ -223,8 +215,7 @@ class Pipeline:
         return result
 
     def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:
-        """
-        Iterate the list of repositories that are dependent on the given node of the dependency graph.
+        """Iterate the list of repositories that are dependent on the given node of the dependency graph.
 
         :param node: The starting point of the graph traversal.
         :param recursive: Whether to return only direct dependencies (False) or transitive dependencies (True) of node.

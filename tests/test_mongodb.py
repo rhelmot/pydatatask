@@ -58,7 +58,9 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
         self.client = motor.motor_asyncio.AsyncIOMotorClient(self.mongo_url)
 
     async def test_mongo(self):
-        repo = pydatatask.MongoMetadataRepository(lambda: self.client[self.database], "test")
+        assert self.client is not None
+        client = self.client
+        repo = pydatatask.MongoMetadataRepository(lambda: client[self.database], "test")
         assert repr(repo)
         await repo.dump("foo", {"weh": 1})
         assert len([x async for x in repo]) == 1
@@ -79,7 +81,7 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
         if self.client is not None:
             await self.client.drop_database(self.database)
 
-        if self.docker_name is not None:
+        if self.docker_name is not None and self.docker_path is not None:
             p = await asyncio.create_subprocess_exec(
                 self.docker_path,
                 "kill",

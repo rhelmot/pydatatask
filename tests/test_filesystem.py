@@ -17,6 +17,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         self.dir = tempfile.mkdtemp()
 
     async def test_filesystem(self):
+        assert self.dir is not None
         repo = pydatatask.FileRepository(self.dir, extension=".txt")
         assert repr(repo)
         await repo.validate()
@@ -30,12 +31,13 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         async with await repo.open("foo", "rb") as fp:
             assert await fp.read() == b"hello world"
         assert [x async for x in repo] == ["foo"]
-        assert await repo.info("bar") == self.dir + "/bar.txt"
+        assert str(repo.fullpath("bar")) == self.dir + "/bar.txt"
         await repo.delete("foo")
         await repo.delete("bar")
         assert [x async for x in repo] == []
 
     async def test_case_insensitivity(self):
+        assert self.dir is not None
         repo = pydatatask.FileRepository(self.dir, extension=".txt", case_insensitive=True)
         await repo.validate()
 
@@ -65,6 +67,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         assert [x async for x in repo] == []
 
     async def test_yaml(self):
+        assert self.dir is not None
         repo = pydatatask.YamlMetadataFileRepository(self.dir)
 
         await repo.dump("foo", {"weh": 1})

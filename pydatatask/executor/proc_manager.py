@@ -1,5 +1,5 @@
-"""
-A process manager can be used with a ProcessTask to specify where and how the processes should run.
+"""A process manager can be used with a ProcessTask to specify where and how the processes should run.
+
 All a process manager needs to specify is how to launch a process and manipulate the filesystem, and the ProcessTask
 will set up an appropriate environment for running the task and retrieve the results using this interface.
 """
@@ -32,7 +32,7 @@ from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
 
-from ..consts import STDOUT, _StderrIsStdout
+from ..consts import _StderrIsStdout
 
 if TYPE_CHECKING:
     from ..repository import AReadStream, AReadText, AWriteStream, AWriteText
@@ -41,8 +41,7 @@ __all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
 
 
 class AbstractProcessManager(Executor):
-    """
-    The base class for process managers.
+    """The base class for process managers.
 
     Processes are managed through arbitrary "process identifier" handle strings.
     """
@@ -52,9 +51,10 @@ class AbstractProcessManager(Executor):
 
     @abstractmethod
     async def get_live_pids(self, hint: Set[str]) -> Set[str]:
-        """
-        Get a set of the live process identifiers. This may include processes which are not part of the current
-        app/task, but MUST include all the processes in ``hint`` which are still alive.
+        """Get a set of the live process identifiers.
+
+        This may include processes which are not part of the current app/task, but MUST include all the processes in
+        ``hint`` which are still alive.
         """
         raise NotImplementedError
 
@@ -63,77 +63,72 @@ class AbstractProcessManager(Executor):
         self,
         args: List[str],
         environ: Dict[str, str],
-        cwd: str,
-        return_code: str,
-        stdin: Optional[str],
-        stdout: Optional[str],
-        stderr: Optional[Union[str, "_StderrIsStdout"]],
+        cwd: Union[str, Path],
+        return_code: Union[str, Path],
+        stdin: Optional[Union[str, Path]],
+        stdout: Optional[Union[str, Path]],
+        stderr: Optional[Union[str, Path, "_StderrIsStdout"]],
     ) -> str:
-        """
-        Launch a process on the target system. This function MUST NOT wait until the process has terminated before
-        returning.
+        """Launch a process on the target system. This function MUST NOT wait until the process has terminated
+        before returning.
 
-        :param args:         The command line of the process to launch. ``args[0]`` is the executable to run.
-        :param environ:      A set of environment variables to add to the target process' environment.
-        :param cwd:          The directory to launch the process in.
-        :param return_code:  A filepath in which to store the process exit code, as an ascii integer.
-        :param stdin:        A filepath from which to read the process' stdin, or None for a null file.
-        :param stdout:       A filepath to which to write the process' stdout, or None for a null file.
-        :param stderr:       A filepath to which to write the process' stderr, None for a null file, or the constant
-                             `pydatatask.task.STDOUT` to interleave it into the stdout stream.
-        :return:             The process identifier of the process spawned.
+        :param args: The command line of the process to launch. ``args[0]`` is the executable to run.
+        :param environ: A set of environment variables to add to the target process' environment.
+        :param cwd: The directory to launch the process in.
+        :param return_code: A filepath in which to store the process exit code, as an ascii integer.
+        :param stdin: A filepath from which to read the process' stdin, or None for a null file.
+        :param stdout: A filepath to which to write the process' stdout, or None for a null file.
+        :param stderr: A filepath to which to write the process' stderr, None for a null file, or the constant
+            `pydatatask.task.STDOUT` to interleave it into the stdout stream.
+        :return: The process identifier of the process spawned.
         """
         raise NotImplementedError
 
     @abstractmethod
     async def kill(self, pid: str):
-        """
-        Terminate the process with the given identifier. This should do nothing if the process is not currently running.
-        This should not prevent e.g. the ``return_code`` file from being populated.
+        """Terminate the process with the given identifier.
+
+        This should do nothing if the process is not currently running. This should not prevent e.g. the ``return_code``
+        file from being populated.
         """
         raise NotImplementedError
 
     @property
     @abstractmethod
     def basedir(self) -> Path:
-        """
-        A path on the target system to a directory which can be freely manipulated by the app.
-        """
+        """A path on the target system to a directory which can be freely manipulated by the app."""
         raise NotImplementedError
 
     @overload
     @abstractmethod
-    async def open(self, path: Path, mode: Literal["r"]) -> "AReadText":
+    async def open(self, path: Union[Path, str], mode: Literal["r"]) -> "AReadText":
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Path, mode: Literal["w"]) -> "AWriteText":
+    async def open(self, path: Union[Path, str], mode: Literal["w"]) -> "AWriteText":
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Path, mode: Literal["rb"]) -> "AReadStream":
+    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> "AReadStream":
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Path, mode: Literal["wb"]) -> "AWriteStream":
+    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> "AWriteStream":
         ...
 
     @abstractmethod
     async def open(
-        self, path: Path, mode: Literal["r", "rb", "w", "wb"]
+        self, path: Union[Path, str], mode: Literal["r", "rb", "w", "wb"]
     ) -> Union["AReadText", "AWriteText", "AReadStream", "AWriteStream"]:
-        """
-        Open the file on the target system for reading or writing according to the given mode.
-        """
+        """Open the file on the target system for reading or writing according to the given mode."""
         raise NotImplementedError
 
     @abstractmethod
     async def mkdir(self, path: Path):  # exist_ok=True, parents=True
-        """
-        Create a directory with the given path on the target system.
+        """Create a directory with the given path on the target system.
 
         This should have the semantics of ``mkdir -p``, i.e. create any necessary parent directories and also succeed if
         the directory already exists.
@@ -142,22 +137,21 @@ class AbstractProcessManager(Executor):
 
     @abstractmethod
     async def rmtree(self, path: Path):
-        """
-        Remove a directory and all its children with the given path on the target system.
-        """
+        """Remove a directory and all its children with the given path on the target system."""
         raise NotImplementedError
 
 
 class LocalLinuxManager(AbstractProcessManager):
-    """
-    A process manager to run tasks on the local linux machine. By default, it will create a directory
-    ``/tmp/pydatatask`` in which to store data.
+    """A process manager to run tasks on the local linux machine.
+
+    By default, it will create a directory ``/tmp/pydatatask`` in which to store data.
     """
 
     def to_container_manager(self):
-        return DockerContainerManager()
+        return DockerContainerManager(self.app)
 
     def __init__(self, app: str, local_path: Union[Path, str] = "/tmp/pydatatask"):
+        self.app = app
         self.local_path = Path(local_path) / app
 
     @property
@@ -220,8 +214,9 @@ class LocalLinuxManager(AbstractProcessManager):
 
 
 class SSHLinuxFile:
-    """
-    A file returned by `SSHLinuxManager.open`. Probably don't instantiate this directly.
+    """A file returned by `SSHLinuxManager.open`.
+
+    Probably don't instantiate this directly.
     """
 
     def __init__(self, path: Union[Path, str], mode: Literal["r", "w", "rb", "wb"], ssh: asyncssh.SSHClientConnection):
@@ -241,15 +236,13 @@ class SSHLinuxFile:
         return self.fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # TODO why error
         await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
         await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
 
 class SSHLinuxManager(AbstractProcessManager):
-    """
-    A process manager that runs its processes on a remote linux machine, accessed over SSH.
-    The SSH connection is parameterized by an :external:class:`asyncssh.connection.SSHClientConnection` instance.
+    """A process manager that runs its processes on a remote linux machine, accessed over SSH. The SSH connection is
+    parameterized by an :external:class:`asyncssh.connection.SSHClientConnection` instance.
 
     Sample usage:
 
@@ -257,14 +250,14 @@ class SSHLinuxManager(AbstractProcessManager):
 
         session = pydatatask.Session()
 
-        @session.resource
+        @session.ephemeral
         async def ssh():
             async with asyncssh.connect(
                 "localhost", port=self.port, username="weh", password="weh", known_hosts=None
             ) as s:
                 yield s
 
-        @session.resource
+        @session.ephemeral
         async def procman():
             yield pydatatask.SSHLinuxManager(self.test_id, ssh)
 
@@ -288,9 +281,9 @@ class SSHLinuxManager(AbstractProcessManager):
 
     @property
     def ssh(self) -> asyncssh.SSHClientConnection:
-        """
-        The `asyncssh.SSHClientConnection` instance associated. Will fail if the connection is provided by an unopened
-        Session.
+        """The `asyncssh.SSHClientConnection` instance associated.
+
+        Will fail if the connection is provided by an unopened Session.
         """
         return self._ssh()
 
@@ -337,12 +330,12 @@ class SSHLinuxManager(AbstractProcessManager):
                 await sftp.chmod(args[0], 0o755)
         p = await self.ssh.create_process(
             f"""
-            cd {shlex.quote(cwd)}
+            cd {shlex.quote(str(cwd))}
             {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
             PID=$!
             echo $PID
             wait $PID >/dev/null 2>/dev/null
-            echo $? >{shlex.quote(return_code)} 2>/dev/null
+            echo $? >{shlex.quote(str(return_code))} 2>/dev/null
             """,
             env=environ,
         )

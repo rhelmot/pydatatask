@@ -1,13 +1,11 @@
-"""
-Documentation for this package can be found at https://pydatatask.readthedocs.io/en/stable/
-"""
+""" Documentation for this package can be found at https://pydatatask.readthedocs.io/en/stable/"""
 
 from .repository import *
 from .task import *
 from .pipeline import *
 from .session import *
 from .main import *
-from .resource_manager import *
+from .quota import *
 from .executor import *
 from .host import *
 

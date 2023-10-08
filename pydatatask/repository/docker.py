@@ -1,6 +1,4 @@
-"""
-This module contains repositories for interacting with docker registries.
-"""
+"""This module contains repositories for interacting with docker registries."""
 
 from typing import Callable
 import base64
@@ -15,9 +13,9 @@ from .base import Repository, job_getter
 
 
 class DockerRepository(Repository):
-    """
-    A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
-    on this repository.
+    """A docker repository is, well, an actual docker repository hosted in some registry somewhere.
+
+    Keys translate to tags on this repository.
     """
 
     def __init__(
@@ -39,8 +37,9 @@ class DockerRepository(Repository):
 
     @property
     def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
-        """
-        The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
+        """The ``docker_registry_client_async`` client object.
+
+        If this is provided by an unopened session, raise an error.
         """
         return self._registry()
 
@@ -61,8 +60,7 @@ class DockerRepository(Repository):
 
     @job_getter
     async def info(self, job):
-        """
-        The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
+        """The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
 
         .. code::
 

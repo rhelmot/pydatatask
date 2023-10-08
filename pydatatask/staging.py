@@ -1,3 +1,11 @@
+"""This module is a sister to declarative, housing the functions needed to handle pipeline.yaml files.
+
+Pipeline.yaml is a specification which lets you set up a pipeline or a piece thereof declaratively. Pipeline files can
+specify all their dependencies, or they can specify only the classes of the missing dependencies, in which case before
+they can be used they need to either be imported by another pipeline file or "locked", a process which automatically
+allocates the needed resources and generates a lockfile, which is itself a pipeline file that imports the original
+pipeline file.
+"""
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -13,25 +21,25 @@ from typing import (
 )
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-import tempfile
+import os
 
 import yaml
 
 from pydatatask.declarative import (
+    build_ephemeral_picker,
     build_executor_picker,
     build_repository_picker,
-    build_resource_picker,
     build_task_picker,
-    make_list_parser,
+    host_constructor,
 )
 from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
+from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import Repository
-from pydatatask.resource_manager import ResourceManager, Resources
-from pydatatask.session import Session
+from pydatatask.session import Ephemeral, Session
 
 if TYPE_CHECKING:
-    dataclass_serial = dataclass
+    from dataclasses import dataclass as _dataclass_serial  # pylint: disable=reimported
 else:
 
     def _reprocess(value, ty):
@@ -45,7 +53,7 @@ else:
                 value[i] = _reprocess(v, get_args(ty)[1])
         return value
 
-    def dataclass_serial(cls):
+    def _dataclass_serial(cls):
         def __post_init__(self):
             for myfield in myfields:
                 setattr(self, myfield.name, _reprocess(getattr(self, myfield.name), myfield.type))
@@ -56,27 +64,28 @@ else:
         return dcls
 
 
-@dataclass_serial
+# pylint: disable=missing-class-docstring,missing-function-docstring
+@_dataclass_serial
 class Dispatcher:
     cls: str
     args: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass_serial
+@_dataclass_serial
 class PriorityEntry:
     priority: int
     task: Optional[str] = None
     job: Optional[str] = None
 
 
-@dataclass_serial
+@_dataclass_serial
 class LinkSpec:
     repo: str
     kind: str
     key: Optional[str] = None
 
 
-@dataclass_serial
+@_dataclass_serial
 class TaskSpec:
     executable: Dispatcher
     executor: Optional[str] = None
@@ -84,7 +93,7 @@ class TaskSpec:
     links: Dict[str, LinkSpec] = field(default_factory=dict)
 
 
-@dataclass_serial
+@_dataclass_serial
 class PipelineChildSpec:
     path: Optional[str] = None
     repos: Dict[str, str] = field(default_factory=dict)  # {child's name: our name}
@@ -92,7 +101,7 @@ class PipelineChildSpec:
     imports: Dict[str, "PipelineChildSpec"] = field(default_factory=dict)
 
 
-@dataclass_serial
+@_dataclass_serial
 class PipelineChildArgs:
     repos: Dict[str, Dispatcher] = field(default_factory=dict)  # {child's name: dispatcher}
     executors: Dict[str, Dispatcher] = field(default_factory=dict)  # {task name: our executor's name}
@@ -112,7 +121,7 @@ class PipelineChildArgs:
         return result, result_repos, result_executors
 
 
-@dataclass_serial
+@_dataclass_serial
 class PipelineChildArgsMissing:
     repos: Dict[str, str] = field(default_factory=dict)  # {child's name: class name}
     executors: Set[str] = field(default_factory=set)  # {task name}
@@ -145,38 +154,56 @@ class PipelineChildArgsMissing:
         return PipelineChildArgs(new_repos, new_executors, new_imports)
 
 
-@dataclass_serial
+@_dataclass_serial
+class HostSpec:
+    os: str
+
+
+@_dataclass_serial
 class PipelineSpec:
+    hosts: Dict[str, HostSpec] = field(default_factory=dict)
     tasks: Dict[str, TaskSpec] = field(default_factory=dict)
     executors: Dict[str, Dispatcher] = field(default_factory=dict)
     repos: Dict[str, Dispatcher] = field(default_factory=dict)
     repo_classes: Dict[str, str] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
-    quotas: Dict[str, Resources] = field(default_factory=dict)
-    resources: Dict[str, Dispatcher] = field(default_factory=dict)
+    quotas: Dict[str, Quota] = field(default_factory=dict)
+    ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
     imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
 
 
-@dataclass_serial
+@_dataclass_serial
 class PipelineChild:
     pipeline: "PipelineStaging"
     repo_translation: Dict[str, str] = field(default_factory=dict)  # {imp name: {our name: child's name}}
 
 
+# pylint: enable=missing-class-docstring,missing-function-docstring
+
+
 class PipelineStaging:
+    """The main manager for pipeline.yaml files.
+
+    Instantiate this with the path to a pipeline.yaml file.
+    """
+
     def __init__(
         self,
         filepath: Optional[Path] = None,
         basedir: Optional[Path] = None,
         params: Optional[PipelineChildArgs] = None,
     ):
+        """The basedir and params parameters are for internal use only."""
+        self.children: Dict[str, PipelineStaging] = {}
+        self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = {}
+        self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
+
         if filepath is None:
             if basedir is None:
                 raise TypeError("Must provide basedir if you don't provide filepath")
 
             self.filename = "pipeline.lock"
             self.basedir = basedir
-            self.children = {}
             self.repos_fulfilled_by_parents = {}
             self.spec = PipelineSpec()
         else:
@@ -186,18 +213,18 @@ class PipelineStaging:
             self.basedir = filepath.parent
             self.filename = filepath.name
 
-            with open(filepath, "r") as fp:
+            with open(filepath, "r", encoding="utf-8") as fp:
                 spec_dict = yaml.safe_load(fp)
             self.spec = PipelineSpec(**spec_dict)
 
             if params is None:
                 params = PipelineChildArgs()
 
-            self.children: Dict[str, PipelineStaging] = {}
-            self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = params.repos
-            self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = params.executors
+            self.children = {}
+            self.repos_fulfilled_by_parents = params.repos
+            self.executors_fulfilled_by_parents = params.executors
 
-            assert not (set(self.spec.repos) & set(self.spec.repo_classes))
+            assert not set(self.spec.repos) & set(self.spec.repo_classes)
 
             for imp_name, imp in self.spec.imports.items():
                 if imp.path is None:
@@ -226,7 +253,7 @@ class PipelineStaging:
 
                 self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
 
-    def get_priority(self, task: str, job: str) -> int:
+    def _get_priority(self, task: str, job: str) -> int:
         result = 0
         for directive in self.spec.priorities:
             if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):
@@ -234,6 +261,11 @@ class PipelineStaging:
         return result
 
     def missing(self) -> PipelineChildArgsMissing:
+        """Return a PipelineChildArgsMissing instance for this pipeline.yaml file.
+
+        This object indicates which resources need to be allocated before the pipeline can be used. You can call its
+        .ready() function to get a boolean for whether it is properly ready.
+        """
         return PipelineChildArgsMissing(
             repos={
                 name: cls for name, cls in self.spec.repo_classes.items() if name not in self.repos_fulfilled_by_parents
@@ -252,28 +284,34 @@ class PipelineStaging:
             yield from child._iter_children()
 
     def instantiate(self) -> Pipeline:
+        """Convert a PipelineStaging into a Pipeline.
+
+        This will fail if any resources need to be allocated.
+        """
         missing = self.missing()
         if not missing.ready():
             raise ValueError("Cannot instantiate pipeline - missing definitions for repositories or executors")
 
-        resource_constructor = build_resource_picker()
+        ephemeral_constructor = build_ephemeral_picker()
         repo_cache: Dict[int, Repository] = {}
-        resource_cache: Dict["PipelineStaging", Dict[str, Callable[[], Any]]] = {}
+        ephemeral_cache: Dict["PipelineStaging", Dict[str, Ephemeral[Any]]] = {}
         executor_cache: Dict[int, Executor] = {}
         all_tasks = []
-        all_quotas = []
+        all_quotas: List[QuotaManager] = []
         session = Session()
         for staging in self._iter_children():
-            resources = {
-                name: session.resource(resource_constructor(asdict(value)))
-                for name, value in staging.spec.resources.items()
+            ephemerals = {
+                name: session.ephemeral(ephemeral_constructor(asdict(value)))
+                for name, value in staging.spec.ephemerals.items()
             }
-            resource_cache[staging] = resources
-            repo_constructor = build_repository_picker(resources)
+            ephemeral_cache[staging] = ephemerals
+            repo_constructor = build_repository_picker(ephemerals)
             repos = {name: repo_constructor(asdict(value)) for name, value in staging.spec.repos.items()}
             repo_cache.update({id(staging.spec.repos[name]): repo for name, repo in repos.items()})
 
-            executor_constructor = build_executor_picker(session, resources)
+            hosts = {name: host_constructor(asdict(val) | {"name": name}) for name, val in staging.spec.hosts.items()}
+
+            executor_constructor = build_executor_picker(hosts, ephemerals)
             executors = {name: executor_constructor(asdict(value)) for name, value in staging.spec.executors.items()}
             executor_cache.update({id(staging.spec.executors[name]): executor for name, executor in executors.items()})
 
@@ -282,7 +320,7 @@ class PipelineStaging:
             all_repos.update(
                 {name: repo_cache[id(dispatch)] for name, dispatch in staging.repos_fulfilled_by_parents.items()}
             )
-            quotas = {name: ResourceManager(val) for name, val in staging.spec.quotas.items()}
+            quotas = {name: QuotaManager(val) for name, val in staging.spec.quotas.items()}
             all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
             all_executors.update(
                 {
@@ -291,16 +329,20 @@ class PipelineStaging:
                 }
             )
             all_quotas.extend(quotas.values())
-            task_constructor = build_task_picker(all_repos, all_executors, quotas, resource_cache[staging])
+            task_constructor = build_task_picker(all_repos, all_executors, quotas, ephemeral_cache[staging])
             for task_name, task_spec in staging.spec.tasks.items():
                 dict_spec = asdict(task_spec)
                 if task_name in staging.executors_fulfilled_by_parents:
                     dict_spec["executor"] = task_name
                 all_tasks.append(task_constructor(task_name, dict_spec))
 
-        return Pipeline(all_tasks, session, all_quotas, self.get_priority)
+        return Pipeline(all_tasks, session, all_quotas, self._get_priority)
 
-    def allocate(self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Dispatcher):
+    def allocate(
+        self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Dispatcher
+    ) -> "PipelineStaging":
+        """Lock a pipeline, generating a new PipelineStaging which imports this one and specifies all of its missing
+        dependencies."""
         spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
         result = PipelineStaging(basedir=self.basedir)
         result.children["locked"] = self
@@ -311,40 +353,25 @@ class PipelineStaging:
         return result
 
     def save(self):
+        """Save this spec back to the pipeline.yaml file, in case it has been modified."""
         spec_dict = asdict(self.spec)
-        with open(self.basedir / self.filename, "w") as fp:
+        with open(self.basedir / self.filename, "w", encoding="utf-8") as fp:
             yaml.dump(spec_dict, fp)
 
 
-def allocate_temp_meta() -> Dispatcher:
-    return Dispatcher("InProcessMetadata", {})
+def find_config() -> Optional[Path]:
+    """Discover a pipeline.yaml file in the current filesystem ancestry or $PIPELINE_YAML."""
+    thing = os.getenv("PIPELINE_YAML")
+    if thing is not None:
+        return Path(thing)
 
-
-def allocate_temp_blob() -> Dispatcher:
-    return Dispatcher("InProcessBlob", {})
-
-
-def allocate_local_meta() -> Dispatcher:
-    Path("/tmp/pydatatask").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
-    return Dispatcher("YamlFile", {"basedir": basedir})
-
-
-def allocate_local_blob() -> Dispatcher:
-    Path("/tmp/pydatatask").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
-    return Dispatcher("File", {"basedir": basedir})
-
-
-def default_allocators_temp() -> Dict[str, Callable[[], Dispatcher]]:
-    return {
-        "MetadataRepository": allocate_temp_meta,
-        "BlobRepository": allocate_temp_blob,
-    }
-
-
-def default_allocators_local() -> Dict[str, Callable[[], Dispatcher]]:
-    return {
-        "MetadataRepository": allocate_local_meta,
-        "BlobRepository": allocate_local_blob,
-    }
+    root = Path.cwd()
+    while True:
+        pth = root / "pipeline.yaml"
+        if pth.exists():
+            return pth
+        newroot = root.parent
+        if newroot == root:
+            return None
+        else:
+            root = newroot
