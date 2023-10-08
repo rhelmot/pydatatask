@@ -29,7 +29,9 @@ If a session is passed to a pipeline, it will be opened and closed when the pipe
 Sessions cannot be opened more than once. But this doesn't have to be the way! If you have a use case, complain in a
 GitHub issue, and I'll see what can be done.
 """
-from typing import AsyncIterable, Callable, TypeAlias, TypeVar
+from typing import AsyncIterable, Callable, TypeVar
+
+from typing_extensions import TypeAlias
 
 __all__ = ("Session", "Ephemeral")
 

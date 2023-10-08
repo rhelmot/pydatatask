@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from enum import Enum
-from importlib.metadata import entry_points
 import base64
 import gc
 import json
@@ -13,6 +12,7 @@ import socket
 import sys
 import traceback
 
+from importlib_metadata import entry_points
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async
