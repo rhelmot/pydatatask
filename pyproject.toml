@@ -30,7 +30,6 @@ dependencies = [
     "asyncssh",
     "aiodocker",
     "sonyflake-py",
-    "typing_extensions",
     "importlib_metadata",
 ]
 

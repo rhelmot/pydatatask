@@ -4,8 +4,7 @@ needs several resource references.
 the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
-from typing import Callable, List, Optional
-from collections.abc import AsyncIterator
+from typing import AsyncIterator, Callable, List, Optional
 import logging
 
 from kubernetes_asyncio.client import ApiClient, CoreV1Api, V1Pod

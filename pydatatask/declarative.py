@@ -1,7 +1,6 @@
 """This module contains parsing methods for transforming various dict and list schemas into Repository, Task, and
 other kinds of pydatatask classes."""
-from typing import Any, Dict, List, Optional, Type, TypeVar
-from collections.abc import Callable, Mapping
+from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar
 from datetime import timedelta
 from enum import Enum
 import base64

@@ -31,12 +31,10 @@ GitHub issue, and I'll see what can be done.
 """
 from typing import AsyncIterable, Callable, TypeVar
 
-from typing_extensions import TypeAlias
-
 __all__ = ("Session", "Ephemeral")
 
 T = TypeVar("T")
-Ephemeral: TypeAlias = Callable[[], T]
+Ephemeral = Callable[[], T]
 
 
 class Session:
