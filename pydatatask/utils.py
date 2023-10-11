@@ -155,7 +155,7 @@ class asyncasynccontextmanager(Generic[_T]):
 
     async def __aenter__(self) -> _T:
         assert self.live is not None
-        return await anext(self.live)
+        return await self.live.__anext__()
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
         pass

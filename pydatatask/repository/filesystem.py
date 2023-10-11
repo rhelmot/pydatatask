@@ -100,7 +100,7 @@ class FilesystemRepository(abc.ABC):
     async def dump_tarball(self, job: str, tar: tarfile.TarFile) -> None:
         """Add an entire filesystem from a tarball."""
         cursor = self.dump(job)
-        await anext(cursor)
+        await cursor.__anext__()
         for f in tar:
             if f.issym():
                 await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, link_target=f.linkname))
