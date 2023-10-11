@@ -24,25 +24,22 @@ from pydatatask.executor.proc_manager import LocalLinuxManager, SSHLinuxManager
 from pydatatask.host import Host, HostOS
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import (
+    DirectoryRepository,
+    DockerRepository,
     FileRepository,
+    InProcessBlobRepository,
+    InProcessMetadataRepository,
+    MongoMetadataRepository,
     Repository,
     S3BucketRepository,
     YamlMetadataFileRepository,
+    YamlMetadataS3Repository,
 )
-from pydatatask.repository.base import (
-    DirectoryRepository,
-    InProcessBlobRepository,
-    InProcessMetadataRepository,
-)
-from pydatatask.repository.bucket import YamlMetadataS3Repository
-from pydatatask.repository.docker import DockerRepository
-from pydatatask.repository.mongodb import MongoMetadataRepository
 from pydatatask.session import Ephemeral
 from pydatatask.task import ContainerTask, KubeTask, LinkKind, ProcessTask, Task
 import pydatatask
 
 _T = TypeVar("_T")
-_K = TypeVar("_K", bound=Task)
 
 
 def parse_bool(thing: Any) -> bool:

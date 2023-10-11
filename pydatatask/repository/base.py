@@ -24,13 +24,18 @@ import os
 import string
 
 import aiofiles.os
-import aioshutil
 import yaml
 
 from pydatatask.host import LOCAL_HOST
 
 from .. import task as taskmodule
-from ..utils import AReadStream, AReadText, AWriteStream, AWriteText, roundrobin
+from ..utils import (
+    AReadStreamManager,
+    AReadText,
+    AWriteStreamManager,
+    AWriteText,
+    roundrobin,
+)
 
 l = logging.getLogger(__name__)
 
@@ -62,7 +67,7 @@ class Repository(ABC):
         """Determine whether the given job identifier is valid, i.e. that it contains only valid characters (numbers
         and letters by default)."""
         return (
-            0 < len(job) < 64
+            0 < len(job) <= 64
             and all(c in cls.CHARSET for c in job)
             and job[0] in cls.CHARSET_START_END
             and job[-1] in cls.CHARSET_START_END
@@ -216,12 +221,12 @@ class BlobRepository(Repository, ABC):
 
     @overload
     @abstractmethod
-    async def open(self, job: str, mode: Literal["rb"]) -> AReadStream:
+    async def open(self, job: str, mode: Literal["rb"]) -> AReadStreamManager:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStream:
+    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStreamManager:
         ...
 
     @abstractmethod
@@ -291,49 +296,6 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
             await aiofiles.os.unlink(self.fullpath(job))
         except FileNotFoundError:
             pass
-
-
-class DirectoryRepository(FileRepositoryBase):
-    """A file repository whose members are directories."""
-
-    def __init__(self, *args, discard_empty=False, **kwargs):
-        """
-        :param discard_empty: Whether only directories containing at least one member should be considered as "present"
-                              in the repository.
-        """
-        super().__init__(*args, **kwargs)
-        self.discard_empty = discard_empty
-
-    @job_getter
-    async def mkdir(self, job):
-        """Create an empty directory corresponding to ``job``.
-
-        Do nothing if the directory already exists.
-        """
-        try:
-            await aiofiles.os.mkdir(self.fullpath(job))
-        except FileExistsError:
-            pass
-
-    async def delete(self, job):
-        if await self.contains(job):
-            await aioshutil.rmtree(self.fullpath(job))
-
-    async def contains(self, item):
-        result = await super().contains(item)
-        if not self.discard_empty:
-            return result
-        if not result:
-            return False
-        return bool(list(await aiofiles.os.listdir(self.fullpath(item))))
-
-    async def unfiltered_iter(self):
-        async for item in super().unfiltered_iter():
-            if self.discard_empty:
-                if bool(list(await aiofiles.os.listdir(self.fullpath(item)))):
-                    yield item
-            else:
-                yield item
 
 
 class RelatedItemRepository(Repository):
@@ -602,15 +564,15 @@ class InProcessBlobStream:
         self.job = job
         self.data = io.BytesIO(repo.data.get(job, b""))
 
-    async def read(self, n: Optional[int] = None) -> bytes:
+    async def read(self, n: int = -1, /) -> bytes:
         """Read up to ``n`` bytes from the stream."""
         return self.data.read(n)
 
-    async def write(self, data: bytes):
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
-        self.data.write(data)
+        return self.data.write(data)
 
-    async def close(self):
+    async def close(self) -> None:
         """Close and release the stream, syncing the data back to the repository."""
         self.repo.data[self.job] = self.data.getvalue()
 

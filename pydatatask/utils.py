@@ -1,28 +1,48 @@
 """Various utility classes and functions that are used throughout the codebase but don't belong anywhere in
 particular."""
 
-from typing import AsyncContextManager, List, Optional, Protocol
+from typing import (
+    AsyncContextManager,
+    AsyncIterator,
+    Callable,
+    Generic,
+    List,
+    Optional,
+    Protocol,
+    TypeVar,
+    Union,
+)
 import codecs
 
+_T = TypeVar("_T")
 
-class AReadStream(Protocol, AsyncContextManager):
+
+class AReadStream(Protocol):
     """A protocol for reading data from an asynchronous stream."""
 
-    async def read(self, n: Optional[int] = None) -> bytes:
+    async def read(self, n: int = -1, /) -> bytes:
         """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
 
     async def close(self) -> None:
         """Close and release the stream."""
 
 
-class AWriteStream(Protocol, AsyncContextManager):
+class AWriteStream(Protocol):
     """A protocol for writing data to an asynchronous stream."""
 
-    async def write(self, data: bytes):
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
 
     async def close(self) -> None:
         """Close and release the stream."""
+
+
+class AReadStreamManager(AReadStream, AsyncContextManager, Protocol):
+    """A protocol for reading data from an asynchronous stream with context management."""
+
+
+class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
+    """A protocol for writing data to an asynchronous stream with context management."""
 
 
 async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 1024):
@@ -63,7 +83,7 @@ class AReadText:
             result, self.buffer = self.buffer, ""
         return result
 
-    async def close(self):
+    async def close(self) -> None:
         """Close and release the stream."""
         await self.base.close()
 
@@ -86,7 +106,7 @@ class AWriteText:
         """Write ``data`` to the stream."""
         await self.base.write(data.encode(self.encoding, self.errors))
 
-    async def close(self):
+    async def close(self) -> None:
         """Close and release the stream."""
         await self.base.close()
 
@@ -120,3 +140,22 @@ async def roundrobin(iterables: List):
             iterables.pop(i)
         else:
             i += 1
+
+
+class asyncasynccontextmanager(Generic[_T]):
+    """Like asynccontextmanager but needs to be awaited first."""
+
+    def __init__(self, f: Callable[..., AsyncIterator[_T]]):
+        self.f = f
+        self.live: Optional[AsyncIterator[_T]] = None
+
+    async def __call__(self, *args, **kwargs) -> "asyncasynccontextmanager[_T]":
+        self.live = self.f(*args, **kwargs)
+        return self
+
+    async def __aenter__(self) -> _T:
+        assert self.live is not None
+        return await anext(self.live)
+
+    async def __aexit__(self, exc_type, exc_value, exc_tb):
+        pass

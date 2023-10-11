@@ -35,7 +35,7 @@ from pydatatask.host import LOCAL_HOST, Host
 from ..consts import _StderrIsStdout
 
 if TYPE_CHECKING:
-    from ..repository import AReadStream, AReadText, AWriteStream, AWriteText
+    from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
 
 __all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
 
@@ -111,18 +111,18 @@ class AbstractProcessManager(Executor):
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> "AReadStream":
+    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> "AReadStreamManager":
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> "AWriteStream":
+    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> "AWriteStreamManager":
         ...
 
     @abstractmethod
     async def open(
         self, path: Union[Path, str], mode: Literal["r", "rb", "w", "wb"]
-    ) -> Union["AReadText", "AWriteText", "AReadStream", "AWriteStream"]:
+    ) -> Union["AReadText", "AWriteText", "AReadStreamManager", "AWriteStreamManager"]:
         """Open the file on the target system for reading or writing according to the given mode."""
         raise NotImplementedError
 

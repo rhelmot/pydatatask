@@ -11,7 +11,7 @@ from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.session import Ephemeral
 from pydatatask.utils import AReadText, AWriteText
 
-from .base import BlobRepository, YamlMetadataRepository, job_getter
+from .base import BlobRepository, Repository, YamlMetadataRepository, job_getter
 
 
 class S3BucketBinaryWriter:
@@ -72,29 +72,40 @@ class S3BucketReader:
         await self.body.__aexit__(exc_type, exc_val, exc_tb)
 
 
-class S3BucketInfo:
-    """The data structure returned from :meth:`S3BucketRepository.info`.
+class S3BucketRepositoryBase(Repository):
+    """A base class for repositories that store their contents in S3-compatible buckets."""
 
-    :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
-               return this.
-    :ivar endpoint: The URL of the API server providing the S3 interface.
-    :ivar bucket: The name of the bucket objects are stored in.
-    :ivar prefix: How to prefix an object name such that it will fit into this repository.
-    :ivar suffix: How to suffix an object name such that it will fit into this repository.
-    """
-
-    def __init__(self, endpoint: str, uri: str, bucket: str, prefix: str, suffix: str):
-        self.endpoint = endpoint
-        self.uri = uri
-        self.prefix = prefix
-        self.suffix = suffix
+    def __init__(
+        self,
+        client: Ephemeral[S3Client],
+        bucket: str,
+        endpoints: Optional[Dict[Optional[Host], str]] = None,
+    ):
+        self._client = client
         self.bucket = bucket
+        self.endpoints = endpoints or {}
 
-    def __str__(self):
-        return self.uri
+    @property
+    def client(self):
+        """The aiobotocore S3 client.
+
+        This will raise an error if the client comes from a session which is not opened.
+        """
+        return self._client()
+
+    def get_endpoint(self, host: Host) -> str:
+        """Given a host, return the endpoint that makes sense."""
+        if host == LOCAL_HOST:
+            return self.client._endpoint.host  # type: ignore
+        endpoint = self.endpoints.get(host, None)
+        if endpoint is None:
+            endpoint = self.endpoints.get(None, None)
+        if endpoint is None:
+            raise ValueError(f"No endpoint specified from host {host}")
+        return endpoint
 
 
-class S3BucketRepository(BlobRepository):
+class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
     """A repository where keys are paths in a S3 bucket.
 
     Provides a streaming interface to the corresponding blobs.
@@ -121,20 +132,10 @@ class S3BucketRepository(BlobRepository):
         :param incluster_endpoint: Optional: An endpoint URL to provide as the result of info() queries instead of
                                    extracting the URL from ``client``.
         """
-        self._client = client
-        self.bucket = bucket
+        super().__init__(client, bucket, endpoints)
         self.prefix = prefix
         self.suffix = suffix
         self.mimetype = mimetype
-        self.endpoints = endpoints or {}
-
-    @property
-    def client(self):
-        """The aiobotocore S3 client.
-
-        This will raise an error if the client comes from a session which is not opened.
-        """
-        return self._client()
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"
@@ -166,17 +167,6 @@ class S3BucketRepository(BlobRepository):
     def object_name(self, job):
         """Return the object name for the given job."""
         return f"{self.prefix}{job}{self.suffix}"
-
-    def get_endpoint(self, host: Host) -> str:
-        """Given a host, return the endpoint that makes sense."""
-        if host == LOCAL_HOST:
-            return self.client._endpoint.host  # type: ignore
-        endpoint = self.endpoints.get(host, None)
-        if endpoint is None:
-            endpoint = self.endpoints.get(None, None)
-        if endpoint is None:
-            raise ValueError(f"No endpoint specified from host {host}")
-        return endpoint
 
     @overload
     async def open(self, job: str, mode: Literal["r"]) -> AReadText:
