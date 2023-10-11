@@ -45,7 +45,7 @@ class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
     """A protocol for writing data to an asynchronous stream with context management."""
 
 
-async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 1024):
+async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 16):
     """Stream data from ``copyfrom`` to ``copyto``."""
     while True:
         data = await copyfrom.read(blocksize)

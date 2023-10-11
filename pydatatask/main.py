@@ -335,8 +335,8 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
     if isinstance(item, BlobRepository):
         async with await item.open(job, "wb") as fp:
             while True:
-                data_bytes = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.buffer.read, 1024 * 1024)
-                if not data:
+                data_bytes = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.buffer.read, 1024 * 16)
+                if not data_bytes:
                     break
                 await fp.write(data_bytes)
     elif isinstance(item, MetadataRepository):

@@ -26,6 +26,12 @@ def _allocate_local_blob() -> Dispatcher:
     return Dispatcher("File", {"basedir": basedir})
 
 
+def _allocate_local_fs() -> Dispatcher:
+    Path("/tmp/pydatatask").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    return Dispatcher("Directory", {"basedir": basedir})
+
+
 def default_allocators_temp() -> Dict[str, Callable[[], Dispatcher]]:
     return {
         "MetadataRepository": _allocate_temp_meta,
@@ -37,6 +43,7 @@ def default_allocators_local() -> Dict[str, Callable[[], Dispatcher]]:
     return {
         "MetadataRepository": _allocate_local_meta,
         "BlobRepository": _allocate_local_blob,
+        "FilesystemRepository": _allocate_local_fs,
     }
 
 
