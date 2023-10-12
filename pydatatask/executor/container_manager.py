@@ -132,16 +132,22 @@ class DockerContainerManager(AbstractContainerManager):
             name=self._id_to_name(task, job),
         )
 
+    @staticmethod
+    def _parse_docker_timestamp(ts: str) -> datetime:
+        ts = ts[:26] + ts[29:]
+        ts = ts.replace("Z", "+0000")
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f%z")
+
     async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers))
         live = [
             (info, self._name_to_id(task, info["Name"]))
             for info in infos
-            if not info["State"]["Dead"] and not info["State"]["OOMKilled"]
+            # if not info["State"]["Status"] in ('exited',)
         ]
         return {
-            name: datetime.fromisoformat(info["State"]["StartedAt"])
+            name: self._parse_docker_timestamp(info["State"]["StartedAt"])
             for info, name in live
             if name is not None and (job is None or name == job)
         }
@@ -159,7 +165,7 @@ class DockerContainerManager(AbstractContainerManager):
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
-            if not info["State"]["Dead"] and not info["State"]["OOMKilled"] and name is not None
+            if info["State"]["Status"] in ("exited",) and name is not None
         ]
         results = await asyncio.gather(*(self._cleanup(container, info) for info, container, _ in dead))
         return activity, {name: result for (_, _, name), result in zip(dead, results)}

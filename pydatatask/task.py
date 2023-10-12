@@ -38,6 +38,7 @@ import copy
 import inspect
 import logging
 import os
+import shlex
 import sys
 import traceback
 
@@ -60,7 +61,7 @@ from .consts import STDOUT, _StderrIsStdout
 from .executor.pod_manager import PodManager
 from .executor.proc_manager import AbstractProcessManager, localhost_manager
 from .quota import Quota, QuotaManager, localhost_quota_manager
-from .utils import async_copyfile
+from .utils import async_copyfile, supergetattr, supergetattr_path
 
 l = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ async def render_template(template, env: Dict[str, Any]):
         enable_async=True,
         keep_trailing_newline=True,
     )
+    j.filters["shquote"] = shlex.quote
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
         async with aiofiles.open(template, "r") as fp:
@@ -194,16 +196,13 @@ class Task(ABC):
         """
         return self.host.mk_http_post(filename, url, headers)
 
-    @property
-    def ready(self):
+    def _make_ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be
         launched.
 
-        If an override is provided to the constructor, this is that, otherwise it is
+        If an override is not provided to the constructor, this is that, otherwise it is
         ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
         """
-        if self._ready is not None:
-            return self._ready
         return repomodule.BlockingRepository(
             repomodule.AggregateAndRepository(**self.required_for_start),
             repomodule.AggregateOrRepository(**self.inhibits_start),
@@ -306,40 +305,78 @@ class Task(ABC):
                     )
                 self.link(name, repo, link.kind, link.key, **link_attrs)
 
+    def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":
+        if seen is None:
+            seen = set()
+        if linkname in seen:
+            raise ValueError("Infinite recursion in repository related key lookup")
+        link = self.links[linkname]
+        if link.key is None:
+            return link.repo
+
+        splitkey = link.key.split(".")
+        related = self._repo_related(splitkey[0], seen)
+        if not isinstance(related, repomodule.MetadataRepository):
+            raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
+
+        async def mapper(info):
+            return supergetattr_path(info, splitkey[1:])
+
+        mapped = related.map(mapper)
+        if isinstance(link.repo, repomodule.MetadataRepository):
+            return repomodule.RelatedItemMetadataRepository(link.repo, mapped)
+        else:
+            return repomodule.RelatedItemRepository(link.repo, mapped)
+
+    @property
+    def ready(self):
+        """Return the repository whose job membership is used to determine whether a task instance should be
+        launched.
+
+        If an override is provided to the constructor, this is that, otherwise it is
+        ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
+        """
+        if self._ready is not None:
+            return self._ready
+        return repomodule.BlockingRepository(
+            repomodule.AggregateAndRepository(**self.required_for_start),
+            repomodule.AggregateOrRepository(**self.inhibits_start),
+        )
+
     @property
     def input(self):
         """A mapping from link name to repository for all links marked ``is_input``."""
-        return {name: link.repo for name, link in self.links.items() if link.is_input}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.is_input}
 
     @property
     def output(self):
         """A mapping from link name to repository for all links marked ``is_output``."""
-        return {name: link.repo for name, link in self.links.items() if link.is_output}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.is_output}
 
     @property
     def status(self):
         """A mapping from link name to repository for all links marked ``is_status``."""
-        return {name: link.repo for name, link in self.links.items() if link.is_status}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.is_status}
 
     @property
     def inhibits_start(self):
         """A mapping from link name to repository for all links marked ``inhibits_start``."""
-        return {name: link.repo for name, link in self.links.items() if link.inhibits_start}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.inhibits_start}
 
     @property
     def required_for_start(self):
         """A mapping from link name to repository for all links marked ``required_for_start``."""
-        return {name: link.repo for name, link in self.links.items() if link.required_for_start}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_start}
 
     @property
     def inhibits_output(self):
         """A mapping from link name to repository for all links marked ``inhibits_output``."""
-        return {name: link.repo for name, link in self.links.items() if link.inhibits_output}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.inhibits_output}
 
     @property
     def required_for_output(self):
         """A mapping from link name to repository for all links marked ``required_for_output``."""
-        return {name: link.repo for name, link in self.links.items() if link.required_for_output}
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_output}
 
     async def validate(self):
         """Raise an exception if for any reason the task is misconfigured.
@@ -371,12 +408,6 @@ class Task(ABC):
         Returns the environment, a list of preambles, and a list of epilogues. These may be of any type depending on the
         task type.
         """
-
-        def supergetattr(item, key):
-            try:
-                return getattr(item, key)
-            except AttributeError:
-                return item[key]
 
         def subkey(items: List[str]):
             src = result[items[0]]
@@ -1368,6 +1399,13 @@ class ContainerTask(Task):
             self.link("logs", logs, is_output=True)
         if done is not None:
             self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
+        self.link(
+            "live",
+            repomodule.LiveContainerRepository(self),
+            is_status=True,
+            inhibits_start=True,
+            inhibits_output=True,
+        )
 
     @property
     def host(self):
@@ -1429,3 +1467,7 @@ class ContainerTask(Task):
             self.mount_directives[job].append((arg.arg, internal_filepath))
             arg.arg = internal_filepath
             arg.file_host = None
+
+        if kind == LinkKind.OutputFilepath:
+            arg.epilogue = f"chmod -R a+w {arg.arg}"
+        return arg

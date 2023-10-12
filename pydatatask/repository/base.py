@@ -129,6 +129,35 @@ class Repository(ABC):
         This will be automatically called by the pipeline on opening.
         """
 
+
+class MetadataRepository(Repository, ABC):
+    """A metadata repository has values which are small, structured data, and loads them entirely into memory,
+    returning the structured data from the `info` method."""
+
+    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+        if kind != taskmodule.LinkKind.InputMetadata:
+            return await super().template(job, task, kind)
+        info = await self.info(job)
+        return taskmodule.TemplateInfo(info)
+
+    @abstractmethod
+    async def info(self, job: str) -> Any:
+        """Retrieve the data with key ``job`` from the repository."""
+        raise NotImplementedError
+
+    async def info_all(self) -> Dict[str, Any]:
+        """Produce a mapping from every job present in the repository to its corresponding info.
+
+        The default implementation is somewhat inefficient; please override it if there is a more effective way to load
+        all info.
+        """
+        return {job: await self.info(job) async for job in self}
+
+    @abstractmethod
+    async def dump(self, job, data):
+        """Insert ``data`` into the repository with key ``job``."""
+        raise NotImplementedError
+
     def map(
         self, func: Callable, filt: Optional[Callable[[str], Awaitable[bool]]] = None, allow_deletes=False
     ) -> "MapRepository":
@@ -136,13 +165,13 @@ class Repository(ABC):
         return MapRepository(self, func, filt, allow_deletes=allow_deletes)
 
 
-class MapRepository(Repository):
+class MapRepository(MetadataRepository):
     """A MapRepository is a repository which uses arbitrary functions to map and filter results from a base
     repository."""
 
     def __init__(
         self,
-        base: Repository,
+        base: MetadataRepository,
         func: Callable[[taskmodule.TemplateInfo], Awaitable[taskmodule.TemplateInfo]],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
@@ -174,36 +203,25 @@ class MapRepository(Repository):
                 yield item
 
     async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        return await self.func(await self.base.template(job, task, kind))
+        raise TypeError("Not supported yet")
 
-
-class MetadataRepository(Repository, ABC):
-    """A metadata repository has values which are small, structured data, and loads them entirely into memory,
-    returning the structured data from the `info` method."""
-
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind)
-        info = await self.info(job)
-        return taskmodule.TemplateInfo(info)
-
-    @abstractmethod
-    async def info(self, job: str) -> Any:
-        """Retrieve the data with key ``job`` from the repository."""
-        raise NotImplementedError
+    async def info(self, job):
+        return await self.func(await self.base.info(job))
 
     async def info_all(self) -> Dict[str, Any]:
-        """Produce a mapping from every job present in the repository to its corresponding info.
+        result = await self.base.info_all()
+        to_remove = []
+        for k, v in result.items():
+            if self.filter is None or await self.filter(k):
+                result[k] = await self.func(v)
+            else:
+                to_remove.append(k)
+        for k in to_remove:
+            result.pop(k)
+        return result
 
-        The default implementation is somewhat inefficient; please override it if there is a more effective way to load
-        all info.
-        """
-        return {job: await self.info(job) async for job in self}
-
-    @abstractmethod
-    async def dump(self, job, data):
-        """Insert ``data`` into the repository with key ``job``."""
-        raise NotImplementedError
+    async def dump(self, job: str, data: Any):
+        raise TypeError("Do not try to dump into a map repository lol")
 
 
 class BlobRepository(Repository, ABC):
@@ -351,19 +369,6 @@ class RelatedItemRepository(Repository):
 
         await self.base_repository.delete(basename)
 
-    @job_getter
-    async def info(self, job):
-        """Perform the info lookup for the base repository.
-
-        This only works if the base repository is a metadata repository.
-        """
-        assert isinstance(self.base_repository, MetadataRepository)
-        basename = await self._lookup(job)
-        if basename is None:
-            raise LookupError(job)
-
-        return await self.base_repository.info(basename)
-
     def __getattr__(self, item):
         v = getattr(self.base_repository, item)
         if not getattr(v, "is_job_getter", False):
@@ -383,6 +388,39 @@ class RelatedItemRepository(Repository):
             basename = await self._lookup(item)
             if basename is not None and basename in base_contents:
                 yield item
+
+
+class RelatedItemMetadataRepository(RelatedItemRepository, MetadataRepository):
+    """It's a `RelatedItemRepository` but additionally a `MetadataRepository`.
+
+    Neat!
+    """
+
+    base_repository: MetadataRepository
+
+    def __init__(
+        self,
+        base_repository: MetadataRepository,
+        translator_repository: MetadataRepository,
+        allow_deletes=False,
+        prefetch_lookup=True,
+    ):
+        super().__init__(
+            base_repository, translator_repository, allow_deletes=allow_deletes, prefetch_lookup=prefetch_lookup
+        )
+
+    @job_getter
+    async def info(self, job):
+        """Perform the info lookup for the base repository."""
+        assert isinstance(self.base_repository, MetadataRepository)
+        basename = await self._lookup(job)
+        if basename is None:
+            raise LookupError(job)
+
+        return await self.base_repository.info(basename)
+
+    async def dump(self, job: str, data: Any):
+        raise TypeError("Simply don't!")
 
 
 class AggregateAndRepository(Repository):

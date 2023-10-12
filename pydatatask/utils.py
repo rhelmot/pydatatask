@@ -2,6 +2,7 @@
 particular."""
 
 from typing import (
+    Any,
     AsyncContextManager,
     AsyncIterator,
     Callable,
@@ -159,3 +160,18 @@ class asyncasynccontextmanager(Generic[_T]):
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
         pass
+
+
+def supergetattr(item: Any, key: str) -> Any:
+    """Like getattr but also tries getitem."""
+    try:
+        return getattr(item, key)
+    except AttributeError:
+        return item[key]
+
+
+def supergetattr_path(item: Any, keys: List[str]) -> Any:
+    """Calls supergetattr repeatedly for each key in a list."""
+    for key in keys:
+        item = supergetattr(item, key)
+    return item

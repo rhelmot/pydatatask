@@ -1,4 +1,5 @@
-"""This module contains repositories for viewing the current state of a kubernetes cluster as a data store."""
+"""This module contains repositories for viewing the current state of a kubernetes cluster or other container runner
+as a data store."""
 
 from typing import TYPE_CHECKING, List
 
@@ -7,7 +8,7 @@ from kubernetes_asyncio.client import V1Pod
 from .base import Repository
 
 if TYPE_CHECKING:
-    from ..task import KubeTask
+    from ..task import ContainerTask, KubeTask
 
 
 class LiveKubeRepository(Repository):
@@ -41,3 +42,27 @@ class LiveKubeRepository(Repository):
             await self.task.delete(pod)
         # while await self.task.podman.query(job=job, task=self.task.name):
         #    await asyncio.sleep(0.2)
+
+
+class LiveContainerRepository(Repository):
+    """A repository where keys translate to containers running in a container executor.
+
+    This repository is constructed automatically by a `ContainerTask` or subclass and is linked as the ``live`` repository. Do not construct this class manually.
+    """
+
+    def __init__(self, task: "ContainerTask"):
+        self.task = task
+
+    async def unfiltered_iter(self):
+        for name in await self.task.manager.live(self.task.name):
+            yield name
+
+    async def contains(self, item):
+        return item in await self.task.manager.live(self.task.name)
+
+    def __repr__(self):
+        return f"<LiveKubeRepository task={self.task.name}>"
+
+    async def delete(self, job):
+        """Deleting a job from this repository will delete the pod."""
+        await self.task.manager.kill(self.task.name, job)
