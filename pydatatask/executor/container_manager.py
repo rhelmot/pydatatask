@@ -6,6 +6,7 @@ import asyncio
 
 from kubernetes_asyncio.client import V1Pod
 import aiodocker.containers
+import dateutil.parser
 
 from pydatatask.executor import Executor
 from pydatatask.host import LOCAL_HOST, Host
@@ -132,12 +133,6 @@ class DockerContainerManager(AbstractContainerManager):
             name=self._id_to_name(task, job),
         )
 
-    @staticmethod
-    def _parse_docker_timestamp(ts: str) -> datetime:
-        ts = ts[:26] + ts[29:]
-        ts = ts.replace("Z", "+0000")
-        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f%z")
-
     async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers))
@@ -147,7 +142,7 @@ class DockerContainerManager(AbstractContainerManager):
             # if not info["State"]["Status"] in ('exited',)
         ]
         return {
-            name: self._parse_docker_timestamp(info["State"]["StartedAt"])
+            name: dateutil.parser.isoparse(info["State"]["StartedAt"])
             for info, name in live
             if name is not None and (job is None or name == job)
         }

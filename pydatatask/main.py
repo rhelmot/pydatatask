@@ -32,8 +32,12 @@ import logging
 import re
 import sys
 
+import aiofiles
 import IPython
 import yaml
+
+from pydatatask.repository.filesystem import FilesystemRepository
+from pydatatask.utils import async_copyfile
 
 from .pipeline import Pipeline
 from .repository import BlobRepository, MetadataRepository, Repository
@@ -314,15 +318,14 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
 
     if isinstance(item, BlobRepository):
         async with await item.open(job, "rb") as fp:
-            while True:
-                data_bytes = await fp.read(4096)
-                if not data_bytes:
-                    break
-                await asyncio.get_running_loop().run_in_executor(None, sys.stdout.buffer.write, data_bytes)
+            await async_copyfile(aiofiles.stdout_bytes, fp)
     elif isinstance(item, MetadataRepository):
         data_bytes = await item.info(job)
         data_str = yaml.safe_dump(data_bytes, None)
         await asyncio.get_running_loop().run_in_executor(None, sys.stdout.write, data_str)
+
+    elif isinstance(item, FilesystemRepository):
+        await item.get_tarball(job, aiofiles.stdout_bytes)
     else:
         print("Error: cannot cat a repository which is not a blob or metadata")
         return 1

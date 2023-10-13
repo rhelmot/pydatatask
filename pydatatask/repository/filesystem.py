@@ -16,9 +16,11 @@ from hashlib import sha256
 from itertools import filterfalse, tee
 from pathlib import Path
 import abc
+import asyncio
 import logging
 import os
 import stat
+import sys
 import tarfile
 
 from aiofiles.threadpool import open as aopen
@@ -28,7 +30,14 @@ import aioshutil
 
 from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import BlobRepository, MetadataRepository, job_getter
-from pydatatask.utils import AReadStream, async_copyfile, asyncasynccontextmanager
+from pydatatask.utils import (
+    AReadStream,
+    AsyncReaderQueueStream,
+    AWriteStream,
+    QueueStream,
+    async_copyfile,
+    asyncasynccontextmanager,
+)
 
 l = logging.getLogger(__name__)
 
@@ -63,6 +72,7 @@ class FilesystemEntry:
     data: Optional[AReadStream] = None
     link_target: Optional[str] = None
     content_hash: Optional[str] = None
+    content_size: Optional[int] = None
 
 
 class FilesystemRepository(abc.ABC):
@@ -72,13 +82,23 @@ class FilesystemRepository(abc.ABC):
     """
 
     @abc.abstractmethod
-    def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str]]]:
-        """The os.walk interface but for the repository."""
+    def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
+        """The os.walk interface but for the repository, but returns three lists - dirs, nondirs, symlinks"""
         raise NotImplementedError
 
     @abc.abstractmethod
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         """Given a path, get the type of the file at that path."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def readlink(self, job: str, path: str) -> str:
+        """Given a path to a symlink, return the path it points to."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, str]:
+        """Given a path to a regular file, return the filessize and content hash."""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -114,23 +134,67 @@ class FilesystemRepository(abc.ABC):
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
-        async for rtop, dirs, nondirs in self.walk(job):
+        async for rtop, dirs, regulars, symlinks in self.walk(job):
             rtopp = Path(rtop)
-            for dirname in dirs:
-                fullname = rtopp / dirname
+            for name in dirs:
+                fullname = rtopp / name
                 yield FilesystemEntry(str(fullname), FilesystemType.DIRECTORY)
-            for nondirname in nondirs:
-                fullname = rtopp / nondirname
-                if fullname.is_symlink():
-                    yield FilesystemEntry(str(fullname), FilesystemType.SYMLINK, link_target=str(fullname.readlink()))
-                elif fullname.is_file():
-                    async with await self.open(job, fullname) as fp:
-                        yield FilesystemEntry(str(fullname), FilesystemType.FILE, data=fp)
-                else:
-                    l.warning("Found inappropriate file %s", rtopp / nondirname)
+            for name in symlinks:
+                fullname = rtopp / name
+                target = await self.readlink(job, str(fullname))
+                yield FilesystemEntry(str(fullname), FilesystemType.SYMLINK, link_target=target)
+            for name in regulars:
+                fullname = rtopp / name
+                size, contenthash = await self.get_regular_meta(job, str(fullname))
+                async with await self.open(job, fullname) as fp:
+                    yield FilesystemEntry(
+                        str(fullname), FilesystemType.FILE, data=fp, content_size=size, content_hash=contenthash
+                    )
 
-    # async def get_tarball(self, job: str) -> tarfile.TarFile:
-    #    pass  # will cross that bridge
+    async def get_tarball(self, job: str, dest: AWriteStream):
+        queue = AsyncReaderQueueStream()
+        typed_queue: IO[bytes] = queue  # type: ignore ...
+
+        async def producer():
+            tar = tarfile.open(mode="w", fileobj=typed_queue)
+            async for member in self.iter_members(job):
+                info = tarfile.TarInfo(member.name)
+                data = None
+                pproducer = ()
+                if member.type == FilesystemType.FILE:
+                    info.type = tarfile.REGTYPE
+                    assert member.content_size is not None
+                    info.size = member.content_size
+                    inner_queue = QueueStream()
+                    data = inner_queue
+
+                    async def _pproducer():
+                        assert member.data is not None
+                        while True:
+                            bytes_data = await member.data.read(1024 * 16)
+                            if not bytes_data:
+                                break
+                            inner_queue.write(bytes_data)
+                        inner_queue.close()
+
+                    pproducer = (_pproducer(),)
+
+                elif member.type == FilesystemType.SYMLINK:
+                    assert member.link_target is not None
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = member.link_target
+
+                elif member.type == FilesystemType.DIRECTORY:
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+
+                await asyncio.gather(
+                    asyncio.get_running_loop().run_in_executor(None, lambda: tar.addfile(info, data)), *pproducer
+                )
+            tar.close()
+            queue.close()
+
+        await asyncio.gather(producer(), async_copyfile(queue, dest))
 
 
 # https://github.com/Tinche/aiofiles/issues/167
@@ -230,12 +294,30 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             else:
                 yield item
 
-    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str]]]:
+    async def readlink(self, job: str, path: str) -> str:
+        """Given a path to a symlink, return the path it points to."""
+        return str((self.fullpath(job) / path).readlink())
+
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, str]:
+        """Given a path to a regular file, return the filesize and content hash."""
+        size = 0
+        h = sha256()
+        async with aiofiles.open(self.fullpath(job) / path, "rb") as fp:
+            while True:
+                data = await fp.read(1024 * 16)
+                if not data:
+                    break
+                h.update(data)
+                size += len(data)
+        return size, h.hexdigest()
+
+    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         root = self.fullpath(job)
         async for top, dirs, nondirs in _walk(root):
             ttop = Path(top)
             rtop = ttop.relative_to(root)
-            yield str(rtop), dirs, nondirs
+            regs, links = partition(lambda path: (Path(top) / path).is_symlink(), nondirs)
+            yield str(rtop), dirs, list(regs), list(links)
 
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         r = os.stat(os.path.join(self.fullpath(job), path))
@@ -296,11 +378,10 @@ class ContentAddressedBlobRepository(FilesystemRepository):
     """A repository which uses a blob repository and a metadata repository to store files in a deduplicated
     fashion."""
 
-    def __init__(self, blobs: BlobRepository, meta: MetadataRepository, pathsep="/", hasher=sha256):
+    def __init__(self, blobs: BlobRepository, meta: MetadataRepository, pathsep="/"):
         self.blobs = blobs
         self.meta = meta
         self.pathsep = pathsep
-        self.hasher = hasher
 
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str]]]:
         meta = await self.meta.info(job)
@@ -390,23 +471,27 @@ class ContentAddressedBlobRepository(FilesystemRepository):
                     submeta["type"] = "FILE"
                     if entry.content_hash is None:
                         all_content = await entry.data.read()  # uhhhhhhhhhhhhhhhhhhhhhh not good
-                        hash_content = self.hasher(all_content).hexdigest()
+                        hash_content = sha256(all_content).hexdigest()
                         async with await self.blobs.open(hash_content, "wb") as fp:
                             await fp.write(all_content)
+                        size = len(all_content)
                     else:
                         hash_content = entry.content_hash
-                        h = self.hasher()
+                        h = sha256()
+                        size = 0
                         async with await self.blobs.open(hash_content, "wb") as fp:
                             while True:
                                 data = await entry.data.read(1024 * 16)
                                 if not data:
                                     break
                                 h.update(data)
+                                size += len(data)
                                 await fp.write(data)
                         if h.hexdigest() != hash_content:
                             raise ValueError("Bad content hash")
 
                     submeta["content"] = hash_content
+                    submeta["size"] = size
         except GeneratorExit:
             pass
 
@@ -438,3 +523,21 @@ class ContentAddressedBlobRepository(FilesystemRepository):
                 return await self._open(job, clpath, link_level + 1)
             if child["type"] == "FILE":
                 return await self.blobs.open(child["content"], "rb")
+
+    async def readlink(self, job: str, path: str) -> str:
+        meta = await self.meta.info(job)
+        ppath = self._splitpath(path)
+        child = self._follow_path(meta, ppath)
+        if child["type"] != "SYMLINK":
+            raise ValueError("Not a symlink")
+
+        return child["link_target"]
+
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, str]:
+        meta = await self.meta.info(job)
+        ppath = self._splitpath(path)
+        child = self._follow_path(meta, ppath)
+        if child["type"] != "FILE":
+            raise ValueError("Not a regular file")
+
+        return child["size"], child["content"]

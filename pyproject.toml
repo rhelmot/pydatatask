@@ -31,6 +31,7 @@ dependencies = [
     "aiodocker",
     "sonyflake-py",
     "importlib_metadata",
+    "python-dateutil"
 ]
 
 [project.optional-dependencies]

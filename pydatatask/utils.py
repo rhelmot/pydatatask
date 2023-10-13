@@ -2,9 +2,11 @@
 particular."""
 
 from typing import (
+    IO,
     Any,
     AsyncContextManager,
     AsyncIterator,
+    Awaitable,
     Callable,
     Generic,
     List,
@@ -13,9 +15,32 @@ from typing import (
     TypeVar,
     Union,
 )
+from io import BytesIO
+import asyncio
 import codecs
+import time
 
 _T = TypeVar("_T")
+
+
+class ReadStream(Protocol):
+    """A protocol for reading data from a stream."""
+
+    def read(self, n: int = -1, /) -> bytes:
+        """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+
+    def close(self) -> Any:
+        """Close and release the stream."""
+
+
+class WriteStream(Protocol):
+    """A protocol for writing data to an stream."""
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``data`` to the stream."""
+
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
 
 
 class AReadStream(Protocol):
@@ -24,7 +49,7 @@ class AReadStream(Protocol):
     async def read(self, n: int = -1, /) -> bytes:
         """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
 
-    async def close(self) -> None:
+    def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
 
 
@@ -34,7 +59,7 @@ class AWriteStream(Protocol):
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
 
-    async def close(self) -> None:
+    def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
 
 
@@ -143,16 +168,9 @@ async def roundrobin(iterables: List):
             i += 1
 
 
-class asyncasynccontextmanager(Generic[_T]):
-    """Like asynccontextmanager but needs to be awaited first."""
-
-    def __init__(self, f: Callable[..., AsyncIterator[_T]]):
-        self.f = f
-        self.live: Optional[AsyncIterator[_T]] = None
-
-    async def __call__(self, *args, **kwargs) -> "asyncasynccontextmanager[_T]":
-        self.live = self.f(*args, **kwargs)
-        return self
+class _AACM(Generic[_T]):
+    def __init__(self, live: AsyncIterator[_T]):
+        self.live = live
 
     async def __aenter__(self) -> _T:
         assert self.live is not None
@@ -160,6 +178,15 @@ class asyncasynccontextmanager(Generic[_T]):
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
         pass
+
+
+def asyncasynccontextmanager(f: Callable[..., AsyncIterator[_T]]) -> Callable[..., Awaitable[AsyncContextManager[_T]]]:
+    """Like asynccontextmanager but needs to be awaited first."""
+
+    async def inner(*args, **kwargs):
+        return _AACM(f(*args, **kwargs))
+
+    return inner
 
 
 def supergetattr(item: Any, key: str) -> Any:
@@ -175,3 +202,83 @@ def supergetattr_path(item: Any, keys: List[str]) -> Any:
     for key in keys:
         item = supergetattr(item, key)
     return item
+
+
+class AsyncReaderQueueStream:
+    def __init__(self):
+        self.buffer: List[Optional[bytes]] = []
+        self.readptr = (0, 0)
+        self.closed = False
+
+    def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        self.buffer.append(bytes(data))
+        return len(data)
+
+    def close(self) -> Any:
+        self.closed = True
+        r = asyncio.Future()
+        r.set_result(None)
+        return r
+
+    async def read(self, size: int = -1, /) -> bytes:
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self.closed:
+                    break
+                await asyncio.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+    def tell(self) -> int:
+        return 0
+
+
+class QueueStream(IO[bytes]):
+    def __init__(self):
+        self.buffer: List[Optional[bytes]] = []
+        self.readptr = (0, 0)
+
+    def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        self.buffer.append(bytes(data))
+        return len(data)
+
+    def read(self, size: int = -1, /) -> bytes:
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self.closed:
+                    break
+                time.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
