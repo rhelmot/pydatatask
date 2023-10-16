@@ -12,7 +12,6 @@ from typing import (
     Generic,
     List,
     Optional,
-    ParamSpec,
     Protocol,
     TypeVar,
     Union,
@@ -21,7 +20,7 @@ import asyncio
 import codecs
 import time
 
-from typing_extensions import Buffer
+from typing_extensions import Buffer, ParamSpec
 
 _T = TypeVar("_T")
 

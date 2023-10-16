@@ -152,9 +152,15 @@ def main(
     parser_launch.add_argument("--sync", action="store_true", help="Run the task in-process, if possible")
     parser_launch.add_argument(
         "--meta",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        action="store_true",
+        default=False,
         help="Store metadata related to task completion",
+    )
+    parser_launch.add_argument(
+        "--no-meta",
+        action="store_false",
+        help="Do not store metadata related to task completion",
+        dest="meta",
     )
     parser_launch.set_defaults(func=launch)
 

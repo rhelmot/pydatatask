@@ -49,8 +49,7 @@ dev = [
     "pre-commit",
 ]
 type = [
-    "mypy",
-    "kubernetes-typed",
+    "mypy>=1.6.0",
     "types-pyyaml",
     "networkx-stubs",
     "types-aiofiles",
@@ -90,9 +89,18 @@ packages = ["pydatatask"]
 [tool.setuptools.dynamic]
 version = {attr = "pydatatask.__version__"}
 
+[tool.mypy]
+python_version = "3.8"
+
 # https://github.com/tomplus/kubernetes_asyncio/issues/230
 [[tool.mypy.overrides]]
 module = "kubernetes_asyncio.*"
+ignore_missing_imports = true
+
+# https://github.com/gordonbondon/kubernetes-typed/issues/22
+# https://github.com/kubernetes-client/python/issues/2033
+[[tool.mypy.overrides]]
+module = "kubernetes.*"
 ignore_missing_imports = true
 
 # lol

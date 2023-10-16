@@ -14,6 +14,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -427,7 +428,7 @@ class Task(ABC):
         epilogue = []
 
         result = {}
-        pending: defaultdict[str, List[Tuple[str, Link]]] = defaultdict(list)
+        pending: DefaultDict[str, List[Tuple[str, Link]]] = defaultdict(list)
         for env_name, link in env_src.items():
             if not isinstance(link, Link):
                 result[env_name] = link
@@ -1396,7 +1397,7 @@ class ContainerTask(Task):
         self._manager: Optional[AbstractContainerManager] = None
         self.warned = False
         self.window = window
-        self.mount_directives: defaultdict[str, List[Tuple[str, str]]] = defaultdict(list)
+        self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
 
         self.quota_manager.register(self._get_load)
 

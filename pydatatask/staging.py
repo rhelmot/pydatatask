@@ -116,8 +116,8 @@ class PipelineChildArgs:
         for imp_name, imp_args in self.imports.items():
             subresult, subrepos, subexecutors = imp_args.specify(prefix=f"{imp_name}_{prefix}")
             result.imports[imp_name] = subresult
-            result_executors |= subexecutors
-            result_repos |= subrepos
+            result_executors.update(subexecutors)
+            result_repos.update(subrepos)
         return result, result_repos, result_executors
 
 
@@ -230,26 +230,32 @@ class PipelineStaging:
                 if imp.path is None:
                     raise TypeError("Import clause must specify path to import")
                 child_params = PipelineChildArgs()
-                child_params.repos |= {
-                    param_name: self.spec.repos[sat_name]
-                    for param_name, sat_name in imp.repos.items()
-                    if sat_name in self.spec.repos
-                }
-                child_params.repos |= {
-                    param_name: self.repos_fulfilled_by_parents[sat_name]
-                    for param_name, sat_name in imp.repos.items()
-                    if sat_name in self.spec.repo_classes and sat_name in self.repos_fulfilled_by_parents
-                }
+                child_params.repos.update(
+                    {
+                        param_name: self.spec.repos[sat_name]
+                        for param_name, sat_name in imp.repos.items()
+                        if sat_name in self.spec.repos
+                    }
+                )
+                child_params.repos.update(
+                    {
+                        param_name: self.repos_fulfilled_by_parents[sat_name]
+                        for param_name, sat_name in imp.repos.items()
+                        if sat_name in self.spec.repo_classes and sat_name in self.repos_fulfilled_by_parents
+                    }
+                )
                 if imp_name in params.imports:
-                    child_params.repos |= params.imports[imp_name].repos
+                    child_params.repos.update(params.imports[imp_name].repos)
 
-                child_params.executors |= {
-                    param_name: self.spec.executors[sat_name]
-                    for param_name, sat_name in imp.executors.items()
-                    if sat_name in self.spec.executors
-                }
+                child_params.executors.update(
+                    {
+                        param_name: self.spec.executors[sat_name]
+                        for param_name, sat_name in imp.executors.items()
+                        if sat_name in self.spec.executors
+                    }
+                )
                 if imp_name in params.imports:
-                    child_params.executors |= params.imports[imp_name].executors
+                    child_params.executors.update(params.imports[imp_name].executors)
 
                 self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
 
@@ -309,7 +315,11 @@ class PipelineStaging:
             repos = {name: repo_constructor(asdict(value)) for name, value in staging.spec.repos.items()}
             repo_cache.update({id(staging.spec.repos[name]): repo for name, repo in repos.items()})
 
-            hosts = {name: host_constructor(asdict(val) | {"name": name}) for name, val in staging.spec.hosts.items()}
+            def nameit(d, name):
+                d["name"] = name
+                return d
+
+            hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in staging.spec.hosts.items()}
 
             executor_constructor = build_executor_picker(hosts, ephemerals)
             executors = {name: executor_constructor(asdict(value)) for name, value in staging.spec.executors.items()}

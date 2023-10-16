@@ -296,7 +296,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
 
     async def readlink(self, job: str, path: str) -> str:
         """Given a path to a symlink, return the path it points to."""
-        return str((self.fullpath(job) / path).readlink())
+        return os.readlink(self.fullpath(job) / path)
 
     async def get_regular_meta(self, job: str, path: str) -> Tuple[int, str]:
         """Given a path to a regular file, return the filesize and content hash."""
