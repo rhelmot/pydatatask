@@ -33,6 +33,7 @@ dependencies = [
     "importlib_metadata",
     "python-dateutil",
     "typing-extensions>=4.8.0",
+    "aiohttp>=3.9.0b0",
 ]
 
 [project.optional-dependencies]

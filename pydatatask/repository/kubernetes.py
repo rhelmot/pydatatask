@@ -47,7 +47,7 @@ class LiveKubeRepository(Repository):
 class LiveContainerRepository(Repository):
     """A repository where keys translate to containers running in a container executor.
 
-    This repository is constructed automatically by a `ContainerTask` or subclass and is linked as the ``live``
+    This repository is constructed automatically by a :class:`ContainerTask` or subclass and is linked as the ``live``
     repository. Do not construct this class manually.
     """
 
