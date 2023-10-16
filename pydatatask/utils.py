@@ -8,17 +8,20 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Coroutine,
     Generic,
     List,
     Optional,
+    ParamSpec,
     Protocol,
     TypeVar,
     Union,
 )
-from io import BytesIO
 import asyncio
 import codecs
 import time
+
+from typing_extensions import Buffer
 
 _T = TypeVar("_T")
 
@@ -180,7 +183,12 @@ class _AACM(Generic[_T]):
         pass
 
 
-def asyncasynccontextmanager(f: Callable[..., AsyncIterator[_T]]) -> Callable[..., Awaitable[AsyncContextManager[_T]]]:
+P = ParamSpec("P")
+
+
+def asyncasynccontextmanager(
+    f: Callable[P, AsyncIterator[_T]]
+) -> Callable[P, Coroutine[Any, Any, AsyncContextManager[_T]]]:
     """Like asynccontextmanager but needs to be awaited first."""
 
     async def inner(*args, **kwargs):
@@ -205,22 +213,30 @@ def supergetattr_path(item: Any, keys: List[str]) -> Any:
 
 
 class AsyncReaderQueueStream:
-    def __init__(self):
+    """A stream queue whose writer is synchronous-nonblocking and whose reader is asynchronous."""
+
+    def __init__(self) -> None:
         self.buffer: List[Optional[bytes]] = []
         self.readptr = (0, 0)
         self.closed = False
 
     def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Add data to the queue."""
         self.buffer.append(bytes(data))
         return len(data)
 
     def close(self) -> Any:
+        """Mark the queue as closed, so reads will terminate."""
         self.closed = True
-        r = asyncio.Future()
+        r: asyncio.Future[None] = asyncio.Future()
         r.set_result(None)
         return r
 
     async def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
         outbuf = bytearray()
         while size != 0:
             line, col = self.readptr
@@ -246,24 +262,38 @@ class AsyncReaderQueueStream:
         return bytes(outbuf)
 
     def tell(self) -> int:
+        """It's a secret to everybody!"""
         return 0
 
 
 class QueueStream(IO[bytes]):
-    def __init__(self):
+    """A stream queue with synchronous-nonblocking reader and synchronous-blocking writer."""
+
+    def __init__(self) -> None:
         self.buffer: List[Optional[bytes]] = []
         self.readptr = (0, 0)
+        self._closed = False
 
-    def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
-        self.buffer.append(bytes(data))
-        return len(data)
+    def close(self) -> None:
+        """Add data to the queue."""
+        self._closed = True
+
+    def write(self, data: Buffer, /) -> int:
+        """Add data to the queue."""
+        b = bytes(data)
+        self.buffer.append(b)
+        return len(b)
 
     def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
         outbuf = bytearray()
         while size != 0:
             line, col = self.readptr
             if line >= len(self.buffer):
-                if self.closed:
+                if self._closed:
                     break
                 time.sleep(0.01)
                 continue
@@ -282,3 +312,10 @@ class QueueStream(IO[bytes]):
             size = 0
 
         return bytes(outbuf)
+
+
+class _StderrIsStdout:
+    pass
+
+
+STDOUT = _StderrIsStdout()

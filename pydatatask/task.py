@@ -57,11 +57,16 @@ from pydatatask.executor.container_manager import (
 from pydatatask.host import LOCAL_HOST, Host
 
 from . import repository as repomodule
-from .consts import STDOUT, _StderrIsStdout
 from .executor.pod_manager import PodManager
 from .executor.proc_manager import AbstractProcessManager, localhost_manager
 from .quota import Quota, QuotaManager, localhost_quota_manager
-from .utils import async_copyfile, supergetattr, supergetattr_path
+from .utils import (
+    STDOUT,
+    _StderrIsStdout,
+    async_copyfile,
+    supergetattr,
+    supergetattr_path,
+)
 
 l = logging.getLogger(__name__)
 
@@ -243,7 +248,7 @@ class Task(ABC):
         if is_input is None:
             is_input = kind in INPUT_KINDS
         if is_output is None:
-            is_output = kind in OUTPUT_KINDS
+            is_output = kind in OUTPUT_KINDS and key != "ALLOC"
         if required_for_start is None:
             required_for_start = is_input
         if required_for_output is None:

@@ -1,5 +1,6 @@
 """This module houses the filesystem repositories, or repositories whose data is a whole filesystem."""
 from typing import (
+    IO,
     Any,
     AsyncContextManager,
     AsyncGenerator,
@@ -20,7 +21,6 @@ import asyncio
 import logging
 import os
 import stat
-import sys
 import tarfile
 
 from aiofiles.threadpool import open as aopen
@@ -83,7 +83,7 @@ class FilesystemRepository(abc.ABC):
 
     @abc.abstractmethod
     def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
-        """The os.walk interface but for the repository, but returns three lists - dirs, nondirs, symlinks"""
+        """The os.walk interface but for the repository, but returns three lists - dirs, regular files, symlinks"""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -152,46 +152,46 @@ class FilesystemRepository(abc.ABC):
                     )
 
     async def get_tarball(self, job: str, dest: AWriteStream):
+        """Stream a tarball for the given job to the provided asynchronous stream."""
         queue = AsyncReaderQueueStream()
-        typed_queue: IO[bytes] = queue  # type: ignore ...
+        typed_queue: IO[bytes] = queue  # type: ignore
 
         async def producer():
-            tar = tarfile.open(mode="w", fileobj=typed_queue)
-            async for member in self.iter_members(job):
-                info = tarfile.TarInfo(member.name)
-                data = None
-                pproducer = ()
-                if member.type == FilesystemType.FILE:
-                    info.type = tarfile.REGTYPE
-                    assert member.content_size is not None
-                    info.size = member.content_size
-                    inner_queue = QueueStream()
-                    data = inner_queue
+            with tarfile.open(mode="w", fileobj=typed_queue) as tar:
+                async for member in self.iter_members(job):
+                    info = tarfile.TarInfo(member.name)
+                    data = None
+                    pproducer = ()
+                    if member.type == FilesystemType.FILE:
+                        info.type = tarfile.REGTYPE
+                        assert member.content_size is not None
+                        info.size = member.content_size
+                        inner_queue = QueueStream()
+                        data = inner_queue
 
-                    async def _pproducer():
-                        assert member.data is not None
-                        while True:
-                            bytes_data = await member.data.read(1024 * 16)
-                            if not bytes_data:
-                                break
-                            inner_queue.write(bytes_data)
-                        inner_queue.close()
+                        async def _pproducer(member, inner_queue):
+                            assert member.data is not None
+                            while True:
+                                bytes_data = await member.data.read(1024 * 16)
+                                if not bytes_data:
+                                    break
+                                inner_queue.write(bytes_data)
+                            inner_queue.close()
 
-                    pproducer = (_pproducer(),)
+                        pproducer = (_pproducer(member, inner_queue),)
 
-                elif member.type == FilesystemType.SYMLINK:
-                    assert member.link_target is not None
-                    info.type = tarfile.SYMTYPE
-                    info.linkname = member.link_target
+                    elif member.type == FilesystemType.SYMLINK:
+                        assert member.link_target is not None
+                        info.type = tarfile.SYMTYPE
+                        info.linkname = member.link_target
 
-                elif member.type == FilesystemType.DIRECTORY:
-                    info.type = tarfile.DIRTYPE
-                    info.mode = 0o755
+                    elif member.type == FilesystemType.DIRECTORY:
+                        info.type = tarfile.DIRTYPE
+                        info.mode = 0o755
 
-                await asyncio.gather(
-                    asyncio.get_running_loop().run_in_executor(None, lambda: tar.addfile(info, data)), *pproducer
-                )
-            tar.close()
+                    await asyncio.gather(
+                        asyncio.get_running_loop().run_in_executor(None, tar.addfile, info, data), *pproducer
+                    )
             queue.close()
 
         await asyncio.gather(producer(), async_copyfile(queue, dest))
@@ -313,10 +313,17 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
 
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         root = self.fullpath(job)
+
+        def mk_islink(top):
+            def islink(path):
+                return (Path(top) / path).is_symlink()
+
+            return islink
+
         async for top, dirs, nondirs in _walk(root):
             ttop = Path(top)
             rtop = ttop.relative_to(root)
-            regs, links = partition(lambda path: (Path(top) / path).is_symlink(), nondirs)
+            regs, links = partition(mk_islink(top), nondirs)
             yield str(rtop), dirs, list(regs), list(links)
 
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
@@ -355,7 +362,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             pass
 
     @asyncasynccontextmanager
-    async def open(self, job: str, path: Union[str, Path]):
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStream]:
         async with aopen(os.path.join(self.fullpath(job), path), "rb") as fp:
             yield fp
 
@@ -374,6 +381,10 @@ def _splitdirs(directory):
     return partition(lambda elem: elem["type"] == "DIRECTORY", directory)
 
 
+def _splitlinks(directory):
+    return partition(lambda elem: elem["type"] == "SYMLINK", directory)
+
+
 class ContentAddressedBlobRepository(FilesystemRepository):
     """A repository which uses a blob repository and a metadata repository to store files in a deduplicated
     fashion."""
@@ -383,7 +394,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         self.meta = meta
         self.pathsep = pathsep
 
-    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str]]]:
+    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         meta = await self.meta.info(job)
         if not isinstance(meta, list):
             raise ValueError("Error: corrupted ContentAddressedBlobRepository meta")
@@ -392,11 +403,13 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         while queue:
             meta, path = queue.pop()
             nondirs, dirs = _splitdirs(meta)
-            nondirs, dirs = list(nondirs), list(dirs)
-            nondir_names = [path + elem["name"] for elem in nondirs]
+            links, regs = _splitlinks(nondirs)
+            links, dirs, regs = list(links), list(dirs), list(regs)
+            link_names = [path + elem["name"] for elem in links]
+            reg_names = [path + elem["name"] for elem in regs]
             dir_names = [path + elem["name"] for elem in dirs]
             dir_mapping = dict(zip(dir_names, dirs))
-            yield path, nondir_names, dir_names
+            yield path, dir_names, reg_names, link_names
 
             for name in dir_names:
                 queue.append((dir_mapping[name], name))

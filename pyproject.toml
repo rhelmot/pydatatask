@@ -31,7 +31,8 @@ dependencies = [
     "aiodocker",
     "sonyflake-py",
     "importlib_metadata",
-    "python-dateutil"
+    "python-dateutil",
+    "typing-extensions>=4.8.0",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +56,7 @@ type = [
     "types-aiofiles",
     "types-psutil",
     "pyfuse3-stubs",
+    "types-python-dateutil"
 ]
 test = [
     "pytest",

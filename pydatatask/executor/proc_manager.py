@@ -32,7 +32,7 @@ from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
 
-from ..consts import _StderrIsStdout
+from ..utils import _StderrIsStdout
 
 if TYPE_CHECKING:
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText

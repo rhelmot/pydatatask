@@ -27,7 +27,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
             assert "valid job" in x.message
 
     async def test_map(self):
-        class DerivedRepository(pydatatask.Repository):
+        class DerivedRepository(pydatatask.MetadataRepository):
             async def unfiltered_iter(self):
                 yield "foo"
                 yield "bar"
@@ -37,6 +37,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
             async def delete(self, key):
                 logging.root.debug("deleting %s", key)
+
+            async def dump(self, job, data):
+                raise NotImplementedError
 
         repo = DerivedRepository()
 
