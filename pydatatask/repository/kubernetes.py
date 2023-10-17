@@ -28,6 +28,14 @@ class LiveKubeRepository(Repository):
     async def contains(self, item):
         return bool(await self.task.podman.query(task=self.task.name, job=item))
 
+    async def get_unique_hash(self, job: str) -> str | None:
+        # get the digest of the image
+        pods = await self.task.podman.query(job=job, task=self.task.name)
+        if not pods:
+            return None
+        pod = pods[0]
+        return pod.metadata.labels["unique_hash"]
+
     def __repr__(self):
         return f"<LiveKubeRepository task={self.task.name}>"
 

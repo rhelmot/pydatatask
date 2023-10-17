@@ -294,6 +294,47 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             else:
                 yield item
 
+    async def get_unique_hash(self, job: str) -> str | None:
+        # compute the hash of the directory structure
+        async def file_metadata(path):
+            # for now, just important fields of stat
+            stat = await aiofiles.os.stat(path)
+
+            metadata = b''
+            metadata += stat.st_mode.to_bytes(4, "big")
+            metadata += stat.st_atime.to_bytes(8, "big")
+            metadata += stat.st_mtime.to_bytes(8, "big")
+            metadata += stat.st_ctime.to_bytes(8, "big")
+            metadata += stat.st_uid.to_bytes(4, "big")
+            metadata += stat.st_gid.to_bytes(4, "big")
+
+            return metadata
+
+        h = sha256()
+        async for top, dirs, nondirs in sorted(self.walk(job)):
+            dirs = sorted(dirs)
+            nondirs = sorted(nondirs)
+            h.update(top.encode())
+            for name in dirs:
+                h.update(name.encode())
+                h.update(await file_metadata(os.path.join(top, name)))
+
+            for name in nondirs:
+                # file hash: name, metadata, content_hash
+                h.update(name.encode())
+                h.update(await file_metadata(os.path.join(top, name)))
+                # now hash the contents
+                async with aiofiles.open(os.path.join(top, name), "rb") as fp:
+                    while True:
+                        data = await fp.read(1024 * 16)
+                        if not data:
+                            break
+                        h.update(data)
+        return h.hexdigest()
+
+
+
+
     async def readlink(self, job: str, path: str) -> str:
         """Given a path to a symlink, return the path it points to."""
         return os.readlink(self.fullpath(job) / path)

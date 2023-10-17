@@ -36,6 +36,13 @@ class MongoMetadataRepository(MetadataRepository):
     async def contains(self, item):
         return await self.collection.count_documents({"_id": item}) != 0
 
+    async def get_unique_hash(self, job: str) -> str | None:
+        # get the digest of the image
+        result = await self.collection.find_one({"_id": job}, projection=["unique_hash"])
+        if result is None:
+            return None
+        return result["unique_hash"]
+
     async def delete(self, job):
         await self.collection.delete_one({"_id": job})
 

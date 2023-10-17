@@ -148,6 +148,16 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         else:
             return True
 
+    async def get_unique_hash(self, job: str) -> str | None:
+        # use the ETag as the unique hash
+        try:
+            return (await self.client.head_object(Bucket=self.bucket, Key=self.object_name(job)))["ETag"]
+        except botocore.exceptions.ClientError as e:
+            if "404" in str(e):
+                return None
+            else:
+                raise
+
     async def unfiltered_iter(self):
         paginator = self.client.get_paginator("list_objects")
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):

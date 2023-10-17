@@ -94,15 +94,6 @@ class Repository(ABC):
     def __aiter__(self) -> AsyncIterator[str]:
         return self.filter_jobs(self.unfiltered_iter())
 
-    @abstractmethod
-    def unfiltered_iter(self) -> AsyncGenerator[str, None]:
-        """The core method of Repository.
-
-        Implement this to produce an iterable of every string which could potentially be a job identifier present in
-        this repository. When the repository is iterated directly, this will be filtered by `filter_jobs`.
-        """
-        raise NotImplementedError
-
     async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
@@ -114,6 +105,22 @@ class Repository(ABC):
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
             return taskmodule.TemplateInfo(self)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
+
+    @abstractmethod
+    def unfiltered_iter(self) -> AsyncGenerator[str, None]:
+        """The core method of Repository.
+
+        Implement this to produce an iterable of every string which could potentially be a job identifier present in
+        this repository. When the repository is iterated directly, this will be filtered by `filter_jobs`.
+        """
+        raise NotImplementedError
+
+    async def get_unique_hash(self, job: str) -> Optional[str]:
+        """Get the hash of the given job, if it is present in the repository.
+
+        This is used by the pipeline to determine whether a job needs to be recomputed.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     async def delete(self, job):

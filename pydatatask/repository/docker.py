@@ -1,6 +1,6 @@
 """This module contains repositories for interacting with docker registries."""
 
-from typing import Callable
+from typing import Callable, Optional
 import base64
 import hashlib
 import os
@@ -54,6 +54,14 @@ class DockerRepository(Repository):
         except aiohttp.client_exceptions.ClientResponseError as e:
             if e.status != 404:
                 raise
+
+    async def get_unique_hash(self, job: str) -> str | None:
+        # get the digest of the image
+        image = docker_registry_client_async.imagename.ImageName(
+            self.repository, tag=job, endpoint=self.domain
+        )
+        # don't know exactly how this works yet
+        return image.digest
 
     def __repr__(self):
         return f"<dockerRepository {self.domain}/{self.repository}:*>"
