@@ -78,6 +78,7 @@ def main(
 
     If you like, you can pass as the ``instrument`` argument a function which will add additional commands to the menu.
     """
+    logging.basicConfig()
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 
@@ -87,6 +88,7 @@ def main(
     parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
+    parser_run.add_argument("--verbose", action="store_true", help="Only evaluates tasks-to-launch once")
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -202,7 +204,9 @@ async def update(pipeline: Pipeline):
     await pipeline.update()
 
 
-async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float]):
+async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool):
+    if verbose:
+        logging.getLogger("pydatatask").setLevel("DEBUG")
     func = pipeline.update
     start = asyncio.get_running_loop().time()
     while await func() or forever:
@@ -324,7 +328,7 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
 
     if isinstance(item, BlobRepository):
         async with await item.open(job, "rb") as fp:
-            await async_copyfile(aiofiles.stdout_bytes, fp)
+            await async_copyfile(fp, aiofiles.stdout_bytes)
     elif isinstance(item, MetadataRepository):
         data_bytes = await item.info(job)
         data_str = yaml.safe_dump(data_bytes, None)

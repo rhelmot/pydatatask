@@ -227,9 +227,9 @@ class Task(ABC):
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
         is_status: bool = False,
-        inhibits_start: bool = False,
+        inhibits_start: Optional[bool] = None,
         required_for_start: Optional[bool] = None,
-        inhibits_output: bool = False,
+        inhibits_output: Optional[bool] = None,
         required_for_output: Optional[bool] = None,
     ):
         """Create a link between this task and a repository.
@@ -260,6 +260,10 @@ class Task(ABC):
             required_for_start = is_input
         if required_for_output is None:
             required_for_output = is_output
+        if inhibits_start is None:
+            inhibits_start = False
+        if inhibits_output is None:
+            inhibits_output = False
         if key == "ALLOC" and is_input:
             raise ValueError("Link cannot be allocated key and input")
 
@@ -300,7 +304,7 @@ class Task(ABC):
                 raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
             async def mapper(info):
-                return supergetattr_path(info, splitkey[1:])
+                return str(supergetattr_path(info, splitkey[1:]))
 
             mapped = related.map(mapper)
             prefetch_lookup = True

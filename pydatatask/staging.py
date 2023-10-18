@@ -11,6 +11,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    ForwardRef,
     Iterator,
     List,
     Optional,
@@ -22,6 +23,7 @@ from typing import (
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 import os
+import random
 
 import yaml
 
@@ -43,6 +45,8 @@ if TYPE_CHECKING:
 else:
 
     def _reprocess(value, ty):
+        if isinstance(ty, ForwardRef):
+            ty = ty._evaluate(globals(), locals(), set())
         if is_dataclass(ty) and isinstance(value, dict):
             return ty(**value)
         elif get_origin(ty) is dict and isinstance(value, dict):
@@ -103,14 +107,14 @@ class PipelineChildSpec:
 
 @_dataclass_serial
 class PipelineChildArgs:
-    repos: Dict[str, Dispatcher] = field(default_factory=dict)  # {child's name: dispatcher}
-    executors: Dict[str, Dispatcher] = field(default_factory=dict)  # {task name: our executor's name}
+    repos: Dict[str, Optional[Dispatcher]] = field(default_factory=dict)  # {child's name: dispatcher}
+    executors: Dict[str, Optional[Dispatcher]] = field(default_factory=dict)  # {task name: our executor's name}
     imports: Dict[str, "PipelineChildArgs"] = field(default_factory=dict)
 
     def specify(self, prefix: str = "") -> Tuple[PipelineChildSpec, Dict[str, Dispatcher], Dict[str, Dispatcher]]:
         result = PipelineChildSpec()
-        result_executors = {f"{prefix}{name}": value for name, value in self.executors.items()}
-        result_repos = {f"{prefix}{name}": value for name, value in self.repos.items()}
+        result_executors = {f"{prefix}{name}": value for name, value in self.executors.items() if value is not None}
+        result_repos = {f"{prefix}{name}": value for name, value in self.repos.items() if value is not None}
         result.executors = {f"{name}": f"{prefix}{name}" for name in self.executors}
         result.repos = {f"{name}": f"{prefix}{name}" for name in self.repos}
         for imp_name, imp_args in self.imports.items():
@@ -133,8 +137,8 @@ class PipelineChildArgsMissing:
     def allocate(
         self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Optional[Dispatcher]
     ) -> PipelineChildArgs:
-        new_repos: Dict[str, Dispatcher] = {}
-        new_executors: Dict[str, Dispatcher] = {}
+        new_repos: Dict[str, Optional[Dispatcher]] = {}
+        new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
             if repo_spec not in repo_allocators:
@@ -197,6 +201,8 @@ class PipelineStaging:
         self.children: Dict[str, PipelineStaging] = {}
         self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = {}
         self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
+        self.repos_promised_by_parents: Set[str] = set()
+        self.executors_promised_by_parents: Set[str] = set()
 
         if filepath is None:
             if basedir is None:
@@ -221,43 +227,48 @@ class PipelineStaging:
                 params = PipelineChildArgs()
 
             self.children = {}
-            self.repos_fulfilled_by_parents = params.repos
-            self.executors_fulfilled_by_parents = params.executors
+            self.repos_fulfilled_by_parents = {k: v for k, v in params.repos.items() if v is not None}
+            self.repos_promised_by_parents = {k for k, v in params.repos.items() if v is None}
+            self.executors_fulfilled_by_parents = {k: v for k, v in params.executors.items() if v is not None}
+            self.executors_promised_by_parents = {k for k, v in params.executors.items() if v is None}
 
             assert not set(self.spec.repos) & set(self.spec.repo_classes)
 
             for imp_name, imp in self.spec.imports.items():
                 if imp.path is None:
                     raise TypeError("Import clause must specify path to import")
-                child_params = PipelineChildArgs()
-                child_params.repos.update(
-                    {
-                        param_name: self.spec.repos[sat_name]
-                        for param_name, sat_name in imp.repos.items()
-                        if sat_name in self.spec.repos
-                    }
-                )
-                child_params.repos.update(
-                    {
-                        param_name: self.repos_fulfilled_by_parents[sat_name]
-                        for param_name, sat_name in imp.repos.items()
-                        if sat_name in self.spec.repo_classes and sat_name in self.repos_fulfilled_by_parents
-                    }
-                )
-                if imp_name in params.imports:
-                    child_params.repos.update(params.imports[imp_name].repos)
-
-                child_params.executors.update(
-                    {
-                        param_name: self.spec.executors[sat_name]
-                        for param_name, sat_name in imp.executors.items()
-                        if sat_name in self.spec.executors
-                    }
-                )
+                child_params = self._reprocess_subimports(imp)
                 if imp_name in params.imports:
                     child_params.executors.update(params.imports[imp_name].executors)
+                    child_params.repos.update(params.imports[imp_name].repos)
+                    child_params.imports.update(params.imports[imp_name].imports)
 
                 self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
+
+    def _get_repo(self, name: str) -> Optional[Dispatcher]:
+        if name in self.repos_fulfilled_by_parents:
+            return self.repos_fulfilled_by_parents[name]
+        if name in self.spec.repos:
+            return self.spec.repos[name]
+        return None
+
+    def _get_executor(self, name: str) -> Optional[Dispatcher]:
+        if name in self.executors_fulfilled_by_parents:
+            return self.executors_fulfilled_by_parents[name]
+        if name in self.spec.executors:
+            return self.spec.executors[name]
+        return None
+
+    @staticmethod
+    def _random_name() -> str:
+        return bytes(random.randrange(256) for _ in range(8)).hex()
+
+    def _reprocess_subimports(self, imp: PipelineChildSpec) -> PipelineChildArgs:
+        return PipelineChildArgs(
+            imports={subname: self._reprocess_subimports(subimp) for subname, subimp in imp.imports.items()},
+            repos={param_name: self._get_repo(sat_name) for param_name, sat_name in imp.repos.items()},
+            executors={param_name: self._get_executor(sat_name) for param_name, sat_name in imp.executors.items()},
+        )
 
     def _get_priority(self, task: str, job: str) -> int:
         result = 0
@@ -274,12 +285,16 @@ class PipelineStaging:
         """
         return PipelineChildArgsMissing(
             repos={
-                name: cls for name, cls in self.spec.repo_classes.items() if name not in self.repos_fulfilled_by_parents
+                name: cls
+                for name, cls in self.spec.repo_classes.items()
+                if name not in self.repos_fulfilled_by_parents and name not in self.repos_promised_by_parents
             },
             executors={
                 name
                 for name, tspec in self.spec.tasks.items()
-                if tspec.executor is None and name not in self.executors_fulfilled_by_parents
+                if tspec.executor is None
+                and name not in self.executors_fulfilled_by_parents
+                and name not in self.executors_promised_by_parents
             },
             imports={name: child.missing() for name, child in self.children.items()},
         )
