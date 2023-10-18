@@ -2,7 +2,8 @@
 
 You define a task by instantiating a Task subclass and passing it to a Pipeline object.
 
-Tasks are related to Repositories by Links. Links are created by ``Task.link("my_link_name", my_repository, LinkKind.Something)``. See `Task.link` for more information.
+Tasks are related to Repositories by Links. Links are created by
+``Task.link("my_link_name", my_repository, LinkKind.Something)``. See `Task.link` for more information.
 
 .. autodata:: STDOUT
 """
