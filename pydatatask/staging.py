@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 import os
 import random
+import subprocess
 
 import yaml
 
@@ -174,6 +175,7 @@ class PipelineSpec:
     quotas: Dict[str, Quota] = field(default_factory=dict)
     ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
     imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
+    lockstep: str = ""
 
 
 @_dataclass_serial
@@ -369,11 +371,20 @@ class PipelineStaging:
         """Lock a pipeline, generating a new PipelineStaging which imports this one and specifies all of its missing
         dependencies."""
         spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
+        for child in self._iter_children():
+            if child.spec.lockstep:
+                if subprocess.run(child.spec.lockstep, shell=True, cwd=child.basedir, check=False).returncode != 0:
+                    raise Exception(
+                        f"Could not lock pipeline: lockstep of {child.basedir / child.filename} "
+                        f"failed ({child.spec.lockstep})"
+                    )
+
         result = PipelineStaging(basedir=self.basedir)
         result.children["locked"] = self
         result.spec.repos.update(repos)
         result.spec.executors.update(executors)
         result.spec.imports["locked"] = spec
+        result.spec.lockstep = "echo 'This is a lockfile - do not lock it' && false"
         spec.path = str(self.basedir / self.filename)
         return result
 

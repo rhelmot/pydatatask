@@ -115,7 +115,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         if await p.wait() != 0:
             raise unittest.SkipTest("docker failed to launch linuxserver/openssh-server:version-9.1_p1-r2")
         self.docker_name = name
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
     async def test_ssh_process(self):
         session = pydatatask.Session()
