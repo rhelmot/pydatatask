@@ -24,10 +24,10 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
             repo0.data[str(i)] = i
 
         @pydatatask.InProcessSyncTask("task", done)
-        async def task(job: str, repo0: pydatatask.MetadataRepository, repo1: pydatatask.BlobRepository, **kwargs):
+        async def task(repo0, repo1, **kwargs):
             async with aiofiles.open("/dev/urandom", "rb") as fp:
-                data = await fp.read(await repo0.info(job))
-            async with await repo1.open(job, "w") as fp:
+                data = await fp.read(await repo0.info())
+            async with await repo1.open("w") as fp:
                 await fp.write(data.hex()[: len(data)])
 
         task.link("repo0", repo0, kind=LinkKind.InputRepo)

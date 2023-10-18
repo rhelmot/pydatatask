@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 
-from pydatatask.host import LOCAL_HOST
 import pydatatask
 
 
@@ -18,23 +17,20 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
 
         @pydatatask.ExecutorTask("phase0", executor, phase0_done)
         async def phase0(
-            job: str,
-            repo_zero: pydatatask.InProcessMetadataRepository,
-            repo_one: pydatatask.InProcessMetadataRepository,
+            repo_zero,
+            repo_one,
         ):
-            await repo_one.dump(job, await repo_zero.info(job) + "!")
+            await repo_one.dump(await repo_zero.info() + "!")
 
         @pydatatask.ExecutorTask("phase1", executor, phase1_done)
-        async def phase1(
-            job: str, repo_one: pydatatask.InProcessMetadataRepository, repo_two: pydatatask.InProcessMetadataRepository
-        ):
-            await repo_two.dump(job, await repo_one.info(job) + "?")
+        async def phase1(repo_one, repo_two):
+            await repo_two.dump(await repo_one.info() + "?")
 
-        phase0.link("repo_zero", repo0, is_input=True)
-        phase0.link("repo_one", repo1, is_output=True)
+        phase0.link("repo_zero", repo0, kind=pydatatask.LinkKind.InputRepo)
+        phase0.link("repo_one", repo1, kind=pydatatask.LinkKind.OutputRepo)
 
-        phase1.plug(phase0)
-        phase1.link("repo_two", repo2, is_output=True)
+        phase1.link("repo_one", repo1, kind=pydatatask.LinkKind.InputRepo)
+        phase1.link("repo_two", repo2, pydatatask.LinkKind.OutputRepo)
 
         pipeline = pydatatask.Pipeline([phase0, phase1], session, [])
 

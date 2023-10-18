@@ -2,11 +2,7 @@
 
 You define a task by instantiating a Task subclass and passing it to a Pipeline object.
 
-Tasks are related to Repositories by Links. Links are created by ``Task.link("my_link_name", my_repository,
-**disposition)``. The main disposition kwargs you'll want to use are ``is_input`` and ``is_output``. See `Task.link` for
-more information.
-
-For a shortcut for linking the output of one task as the input of another task, see `Task.plug`.
+Tasks are related to Repositories by Links. Links are created by ``Task.link("my_link_name", my_repository, LinkKind.Something)``. See `Task.link` for more information.
 
 .. autodata:: STDOUT
 """
@@ -65,6 +61,7 @@ from .utils import (
     STDOUT,
     _StderrIsStdout,
     async_copyfile,
+    crypto_hash,
     supergetattr,
     supergetattr_path,
 )
@@ -72,6 +69,7 @@ from .utils import (
 l = logging.getLogger(__name__)
 
 __all__ = (
+    "LinkKind",
     "Link",
     "Task",
     "KubeTask",
@@ -171,6 +169,7 @@ class Task(ABC):
         self.synchronous = False
         self.metadata = True
         self.disabled = disabled
+        self._related_cache: Dict[str, Any] = {}
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -214,11 +213,15 @@ class Task(ABC):
             repomodule.AggregateOrRepository(**self.inhibits_start),
         )
 
+    def derived_hash(self, job: str, link_name: str) -> int:
+        """For allocate-key links, determine the allocated job id."""
+        return crypto_hash([job, self.name, link_name, self.links[link_name].repo])
+
     def link(
         self,
         name: str,
         repo: "repomodule.Repository",
-        kind: Optional[LinkKind] = None,
+        kind: Optional[LinkKind],
         key: Optional[str] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
@@ -230,12 +233,14 @@ class Task(ABC):
     ):
         """Create a link between this task and a repository.
 
+        All the nullable paramters have their defaults picked based on other paramters.
+
         :param name: The name of the link. Used during templating.
         :param repo: The repository to link.
         :param kind: The way to transform this repository during templating.
         :param key: A related item from a different link to use instead of the current job when doing repository lookup.
-        :param is_input: Whether this repository contains data which is consumed by the task. Default False.
-        :param is_output: Whether this repository is populated by the task. Default False.
+        :param is_input: Whether this repository contains data which is consumed by the task. Default based on kind.
+        :param is_output: Whether this repository is populated by the task. Default based on kind.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
         :param inhibits_start: Whether membership in this repository should be used in the default ``ready`` repository
             to prevent jobs for being launched. Default False.
@@ -249,11 +254,13 @@ class Task(ABC):
         if is_input is None:
             is_input = kind in INPUT_KINDS
         if is_output is None:
-            is_output = kind in OUTPUT_KINDS and key != "ALLOC"
+            is_output = kind in OUTPUT_KINDS
         if required_for_start is None:
             required_for_start = is_input
         if required_for_output is None:
             required_for_output = is_output
+        if key == "ALLOC" and is_input:
+            raise ValueError("Link cannot be allocated key and input")
 
         self.links[name] = Link(
             repo=repo,
@@ -268,50 +275,10 @@ class Task(ABC):
             required_for_output=required_for_output,
         )
 
-    def plug(
-        self,
-        output: "Task",
-        output_links: Optional[Iterable[str]] = None,
-        meta: bool = True,
-        translator: Optional["repomodule.MetadataRepository"] = None,
-        translate_allow_deletes=False,
-        translate_prefetch_lookup=True,
-    ):
-        """Link the output repositories from `output` as inputs to this task.
-
-        :param output: The task to plug into this one.
-        :param output_links: Optional: An iterable allowlist of links to only use.
-        :param meta: Whether to transfer repository inhibit- and required_for- dispositions. Default True.
-        :param translator: Optional: A repository used to transform job identifiers. If this is provided, a job will be
-            said to be present in the resulting linked repository if the source repository contains the key ``await
-            translator.info(job)``.
-        :param translate_allow_deletes: If translator is provided, this controls whether attempts to delete from the
-            translated repository will do anything. Default False.
-        :param translate_prefetch_lookup: If translator is provided, this controls whether the translated repository
-            will pre-fetch the list of translations on first access. Default True.
-        """
-        for name, link in output.links.items():
-            link_attrs = {}
-            if link.inhibits_output and meta:
-                link_attrs["inhibits_start"] = True
-            if link.is_output and (output_links is None or name in output_links):
-                link_attrs["is_input"] = True
-            if link.required_for_output and meta:
-                link_attrs["required_for_start"] = True
-            if not link.is_output:
-                name = f"{output.name}_{name}"
-            if link_attrs:
-                repo = link.repo
-                if translator is not None:
-                    repo = repomodule.RelatedItemRepository(
-                        repo,
-                        translator,
-                        allow_deletes=translate_allow_deletes,
-                        prefetch_lookup=translate_prefetch_lookup,
-                    )
-                self.link(name, repo, link.kind, link.key, **link_attrs)
-
     def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":
+        if linkname in self._related_cache:
+            return self._related_cache[linkname]
+
         if seen is None:
             seen = set()
         if linkname in seen:
@@ -319,20 +286,33 @@ class Task(ABC):
         link = self.links[linkname]
         if link.key is None:
             return link.repo
+        if link.key == "ALLOC":
+            mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
+                lambda job: str(self.derived_hash(job, linkname)), repomodule.AggregateAndRepository(**self.input)
+            )
+            prefetch_lookup = False
 
-        splitkey = link.key.split(".")
-        related = self._repo_related(splitkey[0], seen)
-        if not isinstance(related, repomodule.MetadataRepository):
-            raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
-
-        async def mapper(info):
-            return supergetattr_path(info, splitkey[1:])
-
-        mapped = related.map(mapper)
-        if isinstance(link.repo, repomodule.MetadataRepository):
-            return repomodule.RelatedItemMetadataRepository(link.repo, mapped)
         else:
-            return repomodule.RelatedItemRepository(link.repo, mapped)
+            splitkey = link.key.split(".")
+            related = self._repo_related(splitkey[0], seen)
+            if not isinstance(related, repomodule.MetadataRepository):
+                raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
+
+            async def mapper(info):
+                return supergetattr_path(info, splitkey[1:])
+
+            mapped = related.map(mapper)
+            prefetch_lookup = True
+
+        if isinstance(link.repo, repomodule.MetadataRepository):
+            result: repomodule.Repository = repomodule.RelatedItemMetadataRepository(
+                link.repo, mapped, prefetch_lookup=prefetch_lookup
+            )
+        else:
+            result = repomodule.RelatedItemRepository(link.repo, mapped, prefetch_lookup=prefetch_lookup)
+
+        self._related_cache[linkname] = result
+        return result
 
     @property
     def ready(self):
@@ -439,7 +419,7 @@ class Task(ABC):
             subjob = orig_job
             if link.key is not None:
                 if link.key == "ALLOC":
-                    subjob = str(idgen.next_id())
+                    subjob = str(self.derived_hash(orig_job, env_name))
                 else:
                     items = link.key.split(".")
                     if items[0] in result:
@@ -569,6 +549,7 @@ class KubeTask(Task):
         self.link(
             "live",
             repomodule.LiveKubeRepository(self),
+            None,
             is_status=True,
             inhibits_start=True,
             inhibits_output=True,
@@ -577,6 +558,7 @@ class KubeTask(Task):
             self.link(
                 "logs",
                 logs,
+                None,
                 is_status=True,
                 inhibits_start=True,
                 required_for_output=True,
@@ -585,6 +567,7 @@ class KubeTask(Task):
             self.link(
                 "done",
                 done,
+                None,
                 is_status=True,
                 inhibits_start=True,
                 required_for_output=True,
@@ -803,15 +786,15 @@ class ProcessTask(Task):
 
         self.quota_manager.register(self._get_load)
 
-        self.link("pids", pids, is_status=True, inhibits_start=True, inhibits_output=True)
+        self.link("pids", pids, None, is_status=True, inhibits_start=True, inhibits_output=True)
         if stdin is not None:
-            self.link("stdin", stdin, is_input=True)
+            self.link("stdin", stdin, None, is_input=True)
         if stdout is not None:
-            self.link("stdout", stdout, is_output=True)
+            self.link("stdout", stdout, None, is_output=True)
         if isinstance(stderr, repomodule.BlobRepository):
-            self.link("stderr", stderr, is_output=True)
+            self.link("stderr", stderr, None, is_output=True)
         if done is not None:
-            self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
+            self.link("done", done, None, is_status=True, required_for_output=True, inhibits_start=True)
 
     @property
     def host(self):
@@ -965,7 +948,7 @@ class ProcessTask(Task):
 class FunctionTaskProtocol(Protocol):
     """The protocol which is expected by the tasks which take a python function to execute."""
 
-    def __call__(self, job: str, **kwargs) -> Awaitable[None]:
+    def __call__(self, **kwargs) -> Awaitable[None]:
         ...
 
 
@@ -974,12 +957,12 @@ class InProcessSyncTask(Task):
 
     .. code:: python
 
-        @pydatatask.InProcessSyncTask("my_task", done_repo)
-        async def my_task(job: str, inp: pydatatask.MetadataRepository, out: pydatatask.MetadataRepository):
-            await out.dump(job, await inp.info(job))
+        @InProcessSyncTask("my_task", done_repo)
+        async def my_task(inp, out):
+            await out.dump(await inp.info())
 
-        my_task.link("inp", repo_input, is_input=True)
-        my_task.link("out", repo_output, is_output=True)
+        my_task.link("inp", repo_input, LinkKind.InputRepo)
+        my_task.link("out", repo_output, LinkKind.OutputRepo)
     """
 
     def __init__(
@@ -1001,7 +984,7 @@ class InProcessSyncTask(Task):
 
         self.done = done
         self.func = func
-        self.link("done", done, is_status=True, inhibits_start=True, required_for_output=True)
+        self.link("done", done, None, is_status=True, inhibits_start=True, required_for_output=True)
         self._env: Dict[str, Any] = {}
 
     @property
@@ -1033,7 +1016,6 @@ class InProcessSyncTask(Task):
         start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching in-process %s:%s...", self.name, job)
         args: Dict[str, Any] = dict(self.links)
-        args["job"] = job
         args, preamble, epilogue = await self.build_env(args, job)
         try:
             for p in preamble:
@@ -1103,10 +1085,11 @@ class ExecutorTask(Task):
         self.live = repomodule.ExecutorLiveRepo(self)
         self.done = done
         self._env: Dict[str, Any] = {}
-        self.link("live", self.live, is_status=True, inhibits_output=True, inhibits_start=True)
+        self.link("live", self.live, None, is_status=True, inhibits_output=True, inhibits_start=True)
         self.link(
             "done",
             self.done,
+            None,
             is_status=True,
             required_for_output=True,
             inhibits_start=True,
@@ -1154,18 +1137,14 @@ class ExecutorTask(Task):
 
         sig = inspect.signature(self.func, follow_wrapped=True)
         for name in sig.parameters.keys():
-            if name == "job":
-                self._env[name] = None
-            elif name in self.links:
+            if name in self.links:
                 self._env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def launch(self, job):
         l.debug("Launching %s:%s with %s...", self.name, job, self.executor)
-        args = dict(self._env)
-        if "job" in args:
-            args["job"] = job
+        args = dict(self.links)
         args, preamble, epilogue = await self.build_env(args, job)
         start_time = datetime.now(tz=timezone.utc)
         running_job = self.executor.submit(self._timestamped_func, self.func, preamble, args, epilogue)
@@ -1233,11 +1212,11 @@ class KubeFunctionTask(KubeTask):
             repo_done,
             repo_func_done,
         )
-        async def my_task(job: str, inp: pydatatask.repomodule.MetadataRepository, out: pydatatask.MetadataRepository):
-            await out.dump(job, await inp.info(job))
+        async def my_task(inp, out):
+            await out.dump(await inp.info())
 
-        my_task.link("inp", repo_input, is_input=True)
-        my_task.link("out", repo_output, is_output=True)
+        my_task.link("inp", repo_input, LinkKind.InputRepo)
+        my_task.link("out", repo_output, LinkKind.OutputRepo)
     """
 
     def __init__(
@@ -1282,6 +1261,7 @@ class KubeFunctionTask(KubeTask):
             self.link(
                 "func_done",
                 func_done,
+                None,
                 required_for_output=True,
                 is_status=True,
                 inhibits_start=True,
@@ -1298,9 +1278,7 @@ class KubeFunctionTask(KubeTask):
 
         sig = inspect.signature(self.func, follow_wrapped=True)
         for name in sig.parameters.keys():
-            if name == "job":
-                self._func_env[name] = None
-            elif name in self.links:
+            if name in self.links:
                 self._func_env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
@@ -1315,9 +1293,7 @@ class KubeFunctionTask(KubeTask):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.debug("Launching --sync %s:%s...", self.name, job)
-        args = dict(self._func_env)
-        if "job" in args:
-            args["job"] = job
+        args = dict(self.links)
         args, preamble, epilogue = await self.build_env(args, job)
         try:
             for p in preamble:
@@ -1402,12 +1378,13 @@ class ContainerTask(Task):
         self.quota_manager.register(self._get_load)
 
         if logs is not None:
-            self.link("logs", logs, is_output=True)
+            self.link("logs", logs, None, is_output=True)
         if done is not None:
-            self.link("done", done, is_status=True, required_for_output=True, inhibits_start=True)
+            self.link("done", done, None, is_status=True, required_for_output=True, inhibits_start=True)
         self.link(
             "live",
             repomodule.LiveContainerRepository(self),
+            None,
             is_status=True,
             inhibits_start=True,
             inhibits_output=True,

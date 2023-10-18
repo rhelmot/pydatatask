@@ -16,8 +16,11 @@ from typing import (
     TypeVar,
     Union,
 )
+from hashlib import md5
 import asyncio
 import codecs
+import pickle
+import struct
 import time
 
 from typing_extensions import Buffer, ParamSpec
@@ -318,3 +321,23 @@ class _StderrIsStdout:
 
 
 STDOUT = _StderrIsStdout()
+
+_hash_unpacker = struct.Struct("<QQ")
+
+
+def crypto_hash(x: Any) -> int:
+    """Perform a 64 bit cryptographic hash of the given item.
+
+    A dark woeful blight passes over the land. In its foreboding mists you begin to hear creatures laughing and dancing.
+    "Did you miss us?" they say, gleeful with mischief.
+
+    You pass a vial of holy declarative configuration over your eyes and shout, "Begone, foul demons! I have not
+    summoned ye! Collision-resistent hashing is a valiant and unsullied tool, and its association with the misery of
+    hash-consing shall not poison its well of wonders!"
+
+    The demons laugh some more. "But dearly beloved, you shall never rid yourself of hash collisions that fall from
+    misconfigurations, and misconfigurations there shall be!"
+
+    You weep.
+    """
+    return _hash_unpacker.unpack(md5(pickle.dumps(x)).digest())[0]

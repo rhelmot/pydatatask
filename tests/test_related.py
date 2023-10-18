@@ -27,6 +27,29 @@ class TestRelated(unittest.IsolatedAsyncioTestCase):
         assert [x async for x in base2] == []
         await related2.delete("lsdlkjfj")
 
+    async def test_allocated(self):
+        source = pydatatask.InProcessMetadataRepository({"a": 1})
+        dest = pydatatask.InProcessMetadataRepository()
+        done = pydatatask.InProcessMetadataRepository()
+
+        @pydatatask.InProcessSyncTask("task", done)
+        async def task(source, dest, **kwargs):
+            await dest.dump(await source.info() + 1)
+
+        task.link("source", source, kind=pydatatask.LinkKind.InputRepo)
+        task.link("dest", dest, kind=pydatatask.LinkKind.OutputRepo, key="ALLOC", inhibits_start=True)
+
+        pipeline = pydatatask.Pipeline([task], pydatatask.Session(), [])
+        async with pipeline:
+            assert await pipeline.update()
+            assert not await pipeline.update()
+            assert "a" not in dest.data
+            assert "a" in done.data
+            assert list(dest.data.values()) == [2]
+            assert list(dest.data.keys()) == [str(task.derived_hash("a", "dest"))]
+            await done.delete("a")
+            assert not await pipeline.update()
+
 
 if __name__ == "__main__":
     unittest.main()

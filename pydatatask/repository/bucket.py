@@ -85,6 +85,9 @@ class S3BucketRepositoryBase(Repository):
         self.bucket = bucket
         self.endpoints = endpoints or {}
 
+    def __getstate__(self):
+        return (self.endpoints, self.bucket)
+
     @property
     def client(self):
         """The aiobotocore S3 client.
@@ -136,6 +139,9 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         self.prefix = prefix
         self.suffix = suffix
         self.mimetype = mimetype
+
+    def __getstate__(self):
+        return (super().__getstate__(), self.prefix, self.suffix, self.mimetype)
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"

@@ -7,6 +7,9 @@ import pydatatask
 class TestRepoBase(unittest.IsolatedAsyncioTestCase):
     async def test_derived(self):
         class DerivedRepository(pydatatask.Repository):
+            def __getstate__(self):
+                return "foo"
+
             async def unfiltered_iter(self):
                 yield "foo"
                 yield " "
@@ -28,6 +31,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
     async def test_map(self):
         class DerivedRepository(pydatatask.MetadataRepository):
+            def __getstate__(self):
+                return "foo"
+
             async def unfiltered_iter(self):
                 yield "foo"
                 yield "bar"

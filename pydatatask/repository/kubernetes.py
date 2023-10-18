@@ -21,6 +21,9 @@ class LiveKubeRepository(Repository):
     def __init__(self, task: "KubeTask"):
         self.task = task
 
+    def __getstate__(self):
+        return (self.task.name,)
+
     async def unfiltered_iter(self):
         for pod in await self.pods():
             yield pod.metadata.labels["job"]
@@ -53,6 +56,9 @@ class LiveContainerRepository(Repository):
 
     def __init__(self, task: "ContainerTask"):
         self.task = task
+
+    def __getstate__(self):
+        return (self.task.name,)
 
     async def unfiltered_iter(self):
         for name in await self.task.manager.live(self.task.name):

@@ -22,6 +22,9 @@ class MongoMetadataRepository(MetadataRepository):
         self._database = database
         self._collection = collection
 
+    def __getstate__(self):
+        return (self.collection,)  # uhhhhhh not enough!
+
     def __repr__(self):
         return f"<{type(self).__name__} {self._collection}>"
 

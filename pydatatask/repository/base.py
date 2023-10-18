@@ -95,6 +95,10 @@ class Repository(ABC):
         return self.filter_jobs(self.unfiltered_iter())
 
     @abstractmethod
+    def __getstate__(self) -> Any:
+        raise NotImplementedError
+
+    @abstractmethod
     def unfiltered_iter(self) -> AsyncGenerator[str, None]:
         """The core method of Repository.
 
@@ -112,7 +116,7 @@ class Repository(ABC):
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
-            return taskmodule.TemplateInfo(self)
+            return taskmodule.TemplateInfo(FixedItemRepository(self, job))
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
@@ -187,6 +191,9 @@ class MapRepository(MetadataRepository):
         self.func = func
         self.filter = filt
         self.allow_deletes = allow_deletes
+
+    def __getstate__(self):
+        return (self.base, self.func, self.filter, self.allow_deletes)
 
     async def contains(self, item):
         if self.filter is None or await self.filter(item):
@@ -266,6 +273,9 @@ class FileRepositoryBase(Repository, ABC):
         self.extension = extension
         self.case_insensitive = case_insensitive
 
+    def __getstate__(self):
+        return (self.basedir, self.extension, self.case_insensitive)
+
     async def contains(self, item):
         return await aiofiles.os.path.exists(self.basedir / (item + self.extension))
 
@@ -316,6 +326,34 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
             pass
 
 
+class FunctionCallMetadataRepository(MetadataRepository):
+    """A metadata repository which contains a synchronous function used to generate the info for each job."""
+
+    def __init__(self, info: Callable[[str], Any], domain: Repository):
+        self._info = info
+        self._domain = domain
+
+    def __getstate__(self):
+        return (self._info, self._domain)
+
+    async def contains(self, item: str):
+        return await self._domain.contains(item)
+
+    async def delete(self, job: str):
+        return
+
+    async def unfiltered_iter(self):
+        async for job in self._domain:
+            yield job
+
+    @job_getter
+    async def info(self, job: str):
+        return self._info(job)
+
+    async def dump(self, job: str, data: Any):
+        raise TypeError("Simply don't!")
+
+
 class RelatedItemRepository(Repository):
     """A repository which returns items from another repository based on following a related-item lookup."""
 
@@ -341,6 +379,9 @@ class RelatedItemRepository(Repository):
         self.allow_deletes = allow_deletes
         self.prefetch_lookup_setting = prefetch_lookup
         self.prefetch_lookup = None
+
+    def __getstate__(self):
+        return (self.base_repository, self.translator_repository, self.allow_deletes, self.prefetch_lookup_setting)
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.base_repository} by {self.translator_repository}>"
@@ -423,12 +464,37 @@ class RelatedItemMetadataRepository(RelatedItemRepository, MetadataRepository):
         raise TypeError("Simply don't!")
 
 
+class FixedItemRepository:
+    """The result of templating with the InputRepo or OutputRepo kind.
+
+    Provides access to all job-getter async functions from the given repository, but with the job parameter already
+    filled in.
+    """
+
+    def __init__(self, repo: Repository, job: str):
+        self._repo = repo
+        self._job = job
+
+    def __getattr__(self, item):
+        v = getattr(self._repo, item)
+        if not getattr(v, "is_job_getter", False):
+            raise AttributeError(item)
+
+        async def inner(*args, **kwargs):
+            return await v(self._job, *args, **kwargs)
+
+        return inner
+
+
 class AggregateAndRepository(Repository):
     """A repository which is said to contain a job if all its children also contain that job."""
 
     def __init__(self, **children: Repository):
         assert children
         self.children = children
+
+    def __getstate__(self):
+        return (self.children,)
 
     async def unfiltered_iter(self):
         counting = Counter()
@@ -455,6 +521,9 @@ class AggregateOrRepository(Repository):
     def __init__(self, **children: Repository):
         assert children
         self.children = children
+
+    def __getstate__(self):
+        return (self.children,)
 
     async def unfiltered_iter(self):
         seen = set()
@@ -484,6 +553,9 @@ class BlockingRepository(Repository):
         self.source = source
         self.unless = unless
         self.enumerate_unless = enumerate_unless
+
+    def __getstate__(self):
+        return (self.source, self.unless, self.enumerate_unless)
 
     async def unfiltered_iter(self):
         if self.enumerate_unless:
@@ -545,6 +617,9 @@ class ExecutorLiveRepo(Repository):
     def __init__(self, task: "taskmodule.ExecutorTask"):
         self.task = task
 
+    def __getstate__(self):
+        return (self.task.name,)
+
     def __repr__(self):
         return f"<{type(self).__name__} task={self.task.name}>"
 
@@ -566,6 +641,9 @@ class InProcessMetadataRepository(MetadataRepository):
 
     def __init__(self, data: Optional[Dict[str, Any]] = None):
         self.data: Dict[str, Any] = data if data is not None else {}
+
+    def __getstate__(self):
+        return id(self)
 
     def __repr__(self):
         return f"<{type(self).__name__}>"
@@ -602,6 +680,9 @@ class InProcessBlobStream:
         self.job = job
         self.data = io.BytesIO(repo.data.get(job, b""))
 
+    def __getstate__(self):
+        return id(self)
+
     async def read(self, n: int = -1, /) -> bytes:
         """Read up to ``n`` bytes from the stream."""
         return self.data.read(n)
@@ -627,6 +708,9 @@ class InProcessBlobRepository(BlobRepository):
 
     def __init__(self, data: Optional[Dict[str, bytes]] = None):
         self.data = data if data is not None else {}
+
+    def __getstate__(self):
+        return id(self)
 
     def __repr__(self):
         return f"<{type(self).__name__}>"

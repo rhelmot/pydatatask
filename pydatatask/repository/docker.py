@@ -35,6 +35,9 @@ class DockerRepository(Repository):
         self.domain = domain
         self.repository = repository
 
+    def __getstate__(self):
+        return (self.domain, self.repository)
+
     @property
     def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
         """The ``docker_registry_client_async`` client object.
