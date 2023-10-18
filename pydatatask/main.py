@@ -204,7 +204,7 @@ async def update(pipeline: Pipeline):
     await pipeline.update()
 
 
-async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool):
+async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool = False):
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     func = pipeline.update
