@@ -40,6 +40,7 @@ from pydatatask.repository.filesystem import FilesystemRepository
 from pydatatask.utils import async_copyfile
 
 from .pipeline import Pipeline
+from .quota import localhost_quota_manager
 from .repository import BlobRepository, MetadataRepository, Repository
 from .task import Link, Task
 
@@ -205,13 +206,19 @@ async def update(pipeline: Pipeline):
 
 
 async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool = False):
+    async def update_only_update_flush():
+        await pipeline.update_only_update()
+        for res in pipeline.quota_managers:
+            await res.flush()
+        await localhost_quota_manager.flush()
+
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     func = pipeline.update
     start = asyncio.get_running_loop().time()
     while await func() or forever:
         if launch_once:
-            func = pipeline.update_only_update
+            func = update_only_update_flush
         await asyncio.sleep(1)
         if timeout is not None and asyncio.get_running_loop().time() - start > timeout:
             raise TimeoutError("Pipeline run timeout")

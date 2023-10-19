@@ -163,7 +163,13 @@ class Link:
 class Task(ABC):
     """The Task base class."""
 
-    def __init__(self, name: str, ready: Optional["repomodule.Repository"] = None, disabled: bool = False):
+    def __init__(
+        self,
+        name: str,
+        ready: Optional["repomodule.Repository"] = None,
+        disabled: bool = False,
+        long_running: bool = False,
+    ):
         self.name = name
         self._ready = ready
         self.links: Dict[str, Link] = {}
@@ -171,6 +177,7 @@ class Task(ABC):
         self.metadata = True
         self.disabled = disabled
         self._related_cache: Dict[str, Any] = {}
+        self.long_running = long_running
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -316,7 +323,7 @@ class Task(ABC):
         else:
             result = repomodule.RelatedItemRepository(link.repo, mapped, prefetch_lookup=prefetch_lookup)
 
-        self._related_cache[linkname] = result
+        # self._related_cache[linkname] = result   # this would be nice but we need to flush the cache eventually
         return result
 
     @property
@@ -745,7 +752,7 @@ class ProcessTask(Task):
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
         :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
-                     linked as "pids" with ``is_status, inhibits_start, inhibits_output``.
+                     linked as "live" with ``is_status, inhibits_start, inhibits_output``.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
         :param environ: Additional environment variables to set on the target machine before running the task.
         :param window: How recently a process must have been launched in order to contribute to the process
@@ -791,7 +798,7 @@ class ProcessTask(Task):
 
         self.quota_manager.register(self._get_load)
 
-        self.link("pids", pids, None, is_status=True, inhibits_start=True, inhibits_output=True)
+        self.link("live", pids, None, is_status=True, inhibits_start=True, inhibits_output=True)
         if stdin is not None:
             self.link("stdin", stdin, None, is_input=True)
         if stdout is not None:

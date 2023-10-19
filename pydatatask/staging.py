@@ -375,8 +375,8 @@ class PipelineStaging:
             if child.spec.lockstep:
                 if subprocess.run(child.spec.lockstep, shell=True, cwd=child.basedir, check=False).returncode != 0:
                     raise Exception(
-                        f"Could not lock pipeline: lockstep of {child.basedir / child.filename} "
-                        f"failed ({child.spec.lockstep})"
+                        f"Could not lock pipeline: lockstep of {child.basedir / child.filename} failed:\n"
+                        f"{child.spec.lockstep.strip()}"
                     )
 
         result = PipelineStaging(basedir=self.basedir)

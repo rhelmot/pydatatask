@@ -101,9 +101,13 @@ class Pipeline:
             raise Exception("Pipeline must be opened")
 
         l.info("Running update...")
-        result: bool = await self.update_only_update() | await self.update_only_launch()
+        result1 = await self.update_only_update()
+        result2 = await self.update_only_launch()
+        for res in self.quota_managers:
+            await res.flush()
+        await localhost_quota_manager.flush()
         l.debug("Completed update")
-        return result
+        return result1 | result2
 
     async def update_only_update(self) -> bool:
         """Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this
@@ -116,9 +120,6 @@ class Pipeline:
 
         to_gather = [task.update() for task in self.tasks.values()]
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
-        for res in self.quota_managers:
-            await res.flush()
-        await localhost_quota_manager.flush()
         return any(gathered)
 
     async def update_only_launch(self) -> bool:
@@ -179,8 +180,6 @@ class Pipeline:
             l.debug("Launching jobs of priority %s", prio_queue[0][0])
             await asyncio.gather(leader(prio_queue), *[worker() for _ in range(N_WORKERS)])
 
-        for res in self.quota_managers:
-            await res.flush()
         return True
 
     async def gather_ready_jobs(self, task: Task) -> Set[str]:
