@@ -37,6 +37,7 @@ import inspect
 import logging
 import os
 import shlex
+import string
 import sys
 import traceback
 
@@ -150,7 +151,7 @@ class Link:
 
     repo: "repomodule.Repository"
     kind: Optional[LinkKind] = None
-    key: Optional[str] = None
+    key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None
     is_input: bool = False
     is_output: bool = False
     is_status: bool = False
@@ -221,16 +222,29 @@ class Task(ABC):
             repomodule.AggregateOrRepository(**self.inhibits_start),
         )
 
-    def derived_hash(self, job: str, link_name: str) -> int:
-        """For allocate-key links, determine the allocated job id."""
-        return crypto_hash([job, self.name, link_name, self.links[link_name].repo])
+    def derived_hash(self, job: str, link_name: str, along: bool = True) -> str:
+        """For allocate-key links, determine the allocated job id.
+
+        If along=False, determine the input job id which produced the allocated job id.
+        """
+        hashed = crypto_hash([self.name, link_name, self.links[link_name].repo])
+        sign = 1 if along else -1
+        if job.isdigit() and 0 <= int(job) < 2**64:
+            return str((int(job) + sign * hashed) % 2**64)
+        if all(c in string.hexdigits for c in job) and len(job) % 2 == 0:
+            bytesjob = bytes.fromhex(job)
+            intjob = int.from_bytes(bytesjob, "big")
+            length = len(bytesjob)
+            modulus = 2 ** (len(bytesjob) * 8)
+            return ((intjob + sign * hashed) % modulus).to_bytes(length, "big").hex()
+        raise ValueError("Fatal: Job must be structured (long decimal or arbitrary hex) to derive a hash")
 
     def link(
         self,
         name: str,
         repo: "repomodule.Repository",
         kind: Optional[LinkKind],
-        key: Optional[str] = None,
+        key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
         is_status: bool = False,
@@ -241,12 +255,13 @@ class Task(ABC):
     ):
         """Create a link between this task and a repository.
 
-        All the nullable paramters have their defaults picked based on other paramters.
+        All the nullable paramters have their defaults picked based on other parameters.
 
         :param name: The name of the link. Used during templating.
         :param repo: The repository to link.
         :param kind: The way to transform this repository during templating.
         :param key: A related item from a different link to use instead of the current job when doing repository lookup.
+            Or, a function taking the task's job and producing the desired job to do a lookup for.
         :param is_input: Whether this repository contains data which is consumed by the task. Default based on kind.
         :param is_output: Whether this repository is populated by the task. Default based on kind.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
@@ -266,7 +281,7 @@ class Task(ABC):
         if required_for_start is None:
             required_for_start = is_input
         if required_for_output is None:
-            required_for_output = is_output
+            required_for_output = False
         if inhibits_start is None:
             inhibits_start = False
         if inhibits_output is None:
@@ -300,10 +315,15 @@ class Task(ABC):
             return link.repo
         if link.key == "ALLOC":
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
-                lambda job: str(self.derived_hash(job, linkname)), repomodule.AggregateAndRepository(**self.input)
+                lambda job: self.derived_hash(job, linkname), repomodule.AggregateAndRepository(**self.input)
             )
             prefetch_lookup = False
 
+        elif callable(link.key):
+            mapped = repomodule.FunctionCallMetadataRepository(
+                link.key, repomodule.AggregateAndRepository(**self.input)
+            )
+            prefetch_lookup = False
         else:
             splitkey = link.key.split(".")
             related = self._repo_related(splitkey[0], seen)
@@ -431,7 +451,9 @@ class Task(ABC):
             subjob = orig_job
             if link.key is not None:
                 if link.key == "ALLOC":
-                    subjob = str(self.derived_hash(orig_job, env_name))
+                    subjob = self.derived_hash(orig_job, env_name)
+                elif callable(link.key):
+                    subjob = await link.key(orig_job)
                 else:
                     items = link.key.split(".")
                     if items[0] in result:
@@ -448,7 +470,7 @@ class Task(ABC):
                 epilogue.append(arg.epilogue)
             if env_name in pending:
                 for env_name2, link in pending[env_name]:
-                    assert link.key is not None
+                    assert isinstance(link.key, str)
                     assert link.kind is not None
                     subjob = subkey(link.key.split("."))
                     arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)

@@ -327,7 +327,7 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
 
 
 class FunctionCallMetadataRepository(MetadataRepository):
-    """A metadata repository which contains a synchronous function used to generate the info for each job."""
+    """A metadata repository which contains a function used to generate the info for each job."""
 
     def __init__(self, info: Callable[[str], Any], domain: Repository):
         self._info = info
@@ -348,7 +348,10 @@ class FunctionCallMetadataRepository(MetadataRepository):
 
     @job_getter
     async def info(self, job: str):
-        return self._info(job)
+        result = self._info(job)
+        if inspect.iscoroutine(result):
+            result = await result
+        return result
 
     async def dump(self, job: str, data: Any):
         raise TypeError("Simply don't!")

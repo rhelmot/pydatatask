@@ -3,12 +3,25 @@
 Relationships between the tasks are implicit, defined by which repositories they share.
 """
 
-from typing import Callable, Dict, Iterable, Optional, Set, Tuple, Union
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 import asyncio
 import logging
 
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
+
+from pydatatask.repository.base import MetadataRepository
+from pydatatask.utils import supergetattr_path
 
 from .quota import QuotaManager, localhost_quota_manager
 from .repository import Repository
@@ -43,6 +56,7 @@ class Pipeline:
         self.session = session
         self.quota_managers = list(quota_managers)
         self.priority = priority
+        self._graph: Optional["networkx.classes.digraph.DiGraph"] = None
 
     def settings(self, synchronous=False, metadata=True):
         """This method can be called to set properties of the current run.
@@ -68,16 +82,32 @@ class Pipeline:
     async def __aenter__(self):
         await self.open()
 
-    async def open(self):
+    async def open(self) -> None:
         """Opens the pipeline and its associated session.
 
         This will be automatically when entering an ``async with pipeline:`` block.
         """
         if self._opened:
             raise Exception("Pipeline is alredy used")
-        self._opened = True
+
+        graph = self.task_graph
+        u: Task
+        v: Task
+        for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
+            if u is v or u.long_running:
+                continue
+            for name, link in list(u.links.items()):
+                link_attrs = {}
+                if link.inhibits_output:
+                    link_attrs["inhibits_start"] = True
+                if link.required_for_output:
+                    link_attrs["required_for_start"] = True
+                if link_attrs:
+                    v.link(f"{u.name}_{name}", link.repo, None, self._make_single_func(attrs["rfollow"]), **link_attrs)
+
         await self.session.open()
         await self._validate()
+        self._opened = True
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_val is not None:
@@ -192,17 +222,81 @@ class Pipeline:
             result.add(job)
         return result
 
+    @staticmethod
+    def _make_single_func(func: Callable[[str], Awaitable[List[str]]]) -> Callable[[str], Awaitable[str]]:
+        async def result(job):
+            out = await func(job)
+            if not out:
+                raise ValueError("Produced zero related keys, needed at least one")
+            return out[0]
+
+        return result
+
+    def _make_follow_func(
+        self, task: Task, link_name: str, along: bool
+    ) -> Optional[Callable[[str], Awaitable[List[str]]]]:
+        link = task.links[link_name]
+        if link.key is None:
+
+            async def result1(job):
+                return [job]
+
+            return result1
+
+        if link.key == "ALLOC":
+
+            async def result2(job):
+                return [task.derived_hash(job, link_name, along)]
+
+            return result2
+
+        if callable(link.key):
+            if not along:
+                return None
+
+            async def result4(job):
+                assert callable(link.key)
+                return [await link.key(job)]
+
+            return result4
+
+        if along ^ link.is_output:
+            return None
+
+        splitkey = link.key.split(".")
+        related = task._repo_related(splitkey[0])
+        if not isinstance(related, MetadataRepository):
+            raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
+
+        async def mapper(info):
+            return str(supergetattr_path(info, splitkey[1:]))
+
+        mapped = related.map(mapper)
+
+        async def result3(job):
+            return [str(await mapped.info(job))]
+
+        return result3
+
+    @property
     def graph(self) -> "networkx.classes.digraph.DiGraph":
         """Generate the dependency graph for a pipeline.
 
         This is a directed graph containing both repositories and tasks as nodes.
         """
+        if self._graph is not None:
+            return self._graph
+
         result: networkx.classes.digraph.DiGraph = networkx.classes.digraph.DiGraph()
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
+                follow = self._make_follow_func(task, link_name, True)
+                rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
                 attrs["link_name"] = link_name
+                attrs["follow"] = follow
+                attrs["rfollow"] = rfollow
                 repo = attrs.pop("repo")
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
                     result.add_edge(repo, task, **attrs)
@@ -211,6 +305,37 @@ class Pipeline:
                 else:
                     result.add_edge(task, repo, **attrs)
 
+        self._graph = result
+        return result
+
+    @staticmethod
+    def _combine_follows(
+        a: Optional[Callable[[str], Awaitable[List[str]]]], b: Optional[Callable[[str], Awaitable[List[str]]]]
+    ) -> Optional[Callable[[str], Awaitable[List[str]]]]:
+        if a is None or b is None:
+            return None
+
+        async def result(job: str) -> List[str]:
+            assert a is not None and b is not None
+            intermediate = await a(job)
+            return [final for ijob in intermediate for final in await b(ijob)]
+
+        return result
+
+    @property
+    def task_graph(self) -> "networkx.classes.digraph.DiGraph":
+        """A directed dependency graph of just the tasks, derived from the links between tasks and repositories."""
+        result: "networkx.classes.digraph.DiGraph" = networkx.DiGraph()
+        for repo in [node for node in self.graph if isinstance(node, Repository)]:
+            in_edges = list(self.graph.in_edges(repo, data=True))
+            out_edges = list(self.graph.out_edges(repo, data=True))
+            for u, _, udata in in_edges:  # type: ignore[misc]
+                assert isinstance(u, Task)
+                for _, v, vdata in out_edges:  # type: ignore[misc]
+                    assert isinstance(v, Task)
+                    follow = self._combine_follows(udata["follow"], vdata["follow"])
+                    rfollow = self._combine_follows(vdata["rfollow"], udata["rfollow"])
+                    result.add_edge(u, v, follow=follow, rfollow=rfollow)
         return result
 
     def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:
@@ -219,9 +344,8 @@ class Pipeline:
         :param node: The starting point of the graph traversal.
         :param recursive: Whether to return only direct dependencies (False) or transitive dependencies (True) of node.
         """
-        graph = self.graph()
         if recursive:
-            yield from networkx.algorithms.traversal.depth_first_search.dfs_preorder_nodes(graph, source=node)
+            yield from networkx.algorithms.traversal.depth_first_search.dfs_preorder_nodes(self.graph, source=node)
         else:
             yield node
-            yield from graph.successors(node)
+            yield from self.graph.successors(node)
