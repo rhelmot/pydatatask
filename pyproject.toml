@@ -36,6 +36,10 @@ dependencies = [
     "aiohttp>=3.9.0b0",
 ]
 
+[project.scripts]
+pydatatask-lock = "pydatatask.cli.lock:main"
+pydatatask = "pydatatask.cli.main:_main"
+
 [project.optional-dependencies]
 all = [
     "pydatafs"
