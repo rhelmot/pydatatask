@@ -38,7 +38,9 @@ dependencies = [
 
 [project.scripts]
 pydatatask-lock = "pydatatask.cli.lock:main"
+pdl = "pydatatask.cli.lock:main"
 pydatatask = "pydatatask.cli.main:_main"
+pd = "pydatatask.cli.main:_main"
 
 [project.optional-dependencies]
 all = [
