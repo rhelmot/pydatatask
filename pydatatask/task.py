@@ -110,6 +110,7 @@ async def render_template(template, env: Dict[str, Any]):
         keep_trailing_newline=True,
     )
     j.filters["shquote"] = shlex.quote
+    j.filters["to_yaml"] = yaml.safe_dump
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
         async with aiofiles.open(template, "r") as fp:
