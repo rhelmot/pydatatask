@@ -476,8 +476,10 @@ class Task(ABC):
                     subjob = subkey(link.key.split("."))
                     arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
                     result[env_name2] = arg.arg
-                    preamble.append(arg.preamble)
-                    epilogue.append(arg.epilogue)
+                    if arg.preamble is not None:
+                        preamble.append(arg.preamble)
+                    if arg.epilogue is not None:
+                        epilogue.append(arg.epilogue)
                 pending.pop(env_name)
 
         if pending:
