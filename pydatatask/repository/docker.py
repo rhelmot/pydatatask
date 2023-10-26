@@ -76,6 +76,7 @@ class DockerRepository(Repository):
 
     def _dxf_auth(self, dxf_obj, response):
         # what a fucking hack
+        assert self.registry.credentials is not None
         for pattern, credentials in self.registry.credentials.items():
             if pattern.fullmatch(self.domain):
                 result = credentials
@@ -104,6 +105,6 @@ class DockerRepository(Repository):
             auth=self._dxf_auth,
             insecure=not self.registry.ssl,
         )
-        d.push_blob(data=random_data, digest=random_digest)
+        d.push_blob(data=[random_data], digest=random_digest)
         d.set_alias(job, random_digest)
         d.del_alias(job)

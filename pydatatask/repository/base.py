@@ -8,12 +8,9 @@ from typing import (
     AsyncIterator,
     Awaitable,
     Callable,
-    Dict,
-    Literal,
-    Optional,
-    Union,
-    overload,
 )
+from typing import Counter as TypedCounter
+from typing import Dict, Literal, Optional, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
@@ -397,7 +394,7 @@ class RelatedItemRepository(Repository):
         self.translator_repository = translator_repository
         self.allow_deletes = allow_deletes
         self.prefetch_lookup_setting = prefetch_lookup
-        self.prefetch_lookup = None
+        self.prefetch_lookup: Optional[Dict[str, Any]] = None
 
     def __getstate__(self):
         return (self.base_repository, self.translator_repository, self.allow_deletes, self.prefetch_lookup_setting)
@@ -516,7 +513,7 @@ class AggregateAndRepository(Repository):
         return (self.children,)
 
     async def unfiltered_iter(self):
-        counting = Counter()
+        counting: "TypedCounter[str]" = Counter()
         async for item in roundrobin([child.unfiltered_iter() for child in self.children.values()]):
             counting[item] += 1
             if counting[item] == len(self.children):

@@ -98,6 +98,7 @@ version = {attr = "pydatatask.__version__"}
 
 [tool.mypy]
 python_version = "3.8"
+check_untyped_defs = true
 
 # https://github.com/tomplus/kubernetes_asyncio/issues/230
 [[tool.mypy.overrides]]

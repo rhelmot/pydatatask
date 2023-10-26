@@ -5,6 +5,7 @@ from typing import (
     AsyncContextManager,
     AsyncGenerator,
     AsyncIterator,
+    Coroutine,
     Dict,
     List,
     Optional,
@@ -206,7 +207,7 @@ class FilesystemRepository(abc.ABC):
                 async for member in self.iter_members(job):
                     info = tarfile.TarInfo(member.name)
                     data = None
-                    pproducer = ()
+                    pproducer: Tuple[Coroutine[Any, Any, Any], ...] = ()
                     if member.type == FilesystemType.FILE:
                         info.type = tarfile.REGTYPE
                         assert member.content_size is not None

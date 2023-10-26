@@ -219,7 +219,8 @@ def _build_docker_connection(
 def _build_mongo_connection(url: str, database: str):
     async def mongo():
         client = motor.motor_asyncio.AsyncIOMotorClient(url)
-        collection = client.get_database(database)
+        # is this a bug in the motor stubs?
+        collection = client.get_database(database)  # type: ignore[var-annotated]
         yield collection
 
     return mongo
@@ -339,7 +340,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
     for ep in entry_points(group="pydatatask.repository_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(ephemerals)
+            kinds.update(maker(ephemerals))
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     return make_dispatcher("Repository", kinds)
@@ -392,7 +393,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
     for ep in entry_points(group="pydatatask.executor_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(ephemerals)
+            kinds.update(maker(ephemerals))
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     return make_dispatcher("Executor", kinds)
@@ -465,7 +466,7 @@ def build_ephemeral_picker() -> Callable[[Any], Ephemeral[Any]]:
     for ep in entry_points(group="pydatatask.ephemeral_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker()
+            kinds.update(maker())
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     return make_dispatcher("Ephemeral", kinds)
@@ -564,14 +565,14 @@ def build_task_picker(
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()
         try:
-            kinds |= maker(repos, quotas, ephemerals)
+            kinds.update(maker(repos, quotas, ephemerals))
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     dispatcher = make_dispatcher("Task", kinds)
 
     def constructor(name, thing):
         executable = thing.pop("executable")
-        executable["args"] |= thing
+        executable["args"].update(thing)
         executable["args"]["name"] = name
         links = links_constructor(executable["args"].pop("links", {}) or {})
         task = dispatcher(executable)

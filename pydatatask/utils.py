@@ -2,7 +2,6 @@
 particular."""
 
 from typing import (
-    IO,
     Any,
     AsyncContextManager,
     AsyncIterator,
@@ -342,7 +341,7 @@ class AsyncWriterQueueStream:
         return 0
 
 
-class QueueStream(IO[bytes]):
+class QueueStream:
     """A stream queue with synchronous-nonblocking reader and synchronous-blocking writer."""
 
     def __init__(self) -> None:

@@ -1,5 +1,5 @@
 """This module contains repositories for interacting with MongoDB as a data store."""
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 import motor.core
 import motor.motor_asyncio
@@ -50,7 +50,8 @@ class MongoMetadataRepository(MetadataRepository):
     async def info(self, job):
         """The info of a mongo metadata repository is the literal value stored in the repository with identifier
         ``job``."""
-        result = await self.collection.find_one({"_id": job})
+        # WHY does mypy think this doesn't work
+        result: Optional[Any] = await self.collection.find_one({"_id": job})  # type: ignore[func-returns-value]
         if result is None:
             result = {}
         return result

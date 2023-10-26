@@ -295,6 +295,8 @@ class SSHLinuxFile:
         return self.fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        assert self.fp_mgr is not None
+        assert self.sftp_mgr is not None
         await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
         await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 

@@ -243,7 +243,17 @@ class PipelineStaging:
             self.executors_fulfilled_by_parents = {k: v for k, v in params.executors.items() if v is not None}
             self.executors_promised_by_parents = {k for k, v in params.executors.items() if v is None}
 
-            assert not set(self.spec.repos) & set(self.spec.repo_classes)
+            unused = (
+                (set(self.repos_fulfilled_by_parents) | set(self.repos_promised_by_parents))
+                - set(self.spec.repos)
+                - set(self.spec.repo_classes)
+            )
+            if unused:
+                raise ValueError(f"Unused parameters to {self.basedir / self.filename}: {unused}")
+
+            overlap = set(self.spec.repos) & set(self.spec.repo_classes)
+            if overlap:
+                raise ValueError(f"Overlapping repos and repo_classes in {self.basedir / self.filename}: {overlap}")
 
             for imp_name, imp in self.spec.imports.items():
                 if imp.path is None:
