@@ -1485,6 +1485,7 @@ class ContainerTask(Task):
         done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
+        privileged: Optional[bool] = False,
     ):
         """
         :param name: The name of this task.
@@ -1524,6 +1525,7 @@ class ContainerTask(Task):
         self._manager: Optional[AbstractContainerManager] = None
         self.warned = False
         self.window = window
+        self.privileged = privileged
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
 
         self.quota_manager.register(self._get_load)
