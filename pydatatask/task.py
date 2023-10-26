@@ -1593,6 +1593,8 @@ class ContainerTask(Task):
                 item.close()
 
         mounts = self.mount_directives.pop(job, [])
+
+        privileged = True if self.privileged else False
         await self.manager.launch(
-            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts
+            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts, privileged,
         )
