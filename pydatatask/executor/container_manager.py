@@ -225,6 +225,9 @@ class KubeContainerManager(AbstractContainerManager):
                                     "memory": str(quota.mem),
                                 },
                             },
+                            "securityContext": {
+                                "privileged": privileged,
+                            },
                         }
                     ],
                 },
