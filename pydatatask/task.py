@@ -1594,7 +1594,7 @@ class ContainerTask(Task):
 
         mounts = self.mount_directives.pop(job, [])
 
-        privileged = True if self.privileged else False
+        privileged = bool(self.privileged)
         await self.manager.launch(
             self.name,
             job,
