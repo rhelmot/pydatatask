@@ -48,7 +48,10 @@ else:
 
     def _reprocess(value, ty):
         if isinstance(ty, ForwardRef):
-            ty = ty._evaluate(globals(), locals(), set())
+            try:
+                ty = ty._evaluate(globals(), locals(), set())
+            except TypeError:
+                ty = ty._evaluate(globals(), locals())
         if is_dataclass(ty) and isinstance(value, dict):
             return ty(**value)
         elif get_origin(ty) is dict and isinstance(value, dict):

@@ -405,7 +405,10 @@ async def cat_data_inner(item: Repository, job: str, stream: AWriteStreamBase):
     elif isinstance(item, MetadataRepository):
         data_bytes = await item.info(job)
         data_str = yaml.safe_dump(data_bytes, None)
-        await stream.write(data_str)
+        if isinstance(data_str, str):
+            await stream.write(data_str.encode())
+        else:
+            await stream.write(data_str)
     elif isinstance(item, FilesystemRepository):
         await item.get_tarball(job, stream)
     else:
