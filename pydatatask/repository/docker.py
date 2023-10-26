@@ -105,6 +105,7 @@ class DockerRepository(Repository):
             auth=self._dxf_auth,
             insecure=not self.registry.ssl,
         )
-        d.push_blob(data=[random_data], digest=random_digest)
+        # type stubs seem to be wrong
+        d.push_blob(data=random_data, digest=random_digest)  # type: ignore
         d.set_alias(job, random_digest)
         d.del_alias(job)
