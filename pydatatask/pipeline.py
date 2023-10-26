@@ -109,15 +109,15 @@ class Pipeline:
         graph = self.task_graph
         u: Task
         v: Task
-        for u, v, _, attrs in graph.edges(data=True):  # type: ignore[misc]
+        for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
             if u is v or u.long_running:
                 continue
             for name, link in list(u.links.items()):
                 link_attrs = {}
                 if link.inhibits_output:
-                    link_attrs["inhibits_start"] = attrs["vlink"]
+                    link_attrs["inhibits_start"] = True
                 elif link.required_for_output:
-                    link_attrs["required_for_start"] = True
+                    link_attrs["required_for_start"] = attrs["vlink"]
                 if link_attrs:
                     v.link(
                         f"{u.name}_{name}",
