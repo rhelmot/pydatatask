@@ -1596,5 +1596,13 @@ class ContainerTask(Task):
 
         privileged = True if self.privileged else False
         await self.manager.launch(
-            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts, privileged,
+            self.name,
+            job,
+            self.image,
+            list(self.entrypoint),
+            exe_txt,
+            self.environ,
+            self.job_quota,
+            mounts,
+            privileged,
         )
