@@ -559,6 +559,7 @@ def build_task_picker(
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
+                "privileged": parse_bool,
             },
         ),
     }
