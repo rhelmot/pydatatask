@@ -4,8 +4,10 @@ Relationships between the tasks are implicit, defined by which repositories they
 """
 
 from typing import (
+    Any,
     Awaitable,
     Callable,
+    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -14,6 +16,7 @@ from typing import (
     Tuple,
     Union,
 )
+from collections import defaultdict
 import asyncio
 import logging
 
@@ -106,14 +109,14 @@ class Pipeline:
         graph = self.task_graph
         u: Task
         v: Task
-        for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
+        for u, v, _, attrs in graph.edges(data=True):  # type: ignore[misc]
             if u is v or u.long_running:
                 continue
             for name, link in list(u.links.items()):
                 link_attrs = {}
                 if link.inhibits_output:
-                    link_attrs["inhibits_start"] = True
-                if link.required_for_output:
+                    link_attrs["inhibits_start"] = attrs["vlink"]
+                elif link.required_for_output:
                     link_attrs["required_for_start"] = True
                 if link_attrs:
                     v.link(
@@ -343,9 +346,9 @@ class Pipeline:
         return result
 
     @property
-    def task_graph(self) -> "networkx.classes.digraph.DiGraph":
+    def task_graph(self) -> "networkx.classes.multidigraph.MultiDiGraph":
         """A directed dependency graph of just the tasks, derived from the links between tasks and repositories."""
-        result: "networkx.classes.digraph.DiGraph" = networkx.DiGraph()
+        result: "networkx.classes.multidigraph.MultiDiGraph" = networkx.MultiDiGraph()
         for repo in [node for node in self.graph if isinstance(node, Repository)]:
             in_edges = list(self.graph.in_edges(repo, data=True))
             out_edges = list(self.graph.out_edges(repo, data=True))
@@ -355,7 +358,15 @@ class Pipeline:
                     assert isinstance(v, Task)
                     follow = self._combine_follows(udata["follow"], vdata["follow"])
                     rfollow = self._combine_follows(vdata["rfollow"], udata["rfollow"])
-                    result.add_edge(u, v, follow=follow, rfollow=rfollow)
+                    result.add_edge(
+                        u,
+                        v,
+                        follow=follow,
+                        rfollow=rfollow,
+                        repo=repo,
+                        ulink=udata["link_name"],
+                        vlink=vdata["link_name"],
+                    )
         return result
 
     def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:

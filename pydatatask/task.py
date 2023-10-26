@@ -161,7 +161,7 @@ class Link:
     is_output: bool = False
     is_status: bool = False
     inhibits_start: bool = False
-    required_for_start: bool = False
+    required_for_start: Union[bool, str] = False
     inhibits_output: bool = False
     required_for_output: bool = False
 
@@ -314,8 +314,20 @@ EOF
         If an override is not provided to the constructor, this is that, otherwise it is
         ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
         """
+        base_listing = []
+        scoped_listing = defaultdict(list)
+        for link_name, (repo, scope) in self.required_for_start.items():
+            if scope is True:
+                base_listing.append((link_name, repo))
+            else:
+                scoped_listing[scope].append((link_name, repo))
+        for scope, scope_listing in scoped_listing.items():
+            if len(scope_listing) > 1:
+                base_listing.append(scope_listing[0])
+            else:
+                base_listing.append((str(scope), repomodule.AggregateOrRepository(**dict(scope_listing))))
         return repomodule.BlockingRepository(
-            repomodule.AggregateAndRepository(**self.required_for_start),
+            repomodule.AggregateAndRepository(**dict(base_listing)),
             repomodule.AggregateOrRepository(**self.inhibits_start),
         )
 
@@ -347,7 +359,7 @@ EOF
         is_output: Optional[bool] = None,
         is_status: bool = False,
         inhibits_start: Optional[bool] = None,
-        required_for_start: Optional[bool] = None,
+        required_for_start: Optional[Union[bool, str]] = None,
         inhibits_output: Optional[bool] = None,
         required_for_output: Optional[bool] = None,
     ):
@@ -379,10 +391,10 @@ EOF
             is_output = kind in OUTPUT_KINDS
         if required_for_start is None:
             required_for_start = is_input
-        if required_for_output is None:
-            required_for_output = False
         if inhibits_start is None:
             inhibits_start = False
+        if required_for_output is None:
+            required_for_output = False
         if inhibits_output is None:
             inhibits_output = False
         if key == "ALLOC" and is_input:
@@ -454,12 +466,9 @@ EOF
         If an override is provided to the constructor, this is that, otherwise it is
         ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
         """
-        if self._ready is not None:
-            return self._ready
-        return repomodule.BlockingRepository(
-            repomodule.AggregateAndRepository(**self.required_for_start),
-            repomodule.AggregateOrRepository(**self.inhibits_start),
-        )
+        if self._ready is None:
+            self._ready = self._make_ready()
+        return self._ready
 
     @property
     def input(self):
@@ -484,7 +493,11 @@ EOF
     @property
     def required_for_start(self):
         """A mapping from link name to repository for all links marked ``required_for_start``."""
-        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_start}
+        return {
+            name: (self._repo_related(name), link.required_for_start)
+            for name, link in self.links.items()
+            if link.required_for_start
+        }
 
     @property
     def inhibits_output(self):
