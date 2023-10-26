@@ -587,7 +587,7 @@ EOF
                     assert link.kind is not None
                     subjob = subkey(link.key.split("."))
                     arg = self.instrument_arg(
-                        orig_job, await link.repo.template(subjob, self, link.kind, env_name), link.kind
+                        orig_job, await link.repo.template(subjob, self, link.kind, env_name2), link.kind
                     )
                     result[env_name2] = arg.arg
                     if arg.preamble is not None:
