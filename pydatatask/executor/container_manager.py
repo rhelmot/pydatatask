@@ -33,6 +33,7 @@ class AbstractContainerManager(ABC, Executor):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
+        privileged: bool,
     ):
         """Launch a container with the given parameters.
 
@@ -195,6 +196,7 @@ class KubeContainerManager(AbstractContainerManager):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
+        privileged: bool,
     ):
         if mounts:
             raise ValueError("Cannot do mounts from a container on a kube cluster")
