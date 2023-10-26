@@ -21,6 +21,7 @@ from typing import (
     get_origin,
 )
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from datetime import datetime
 from pathlib import Path
 import os
 import random
@@ -88,6 +89,7 @@ class LinkSpec:
     repo: str
     kind: str
     key: Optional[str] = None
+    multi_meta: Optional[str] = None
 
 
 @_dataclass_serial
@@ -176,6 +178,10 @@ class PipelineSpec:
     ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
     imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
     lockstep: str = ""
+    agent_port: int = 6132
+    agent_hosts: Dict[Optional[str], str] = field(default_factory=dict)
+    agent_version: str = "unversioned"
+    agent_secret: str = "insecure"
 
 
 @_dataclass_serial
@@ -315,6 +321,10 @@ class PipelineStaging:
         if not missing.ready():
             raise ValueError("Cannot instantiate pipeline - missing definitions for repositories or executors")
 
+        def nameit(d, name):
+            d["name"] = name
+            return d
+
         ephemeral_constructor = build_ephemeral_picker()
         repo_cache: Dict[int, Repository] = {}
         ephemeral_cache: Dict["PipelineStaging", Dict[str, Ephemeral[Any]]] = {}
@@ -331,10 +341,6 @@ class PipelineStaging:
             repo_constructor = build_repository_picker(ephemerals)
             repos = {name: repo_constructor(asdict(value)) for name, value in staging.spec.repos.items()}
             repo_cache.update({id(staging.spec.repos[name]): repo for name, repo in repos.items()})
-
-            def nameit(d, name):
-                d["name"] = name
-                return d
 
             hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in staging.spec.hosts.items()}
 
@@ -363,7 +369,19 @@ class PipelineStaging:
                     dict_spec["executor"] = task_name
                 all_tasks.append(task_constructor(task_name, dict_spec))
 
-        return Pipeline(all_tasks, session, all_quotas, self._get_priority)
+        root_hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in self.spec.hosts.items()}
+        return Pipeline(
+            all_tasks,
+            session,
+            all_quotas,
+            self._get_priority,
+            agent_port=self.spec.agent_port,
+            agent_hosts={
+                root_hosts[name] if name is not None else None: val for name, val in self.spec.agent_hosts.items()
+            },
+            agent_secret=self.spec.agent_secret,
+            agent_version=self.spec.agent_version,
+        )
 
     def allocate(
         self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Dispatcher
@@ -385,6 +403,10 @@ class PipelineStaging:
         result.spec.executors.update(executors)
         result.spec.imports["locked"] = spec
         result.spec.lockstep = "echo 'This is a lockfile - do not lock it' && false"
+        result.spec.agent_port = random.randrange(0x4000, 0x8000)
+        result.spec.agent_version = datetime.now().isoformat()
+        result.spec.agent_secret = str(random.randint(10**40, 10**41))
+        result.spec.agent_hosts = {}
         spec.path = str(self.basedir / self.filename)
         return result
 

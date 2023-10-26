@@ -490,6 +490,7 @@ def build_task_picker(
             "repo": make_picker("Repository", repos),
             "kind": link_kind_constructor,
             "key": lambda thing: None if thing is None else str(thing),
+            "multi_meta": lambda thing: None if thing is None else str(thing),
             "is_input": parse_bool,
             "is_output": parse_bool,
             "is_status": parse_bool,

@@ -30,14 +30,14 @@ import argparse
 import asyncio
 import logging
 import re
-import sys
 
+from aiohttp import web
 import aiofiles
 import IPython
 import yaml
 
 from pydatatask.repository.filesystem import FilesystemRepository
-from pydatatask.utils import async_copyfile
+from pydatatask.utils import AReadStreamBase, AWriteStreamBase, async_copyfile
 
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
@@ -170,6 +170,14 @@ def main(
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
     parser_shell.set_defaults(func=shell)
 
+    parser_http_agent = subparsers.add_parser(
+        "agent-http", help="Launch an http server to accept reads and writes from repositories"
+    )
+    parser_http_agent.set_defaults(func=http_agent)
+    parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
+    parser_http_agent.add_argument("--port", help="The port to listen on", default=6132, type=int)
+    parser_http_agent.add_argument("--secret", help="The token to use for authentication", required=True)
+
     if fuse is not None:
         parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
         parser_fuse.set_defaults(func=fuse)
@@ -203,6 +211,56 @@ def shell(pipeline: Pipeline):
 
 async def update(pipeline: Pipeline):
     await pipeline.update()
+
+
+def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
+    app = web.Application()
+
+    def authorize(f):
+        async def inner(request: web.Request) -> web.StreamResponse:
+            if request.cookies.get("secret", None) != secret:
+                raise web.HTTPForbidden()
+            return await f(request)
+
+        return inner
+
+    def parse(f):
+        async def inner(request: web.Request) -> web.StreamResponse:
+            try:
+                repo = pipeline.tasks[request.match_info["task"]].links[request.match_info["link"]].repo
+            except KeyError as e:
+                raise web.HTTPNotFound() from e
+            return await f(request, repo, request.match_info["job"])
+
+        return inner
+
+    @authorize
+    @parse
+    async def get(request: web.Request, repo: Repository, job: str) -> web.StreamResponse:
+        response = web.StreamResponse()
+        await response.prepare(request)
+        await cat_data_inner(repo, job, response)
+        await response.write_eof()
+        return response
+
+    @authorize
+    @parse
+    async def post(request: web.Request, repo: Repository, job: str) -> web.StreamResponse:
+        await inject_data_inner(repo, job, request.content)
+        return web.Response(text=job)
+
+    app.add_routes([web.get("/{task}/{link}/{job}", get), web.post("/{task}/{link}/{job}", post)])
+
+    async def on_startup(_app):
+        await pipeline.open()
+
+    async def on_shutdown(_app):
+        await pipeline.close()
+
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    web.run_app(app, host=host, port=port)
 
 
 async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool = False):
@@ -333,42 +391,56 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
     taskname, reponame = data.split(".")
     item = pipeline.tasks[taskname].links[reponame].repo
 
+    try:
+        await cat_data_inner(item, job, aiofiles.stdout_bytes)
+    except TypeError:
+        print("Error: cannot serialize a job in a repository which is not a blob or metadata or filesystem")
+        return 1
+
+
+async def cat_data_inner(item: Repository, job: str, stream: AWriteStreamBase):
     if isinstance(item, BlobRepository):
         async with await item.open(job, "rb") as fp:
-            await async_copyfile(fp, aiofiles.stdout_bytes)
+            await async_copyfile(fp, stream)
     elif isinstance(item, MetadataRepository):
         data_bytes = await item.info(job)
         data_str = yaml.safe_dump(data_bytes, None)
-        await asyncio.get_running_loop().run_in_executor(None, sys.stdout.write, data_str)
-
+        await stream.write(data_str)
     elif isinstance(item, FilesystemRepository):
-        await item.get_tarball(job, aiofiles.stdout_bytes)
+        await item.get_tarball(job, stream)
     else:
-        print("Error: cannot cat a repository which is not a blob or metadata")
-        return 1
+        raise TypeError(type(item))
 
 
 async def inject_data(pipeline: Pipeline, data: str, job: str):
     taskname, reponame = data.split(".")
     item = pipeline.tasks[taskname].links[reponame].repo
 
+    try:
+        await inject_data_inner(item, job, aiofiles.stdin_bytes)
+    except TypeError:
+        print("Error: cannot deserialize a job in a repository which is not a blob or metadata")
+        return 1
+    except ValueError as e:
+        print(f"Bad data structure: {e.args[0]}")
+        return 1
+
+
+async def inject_data_inner(item: Repository, job: str, stream: AReadStreamBase):
     if isinstance(item, BlobRepository):
         async with await item.open(job, "wb") as fp:
-            while True:
-                data_bytes = await asyncio.get_running_loop().run_in_executor(None, sys.stdin.buffer.read, 1024 * 16)
-                if not data_bytes:
-                    break
-                await fp.write(data_bytes)
+            await async_copyfile(stream, fp)
     elif isinstance(item, MetadataRepository):
+        data = await stream.read()
         try:
-            data_obj = yaml.safe_load(sys.stdin)
-        except yaml.YAMLError:
-            print("Error: could not parse stdin as yaml")
-            return 1
+            data_obj = yaml.safe_load(data)
+        except yaml.YAMLError as e:
+            raise ValueError(e.args[0]) from e
         await item.dump(job, data_obj)
+    elif isinstance(item, FilesystemRepository):
+        await item.dump_tarball(job, stream)
     else:
-        print("Error: cannot inject data into a repository which is not a blob or metadata")
-        return 1
+        raise TypeError(type(item))
 
 
 async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool):

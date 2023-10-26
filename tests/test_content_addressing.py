@@ -3,6 +3,7 @@ import tarfile
 import tempfile
 import unittest
 
+from aiofiles.threadpool import wrap
 import aioshutil
 
 import pydatatask
@@ -46,8 +47,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         tar.close()
 
         buf.seek(0)
-        tar = tarfile.open(fileobj=buf)
-        await self.repo.dump_tarball("1", tar)
+        await self.repo.dump_tarball("1", wrap(buf))
 
         files = [f async for f in self.repo.blobs]
         assert len(files) == 2

@@ -48,6 +48,13 @@ class WriteStream(Protocol):
         """Close and release the stream."""
 
 
+class AReadStreamBase(Protocol):
+    """A protocol for reading data from an asynchronous stream (bass boosted)."""
+
+    async def read(self, n: int = -1, /) -> bytes:
+        """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+
+
 class AReadStream(Protocol):
     """A protocol for reading data from an asynchronous stream."""
 
@@ -56,6 +63,13 @@ class AReadStream(Protocol):
 
     def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
+
+
+class AWriteStreamBase(Protocol):
+    """A protocol for writing data to an asynchronous stream (bass boosted)."""
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> Any:
+        """Write ``data`` to the stream."""
 
 
 class AWriteStream(Protocol):
@@ -76,7 +90,7 @@ class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
     """A protocol for writing data to an asynchronous stream with context management."""
 
 
-async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 16):
+async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, blocksize=1024 * 16):
     """Stream data from ``copyfrom`` to ``copyto``."""
     while True:
         data = await copyfrom.read(blocksize)
@@ -252,6 +266,66 @@ class AsyncReaderQueueStream:
 
             if size < 0 or size >= len(buf) - col:
                 outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+    def tell(self) -> int:
+        """It's a secret to everybody!"""
+        return 0
+
+
+class AsyncWriterQueueStream:
+    """A stream queue whose writer is asynchronous-blocking and whose reader is synchronous."""
+
+    def __init__(self) -> None:
+        self.buffer: List[Optional[bytes]] = []
+        self.bufsize = 0
+        self.max_bufsize = 1024 * 16 * 8
+        self.readptr = (0, 0)
+        self.closed = False
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Add data to the queue."""
+        while self.bufsize >= self.max_bufsize:
+            await asyncio.sleep(0.01)
+        self.bufsize += len(data)
+        self.buffer.append(bytes(data))
+        return len(data)
+
+    def close(self) -> Any:
+        """Mark the queue as closed, so reads will terminate."""
+        self.closed = True
+        r: asyncio.Future[None] = asyncio.Future()
+        r.set_result(None)
+        return r
+
+    def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self.closed:
+                    break
+                time.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.bufsize -= len(buf)
                 self.buffer[line] = None
                 self.readptr = (line + 1, 0)
                 size -= len(buf) - col

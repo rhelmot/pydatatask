@@ -26,8 +26,7 @@ import string
 import aiofiles.os
 import yaml
 
-from pydatatask.host import LOCAL_HOST
-
+from .. import repository as repomodule
 from .. import task as taskmodule
 from ..utils import (
     AReadStreamManager,
@@ -107,16 +106,38 @@ class Repository(ABC):
         """
         raise NotImplementedError
 
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+    async def template(
+        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+    ) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
         Notably, this is used during templating. This should do something meaningful even if the repository does not
         contain the requested job.
+
+        TODO: this docstring is woefully outdated. See LinkKind.
         """
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
             return taskmodule.TemplateInfo(FixedItemRepository(self, job))
+        if kind == taskmodule.LinkKind.InputFilepath:
+            filepath = task.mktemp(job)
+            return taskmodule.TemplateInfo(filepath, preamble=task.mk_repo_get(filepath, link_name, job))
+        if kind == taskmodule.LinkKind.OutputFilepath:
+            filepath = task.mktemp(job)
+            preamble = (
+                task.mk_mkdir(filepath)
+                if isinstance(task.links[link_name].repo, repomodule.FilesystemRepository)
+                else None
+            )
+            return taskmodule.TemplateInfo(
+                filepath, epilogue=task.mk_repo_put(filepath, link_name, job), preamble=preamble
+            )
+        if kind == taskmodule.LinkKind.StreamingOutputFilepath:
+            filepath = task.mktemp(job)
+            return taskmodule.TemplateInfo(
+                filepath, preamble=task.mk_watchdir_upload(filepath, link_name, {"parent": job})
+            )
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
@@ -138,9 +159,11 @@ class MetadataRepository(Repository, ABC):
     """A metadata repository has values which are small, structured data, and loads them entirely into memory,
     returning the structured data from the `info` method."""
 
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+    async def template(
+        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+    ) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind)
+            return await super().template(job, task, kind, link_name)
         info = await self.info(job)
         return taskmodule.TemplateInfo(info)
 
@@ -209,7 +232,9 @@ class MapRepository(MetadataRepository):
             if self.filter is None or await self.filter(item):
                 yield item
 
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
+    async def template(
+        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+    ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 
     async def info(self, job):
@@ -299,15 +324,6 @@ class FileRepositoryBase(Repository, ABC):
     def fullpath(self, job) -> Path:
         """Construct the full local path of the file corresponding to ``job``."""
         return self.basedir / (job + self.extension)
-
-    @job_getter
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        """The templating info provided by a file repository is the full path to the corresponding file as a
-        string."""
-        if kind in (taskmodule.LinkKind.InputFilepath, taskmodule.LinkKind.OutputFilepath) and task.host == LOCAL_HOST:
-            info = str(self.fullpath(job))
-            return taskmodule.TemplateInfo(info, file_host=LOCAL_HOST)
-        return await super().template(job, task, kind)
 
 
 class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?

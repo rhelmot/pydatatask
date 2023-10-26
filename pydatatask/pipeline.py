@@ -20,6 +20,7 @@ import logging
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
 
+from pydatatask.host import Host
 from pydatatask.repository.base import MetadataRepository
 from pydatatask.utils import supergetattr_path
 
@@ -42,6 +43,10 @@ class Pipeline:
         session: Session,
         quota_managers: Iterable[QuotaManager],
         priority: Optional[Callable[[str, str], int]] = None,
+        agent_version: str = "unversioned",
+        agent_secret: str = "insecure",
+        agent_port: int = 6132,
+        agent_hosts: Optional[Dict[Optional[Host], str]] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
@@ -57,6 +62,10 @@ class Pipeline:
         self.quota_managers = list(quota_managers)
         self.priority = priority
         self._graph: Optional["networkx.classes.digraph.DiGraph"] = None
+        self.agent_version: str = agent_version
+        self.agent_secret: str = agent_secret
+        self.agent_port: int = agent_port
+        self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
 
     def settings(self, synchronous=False, metadata=True):
         """This method can be called to set properties of the current run.
@@ -90,6 +99,10 @@ class Pipeline:
         if self._opened:
             raise Exception("Pipeline is alredy used")
 
+        for task in self.tasks.values():
+            task.agent_secret = self.agent_secret
+            task.agent_url = f"http://{self.agent_hosts.get(task.host, self.agent_hosts[None])}:{self.agent_port}"
+
         graph = self.task_graph
         u: Task
         v: Task
@@ -103,7 +116,14 @@ class Pipeline:
                 if link.required_for_output:
                     link_attrs["required_for_start"] = True
                 if link_attrs:
-                    v.link(f"{u.name}_{name}", link.repo, None, self._make_single_func(attrs["rfollow"]), **link_attrs)
+                    v.link(
+                        f"{u.name}_{name}",
+                        link.repo,
+                        None,
+                        self._make_single_func(attrs["rfollow"]),
+                        multi_meta=None,
+                        **link_attrs,
+                    )
 
         await self.session.open()
         await self._validate()

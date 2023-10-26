@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from pydatatask.host import Host
 
 if TYPE_CHECKING:
+    from ..pipeline import Pipeline
     from . import container_manager, pod_manager, proc_manager
 
 
@@ -46,3 +47,11 @@ class Executor:
     def host(self) -> Host:
         """The host that this executor's tasks will run on."""
         raise NotImplementedError
+
+    async def launch_agent(self, pipeline: "Pipeline"):
+        """Spawn the pydatatask http agent using this executor."""
+        raise TypeError("Not supported, yikes")
+
+    async def teardown_agent(self):
+        """Kill the pydatatask http agent that was spawned using this executor."""
+        raise TypeError("Not supported, yikes")

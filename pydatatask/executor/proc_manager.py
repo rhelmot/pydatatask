@@ -7,12 +7,12 @@ will set up an appropriate environment for running the task and retrieve the res
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
-    Callable,
     Dict,
     List,
     Literal,
     Optional,
     Set,
+    Tuple,
     Union,
     overload,
 )
@@ -22,19 +22,23 @@ import asyncio
 import os
 import shlex
 import signal
+import sys
 
 import aiofiles
 import aioshutil
 import asyncssh
 import psutil
+import yaml
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.session import Ephemeral
 
 from ..utils import _StderrIsStdout
 
 if TYPE_CHECKING:
+    from ..pipeline import Pipeline
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
 
 __all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
@@ -45,6 +49,9 @@ class AbstractProcessManager(Executor):
 
     Processes are managed through arbitrary "process identifier" handle strings.
     """
+
+    def __init__(self, tmp_path: Union[str, Path]):
+        self.tmp_path = Path(tmp_path)
 
     def to_process_manager(self) -> "AbstractProcessManager":
         return self
@@ -151,8 +158,8 @@ class LocalLinuxManager(AbstractProcessManager):
         return DockerContainerManager(self.app)
 
     def __init__(self, app: str, local_path: Union[Path, str] = "/tmp/pydatatask"):
+        super().__init__(Path(local_path) / app)
         self.app = app
-        self.local_path = Path(local_path) / app
 
     @property
     def host(self) -> Host:
@@ -160,12 +167,13 @@ class LocalLinuxManager(AbstractProcessManager):
 
     @property
     def basedir(self) -> Path:
-        return self.local_path
+        return self.tmp_path
 
     async def get_live_pids(self, hint: Set[str]) -> Set[str]:
         return {str(x) for x in psutil.pids()}
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
+        await self.mkdir(self.tmp_path)
         if stdin is None:
             stdin = "/dev/null"
         else:
@@ -211,6 +219,57 @@ class LocalLinuxManager(AbstractProcessManager):
 
     async def open(self, path, mode):
         return aiofiles.open(path, mode)
+
+    async def agent_live(self) -> Tuple[Optional[str], Optional[str]]:
+        """Determine whether the agent is alive.
+
+        If so, return (pid, version_string). Otherwise, return (None, None)
+        """
+        agent_path = self.tmp_path / "agent"
+        try:
+            async with await self.open(agent_path, "r") as fp:
+                bdata = await fp.read()
+            data = yaml.safe_load(bdata)
+            pid = data["pid"]
+            live_version = data["version"]
+            if pid in await self.get_live_pids(set()):
+                return pid, live_version
+        except FileNotFoundError:
+            pass
+
+        return None, None
+
+    async def teardown_agent(self):
+        pid, _ = await self.agent_live()
+        if pid is not None:
+            await self.kill(pid)
+
+    async def launch_agent(self, pipeline):
+        pid, version = await self.agent_live()
+        if pid is not None:
+            if version == pipeline.agent_version:
+                return
+            await self.kill(pid)
+
+        # lmao, hack
+        p = await asyncio.create_subprocess_exec(
+            sys.executable,
+            Path(__file__).parent.parent / "cli" / "main.py",
+            "agent-http",
+            "--port",
+            str(pipeline.agent_port),
+            "--secret",
+            pipeline.agent_secret,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            close_fds=True,
+        )
+        agent_path = self.tmp_path / "agent"
+        await self.mkdir(self.tmp_path)
+        data = yaml.safe_dump({"pid": str(p.pid), "version": pipeline.agent_version})
+        async with await self.open(agent_path, "w") as fp:
+            await fp.write(data)
 
 
 class SSHLinuxFile:
@@ -267,11 +326,11 @@ class SSHLinuxManager(AbstractProcessManager):
     def __init__(
         self,
         app: str,
-        ssh: Callable[[], asyncssh.SSHClientConnection],
+        ssh: Ephemeral[asyncssh.SSHClientConnection],
         host: Host,
         remote_path: Union[Path, str] = "/tmp/pydatatask",
     ):
-        self.remote_path = Path(remote_path) / app
+        super().__init__(Path(remote_path) / app)
         self._ssh = ssh
         self._host = host
 
@@ -289,7 +348,7 @@ class SSHLinuxManager(AbstractProcessManager):
 
     @property
     def basedir(self) -> Path:
-        return self.remote_path
+        return self.tmp_path
 
     async def open(self, path, mode):
         return SSHLinuxFile(path, mode, self.ssh)
@@ -311,6 +370,7 @@ class SSHLinuxManager(AbstractProcessManager):
         return {x for x in p.stdout.split() if x.isdigit()}
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
+        await self.mkdir(self.tmp_path)
         if stdin is None:
             stdin = "/dev/null"
         else:

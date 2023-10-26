@@ -35,9 +35,9 @@ class Host:
     def mk_http_get(self, filename: str, url: str, headers: Dict[str, str]) -> str:
         """Generate a shell script to perform an http download for the host system."""
         if self.os == HostOS.Linux:
-            headers_str = " ".join(f'--header "{key}={val}"' for key, val in headers.items())
+            headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
-            URL='{url}'
+            URL="{url}"
             FILENAME='{filename}'
             wget -O- $URL {headers_str} >$FILENAME || curl $URL {headers_str} >$FILENAME
             """
@@ -47,11 +47,41 @@ class Host:
     def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> str:
         """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
-            headers_str = " ".join(f'--header "{key}={val}"' for key, val in headers.items())
+            headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
-            URL='{url}'
+            URL="{url}"
             FILENAME='{filename}'
-            wget -O- $URL {headers_str} --post-file $FILENAME || curl $URL {headers_str} --data @$FILENAME
+            wget -O- $URL {headers_str} --post-file $FILENAME || curl $URL {headers_str} --data-binary @$FILENAME
+            """
+        else:
+            raise TypeError(self.os)
+
+    def mk_unzip(self, output_filename: str, input_filename: str) -> str:
+        """Generate a shell script to unpack an archive for the host system."""
+        if self.os == HostOS.Linux:
+            return f"""
+            mkdir {output_filename}
+            cd {output_filename}
+            tar -xf {input_filename}
+            """
+        else:
+            raise TypeError(self.os)
+
+    def mk_zip(self, output_filename: str, input_filename: str) -> str:
+        """Generate a shell script to pack an archive for the host system."""
+        if self.os == HostOS.Linux:
+            return f"""
+            cd {input_filename}
+            tar -cf {output_filename} .
+            """
+        else:
+            raise TypeError(self.os)
+
+    def mk_mkdir(self, filepath: str) -> str:
+        """Generate a shell script to make a directory for the host system."""
+        if self.os == HostOS.Linux:
+            return f"""
+            mkdir -p {filepath}
             """
         else:
             raise TypeError(self.os)

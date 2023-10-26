@@ -6,7 +6,6 @@ import io
 from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 
-from pydatatask import task as taskmodule
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.session import Ephemeral
 from pydatatask.utils import AReadText, AWriteText
@@ -209,23 +208,6 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
 
     async def delete(self, job):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
-
-    async def template(self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind) -> taskmodule.TemplateInfo:
-        if kind == taskmodule.LinkKind.InputFilepath:
-            input_filepath = task.mktemp(job)
-            endpoint = self.get_endpoint(task.host)
-            preamble = task.mk_http_get(
-                input_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={}
-            )  # BT: Fix the headers
-            return taskmodule.TemplateInfo(input_filepath, preamble=preamble)
-        if kind == taskmodule.LinkKind.OutputFilepath:
-            output_filepath = task.host.mktemp(job)
-            endpoint = self.get_endpoint(task.host)
-            epilogue = task.mk_http_post(
-                output_filepath, f"{endpoint}/api/v1/{self.bucket}/{self.object_name(job)}", headers={}
-            )  # BT: fix the headers
-            return taskmodule.TemplateInfo(output_filepath, epilogue=epilogue)
-        return await super().template(job, task, kind)
 
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):

@@ -32,8 +32,10 @@ from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import BlobRepository, MetadataRepository, job_getter
 from pydatatask.utils import (
     AReadStream,
+    AReadStreamBase,
     AsyncReaderQueueStream,
-    AWriteStream,
+    AsyncWriterQueueStream,
+    AWriteStreamBase,
     QueueStream,
     async_copyfile,
     asyncasynccontextmanager,
@@ -117,20 +119,63 @@ class FilesystemRepository(abc.ABC):
         """
         raise NotImplementedError
 
-    async def dump_tarball(self, job: str, tar: tarfile.TarFile) -> None:
+    async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         """Add an entire filesystem from a tarball."""
-        cursor = self.dump(job)
-        await cursor.__anext__()
-        for f in tar:
-            if f.issym():
-                await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, link_target=f.linkname))
-            elif f.isdir():
-                await cursor.asend(FilesystemEntry(f.name, FilesystemType.DIRECTORY))
-            elif f.isreg():
-                await cursor.asend(FilesystemEntry(f.name, FilesystemType.FILE, data=wrap(tar.extractfile(f))))
-            else:
-                l.warning("Could not dump archive member %s: bad type", f)
-        await cursor.aclose()
+        queue = AsyncWriterQueueStream()
+        typed_queue: IO[bytes] = queue  # type: ignore
+
+        async def consumer():
+            # pylint: disable=missing-class-docstring,missing-function-docstring,consider-using-with
+            class Fucker:
+                def __init__(self):
+                    self._tar = None
+                    self._iter = None
+
+                def init(self):
+                    self._tar = tarfile.open(mode="r|*", fileobj=typed_queue)
+                    self._iter = iter(self._tar)
+
+                def next(self):
+                    assert self._iter is not None
+                    result = next(self._iter, None)
+                    return result
+
+                def extractfile(self, f: tarfile.TarInfo) -> IO[bytes]:
+                    assert self._tar is not None
+                    result = self._tar.extractfile(f)
+                    assert result is not None
+                    return result
+
+                def close(self):
+                    assert self._tar is not None
+                    self._tar.close()
+
+            # pylint: enable=missing-class-docstring,missing-function-docstring,consider-using-with
+
+            tar = Fucker()
+            await asyncio.get_running_loop().run_in_executor(None, tar.init)
+            cursor = self.dump(job)
+            await cursor.__anext__()
+            while True:
+                f = await asyncio.get_running_loop().run_in_executor(None, tar.next)
+                if f is None:
+                    break
+                if f.issym():
+                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, link_target=f.linkname))
+                elif f.isdir():
+                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.DIRECTORY))
+                elif f.isreg():
+                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.FILE, data=wrap(tar.extractfile(f))))
+                else:
+                    l.warning("Could not dump archive member %s: bad type", f)
+            await cursor.aclose()
+            tar.close()
+
+        async def producer():
+            await async_copyfile(stream, queue)
+            queue.close()
+
+        await asyncio.gather(producer(), consumer())
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
@@ -151,7 +196,7 @@ class FilesystemRepository(abc.ABC):
                         str(fullname), FilesystemType.FILE, data=fp, content_size=size, content_hash=contenthash
                     )
 
-    async def get_tarball(self, job: str, dest: AWriteStream):
+    async def get_tarball(self, job: str, dest: AWriteStreamBase):
         """Stream a tarball for the given job to the provided asynchronous stream."""
         queue = AsyncReaderQueueStream()
         typed_queue: IO[bytes] = queue  # type: ignore

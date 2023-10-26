@@ -1,9 +1,14 @@
 from typing import Callable, Dict
 from pathlib import Path
+import asyncio
 import sys
 import tempfile
 
-from pydatatask.staging import Dispatcher, PipelineStaging, find_config
+import aiodocker
+
+from pydatatask.executor.proc_manager import LocalLinuxManager
+from pydatatask.host import LOCAL_HOST, LOCAL_OS, HostOS
+from pydatatask.staging import Dispatcher, HostSpec, PipelineStaging, find_config
 
 
 def _allocate_temp_meta() -> Dispatcher:
@@ -47,6 +52,18 @@ def default_allocators_local() -> Dict[str, Callable[[], Dispatcher]]:
     }
 
 
+async def get_ip() -> str:
+    docker = None
+    try:
+        docker = aiodocker.Docker()
+        return (await (await docker.networks.get("bridge")).show())["IPAM"]["Config"][0]["Gateway"]
+    except:
+        return "127.0.0.1"
+    finally:
+        if docker is not None:
+            await docker.close()
+
+
 def main():
     all_allocators = {
         "local": default_allocators_local(),
@@ -59,9 +76,17 @@ def main():
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
     spec = PipelineStaging(cfgpath)
-    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": "pydatatask"}))
+    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": cfgpath.name}))
     locked.filename = cfgpath.with_suffix(".lock").name
+
+    locked.spec.agent_hosts[None] = asyncio.run(get_ip())
     locked.save()
+
+    locked = PipelineStaging(locked.basedir / locked.filename)
+    pipeline = locked.instantiate()
+    executor = LocalLinuxManager(cfgpath.name)
+    asyncio.run(executor.launch_agent(pipeline))
+
     print(locked.basedir / locked.filename)
 
 

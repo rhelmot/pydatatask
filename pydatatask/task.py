@@ -34,6 +34,7 @@ from pathlib import Path
 import asyncio
 import copy
 import inspect
+import json
 import logging
 import os
 import shlex
@@ -53,7 +54,7 @@ from pydatatask.executor.container_manager import (
     AbstractContainerManager,
     localhost_docker_manager,
 )
-from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.host import LOCAL_HOST, Host, HostOS
 
 from . import repository as repomodule
 from .executor.pod_manager import PodManager
@@ -132,6 +133,7 @@ class LinkKind(Enum):
     OutputId = auto()
     OutputYamlMetadataFilepath = auto()
     OutputFilepath = auto()
+    StreamingOutputFilepath = auto()
 
 
 INPUT_KINDS: Set[LinkKind] = {LinkKind.InputId, LinkKind.InputMetadata, LinkKind.InputFilepath, LinkKind.InputRepo}
@@ -140,6 +142,7 @@ OUTPUT_KINDS: Set[LinkKind] = {
     LinkKind.OutputYamlMetadataFilepath,
     LinkKind.OutputFilepath,
     LinkKind.OutputRepo,
+    LinkKind.StreamingOutputFilepath,
 }
 
 
@@ -153,6 +156,7 @@ class Link:
     repo: "repomodule.Repository"
     kind: Optional[LinkKind] = None
     key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None
+    multi_meta: Optional[str] = None
     is_input: bool = False
     is_output: bool = False
     is_status: bool = False
@@ -178,6 +182,8 @@ class Task(ABC):
         self.synchronous = False
         self.metadata = True
         self.disabled = disabled
+        self.agent_url = ""
+        self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
 
@@ -210,6 +216,96 @@ class Task(ABC):
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
         return self.host.mk_http_post(filename, url, headers)
+
+    def mk_repo_get(self, filename: str, link_name: str, job: str) -> Any:
+        """Generate logic to perform an repository download for the task host system.
+
+        For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
+        """
+        is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
+        payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        result = self.host.mk_http_get(
+            payload_filename,
+            f"{self.agent_url}/{self.name}/{link_name}/{job}",
+            {"Cookie": "secret=" + self.agent_secret},
+        )
+        if is_filesystem:
+            result += self.host.mk_unzip(filename, payload_filename)
+        return result
+
+    def mk_repo_put(self, filename: str, link_name: str, job: str) -> Any:
+        """Generate logic to perform an repository insert for the task host system.
+
+        For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
+        """
+        is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
+        payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        result = self.host.mk_http_post(
+            payload_filename,
+            f"{self.agent_url}/{self.name}/{link_name}/{job}",
+            {"Cookie": "secret=" + self.agent_secret},
+        )
+        if is_filesystem:
+            result = self.host.mk_zip(payload_filename, filename) + result
+        return result
+
+    def mk_mkdir(self, filepath: str) -> Any:
+        """Generate logic to perform a directory creation for the task host system.
+
+        For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
+        """
+        return self.host.mk_mkdir(filepath)
+
+    def mk_watchdir_upload(self, filepath: str, link_name: str, extra_info: Dict[str, Any]) -> Any:
+        """Misery and woe.
+
+        If you're trying to debug something and you run across this, just ask rhelmot for help.
+        """
+        # leaky abstraction!
+        if self.host.os != HostOS.Linux:
+            raise ValueError("Not sure how to do this off of linux")
+        meta_link_name = self.links[link_name].multi_meta
+        if meta_link_name is None:
+            raise ValueError("Cannot do watchdir upload without multi_meta")
+        upload = self.host.mktemp("upload")
+        scratch = self.host.mktemp("scratch")
+        extra_lines = "\n".join(f"{name}: {json.dumps(value)}" for name, value in extra_info.items())
+
+        return f"""
+        {self.host.mk_mkdir(filepath)}
+        {self.host.mk_mkdir(scratch)}
+        idgen() {{
+            echo $(($(shuf -i0-255 -n1) +
+                    $(shuf -i0-255 -n1)*0x100 +
+                    $(shuf -i0-255 -n1)*0x10000 +
+                    $(shuf -i0-255 -n1)*0x1000000 +
+                    $(shuf -i0-255 -n1)*0x100000000 +
+                    $(shuf -i0-255 -n1)*0x10000000000 +
+                    $(shuf -i0-255 -n1)*0x1000000000000 +
+                    $(shuf -i0-127 -n1)*0x100000000000000))
+        }}
+        watcher() {{
+            cd {filepath}
+            while true; do
+                sleep 5
+                for f in *; do
+                    if [ -e "$f" ] && ! [ -e "{scratch}/$f" ]; then
+                        ID=$(idgen)
+                        ln -sf "$PWD/$f" {upload}
+                        {self.mk_repo_put(upload, link_name, "$ID")}
+                        rm {upload}
+                        cat >{upload} <<EOF
+filename: "$f"
+{extra_lines}
+EOF
+                        {self.mk_repo_put(upload, meta_link_name, "$ID")}
+                        echo $ID >"{scratch}/$f"
+                    fi
+                done
+            done
+        }}
+        watcher &
+        """
 
     def _make_ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be
@@ -246,6 +342,7 @@ class Task(ABC):
         repo: "repomodule.Repository",
         kind: Optional[LinkKind],
         key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None,
+        multi_meta: Optional[str] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
         is_status: bool = False,
@@ -263,6 +360,7 @@ class Task(ABC):
         :param kind: The way to transform this repository during templating.
         :param key: A related item from a different link to use instead of the current job when doing repository lookup.
             Or, a function taking the task's job and producing the desired job to do a lookup for.
+        :param multi_meta: A link to use for identifying which keys are related to a given other key.
         :param is_input: Whether this repository contains data which is consumed by the task. Default based on kind.
         :param is_output: Whether this repository is populated by the task. Default based on kind.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
@@ -294,6 +392,7 @@ class Task(ABC):
             repo=repo,
             key=key,
             kind=kind,
+            multi_meta=multi_meta,
             is_input=is_input,
             is_output=is_output,
             is_status=is_status,
@@ -463,7 +562,7 @@ class Task(ABC):
                         pending[items[0]].append((env_name, link))
                         continue
 
-            arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
+            arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind, env_name), link.kind)
             result[env_name] = arg.arg
             if arg.preamble is not None:
                 preamble.append(arg.preamble)
@@ -474,7 +573,9 @@ class Task(ABC):
                     assert isinstance(link.key, str)
                     assert link.kind is not None
                     subjob = subkey(link.key.split("."))
-                    arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind), link.kind)
+                    arg = self.instrument_arg(
+                        orig_job, await link.repo.template(subjob, self, link.kind, env_name), link.kind
+                    )
                     result[env_name2] = arg.arg
                     if arg.preamble is not None:
                         preamble.append(arg.preamble)
@@ -1480,14 +1581,3 @@ class ContainerTask(Task):
         await self.manager.launch(
             self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts
         )
-
-    def instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind):
-        if kind in (LinkKind.InputFilepath, LinkKind.OutputFilepath) and arg.file_host == LOCAL_HOST:
-            internal_filepath = self.host.mktemp(job)
-            self.mount_directives[job].append((arg.arg, internal_filepath))
-            arg.arg = internal_filepath
-            arg.file_host = None
-
-        if kind == LinkKind.OutputFilepath:
-            arg.epilogue = f"chmod -R a+w {arg.arg}"
-        return arg
