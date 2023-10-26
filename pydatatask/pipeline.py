@@ -4,10 +4,8 @@ Relationships between the tasks are implicit, defined by which repositories they
 """
 
 from typing import (
-    Any,
     Awaitable,
     Callable,
-    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -16,7 +14,6 @@ from typing import (
     Tuple,
     Union,
 )
-from collections import defaultdict
 import asyncio
 import logging
 
