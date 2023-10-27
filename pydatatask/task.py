@@ -256,7 +256,7 @@ class Task(ABC):
         """
         return self.host.mk_mkdir(filepath)
 
-    def mk_watchdir_upload(self, filepath: str, link_name: str, extra_info: Dict[str, Any]) -> Any:
+    def mk_watchdir_upload(self, filepath: str, link_name: str, extra_info: Dict[str, Any]) -> Tuple[Any, Any]:
         """Misery and woe.
 
         If you're trying to debug something and you run across this, just ask rhelmot for help.
@@ -271,7 +271,8 @@ class Task(ABC):
         scratch = self.host.mktemp("scratch")
         extra_lines = "\n".join(f"{name}: {json.dumps(value)}" for name, value in extra_info.items())
 
-        return f"""
+        return (
+            f"""
         {self.host.mk_mkdir(filepath)}
         {self.host.mk_mkdir(scratch)}
         idgen() {{
@@ -284,10 +285,15 @@ class Task(ABC):
                     $(shuf -i0-255 -n1)*0x1000000000000 +
                     $(shuf -i0-127 -n1)*0x100000000000000))
         }}
+        WATCHER_FINISHED=
+        WATCHER_LAST=
         watcher() {{
             cd {filepath}
-            while true; do
+            while [ -z "$WATCHER_LAST" ]; do
                 sleep 5
+                if ! [ -z "$WATCHER_FINISHED" ]; then
+                    WATCHER_LAST=1
+                fi
                 for f in *; do
                     if [ -e "$f" ] && ! [ -e "{scratch}/$f" ]; then
                         ID=$(idgen)
@@ -305,7 +311,14 @@ EOF
             done
         }}
         watcher &
-        """
+        WATCHER_PID=$!
+        """,
+            """
+        echo "Finishing up"
+        WATCHER_FINISHED=1
+        wait $WATCHER_PID
+        """,
+        )
 
     def _make_ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be

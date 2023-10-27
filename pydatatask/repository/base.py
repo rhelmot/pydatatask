@@ -132,9 +132,8 @@ class Repository(ABC):
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
             filepath = task.mktemp(job)
-            return taskmodule.TemplateInfo(
-                filepath, preamble=task.mk_watchdir_upload(filepath, link_name, {"parent": job})
-            )
+            preamble, epilogue = task.mk_watchdir_upload(filepath, link_name, {"parent": job})
+            return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
