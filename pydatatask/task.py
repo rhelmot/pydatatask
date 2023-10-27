@@ -1485,6 +1485,7 @@ class ContainerTask(Task):
         done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
+        privileged: Optional[bool] = False,
     ):
         """
         :param name: The name of this task.
@@ -1524,6 +1525,7 @@ class ContainerTask(Task):
         self._manager: Optional[AbstractContainerManager] = None
         self.warned = False
         self.window = window
+        self.privileged = privileged
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
 
         self.quota_manager.register(self._get_load)
@@ -1591,6 +1593,16 @@ class ContainerTask(Task):
                 item.close()
 
         mounts = self.mount_directives.pop(job, [])
+
+        privileged = bool(self.privileged)
         await self.manager.launch(
-            self.name, job, self.image, list(self.entrypoint), exe_txt, self.environ, self.job_quota, mounts
+            self.name,
+            job,
+            self.image,
+            list(self.entrypoint),
+            exe_txt,
+            self.environ,
+            self.job_quota,
+            mounts,
+            privileged,
         )

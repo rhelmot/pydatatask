@@ -33,6 +33,7 @@ class AbstractContainerManager(ABC, Executor):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
+        privileged: bool,
     ):
         """Launch a container with the given parameters.
 
@@ -114,6 +115,7 @@ class DockerContainerManager(AbstractContainerManager):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
+        privileged: bool,
     ):
         await self.docker.containers.run(
             {
@@ -128,6 +130,7 @@ class DockerContainerManager(AbstractContainerManager):
                 "Env": [f"{key}={val}" for key, val in environ.items()],
                 "HostConfig": {
                     "Binds": [f"{a}:{b}" for a, b in mounts],
+                    "Privileged": privileged,
                 },
             },
             name=self._id_to_name(task, job),
@@ -193,6 +196,7 @@ class KubeContainerManager(AbstractContainerManager):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
+        privileged: bool,
     ):
         if mounts:
             raise ValueError("Cannot do mounts from a container on a kube cluster")
@@ -220,6 +224,9 @@ class KubeContainerManager(AbstractContainerManager):
                                     "cpu": str(quota.cpu),
                                     "memory": str(quota.mem),
                                 },
+                            },
+                            "securityContext": {
+                                "privileged": privileged,
                             },
                         }
                     ],
