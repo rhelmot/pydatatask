@@ -34,6 +34,7 @@ class AbstractContainerManager(ABC, Executor):
         quota: Quota,
         mounts: List[Tuple[str, str]],
         privileged: bool,
+        tty: bool,
     ):
         """Launch a container with the given parameters.
 
@@ -116,6 +117,7 @@ class DockerContainerManager(AbstractContainerManager):
         quota: Quota,
         mounts: List[Tuple[str, str]],
         privileged: bool,
+        tty: bool,
     ):
         await self.docker.containers.run(
             {
@@ -124,7 +126,7 @@ class DockerContainerManager(AbstractContainerManager):
                 "AttachStderr": False,
                 "AttachStdin": False,
                 "OpenStdin": False,
-                "Tty": False,
+                "Tty": tty,
                 "Entrypoint": entrypoint,
                 "Cmd": cmd,
                 "Env": [f"{key}={val}" for key, val in environ.items()],
@@ -197,9 +199,12 @@ class KubeContainerManager(AbstractContainerManager):
         quota: Quota,
         mounts: List[Tuple[str, str]],
         privileged: bool,
+        tty: bool,
     ):
         if mounts:
             raise ValueError("Cannot do mounts from a container on a kube cluster")
+        if tty:
+            raise ValueError("Cannot do tty from a container on a kube cluster")
         await self.cluster.launch(
             job,
             task,
