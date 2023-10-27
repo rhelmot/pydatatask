@@ -443,7 +443,10 @@ EOF
                 raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
             async def mapper(info):
-                return str(supergetattr_path(info, splitkey[1:]))
+                try:
+                    return str(supergetattr_path(info, splitkey[1:]))
+                except:
+                    return ""
 
             mapped = related.map(mapper)
             prefetch_lookup = True
