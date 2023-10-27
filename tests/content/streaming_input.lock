@@ -1,0 +1,59 @@
+agent_hosts: {}
+agent_port: 19988
+agent_secret: '57941463384595167735065210411814043557634'
+agent_version: '2023-10-27T14:47:42.544745'
+ephemerals: {}
+executors:
+  task:
+    args:
+      app: test_streaming
+    cls: LocalLinux
+hosts: {}
+imports:
+  locked:
+    executors:
+      task: task
+    imports: {}
+    path: /home/audrey/proj/python/pydatatask/tests/content/streaming_input.yaml
+    repos:
+      done: done
+      input: input
+      inputScope: inputScope
+      logs: logs
+      output: output
+      outputMeta: outputMeta
+      scope: scope
+lockstep: echo 'This is a lockfile - do not lock it' && false
+priorities: []
+quotas: {}
+repo_classes: {}
+repos:
+  done:
+    args:
+      basedir: /tmp/pydatatask/tmpi_jvj1ol
+    cls: YamlFile
+  input:
+    args:
+      basedir: /tmp/pydatatask/tmp4vl8_z_s
+    cls: File
+  inputScope:
+    args:
+      basedir: /tmp/pydatatask/tmp_7qf9jzy
+    cls: YamlFile
+  logs:
+    args:
+      basedir: /tmp/pydatatask/tmpmchz63f6
+    cls: File
+  output:
+    args:
+      basedir: /tmp/pydatatask/tmpeiqnz8h0
+    cls: File
+  outputMeta:
+    args:
+      basedir: /tmp/pydatatask/tmpemphtyje
+    cls: YamlFile
+  scope:
+    args:
+      basedir: /tmp/pydatatask/tmpdfibihrp
+    cls: YamlFile
+tasks: {}
