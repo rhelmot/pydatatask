@@ -8,3 +8,4 @@
 .minikube
 coverage.xml
 .coverage
+pipeline.lock

@@ -206,7 +206,7 @@ class LocalLinuxManager(AbstractProcessManager):
         )
         assert p.stdout is not None
         pid = await p.stdout.readline()
-        return pid.strip()
+        return pid.decode().strip()
 
     async def kill(self, pid: str):
         os.kill(int(pid), signal.SIGKILL)
@@ -245,6 +245,9 @@ class LocalLinuxManager(AbstractProcessManager):
             await self.kill(pid)
 
     async def launch_agent(self, pipeline):
+        if pipeline.source_file is None:
+            raise ValueError("Cannot start a pipeline without a source_file")
+            # if you really need this look into forking instead of subprocessing
         pid, version = await self.agent_live()
         if pid is not None:
             if version == pipeline.agent_version:
@@ -252,19 +255,22 @@ class LocalLinuxManager(AbstractProcessManager):
             await self.kill(pid)
 
         # lmao, hack
-        p = await asyncio.create_subprocess_exec(
-            sys.executable,
-            Path(__file__).parent.parent / "cli" / "main.py",
-            "agent-http",
-            "--port",
-            str(pipeline.agent_port),
-            "--secret",
-            pipeline.agent_secret,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            close_fds=True,
-        )
+        Path("/tmp/pydatatask").mkdir(exist_ok=True)
+        with open("/tmp/pydatatask/agent-stdout", "wb") as fp:
+            p = await asyncio.create_subprocess_exec(
+                sys.executable,
+                Path(__file__).parent.parent / "cli" / "main.py",
+                "agent-http",
+                "--port",
+                str(pipeline.agent_port),
+                "--secret",
+                pipeline.agent_secret,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=fp,
+                stderr=asyncio.subprocess.STDOUT,
+                close_fds=True,
+                env={"PIPELINE_YAML": pipeline.source_file},
+            )
         agent_path = self.tmp_path / "agent"
         await self.mkdir(self.tmp_path)
         data = yaml.safe_dump({"pid": str(p.pid), "version": pipeline.agent_version})
@@ -402,7 +408,7 @@ class SSHLinuxManager(AbstractProcessManager):
             env=environ,
         )
         pid = await p.stdout.readline()
-        return pid.strip()
+        return pid.decode().strip()
 
 
 localhost_manager = LocalLinuxManager("default")

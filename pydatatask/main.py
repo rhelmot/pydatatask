@@ -249,7 +249,22 @@ def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
         await inject_data_inner(repo, job, request.content)
         return web.Response(text=job)
 
-    app.add_routes([web.get("/{task}/{link}/{job}", get), web.post("/{task}/{link}/{job}", post)])
+    @authorize
+    async def stream(request: web.Request) -> web.StreamResponse:
+        try:
+            task = pipeline.tasks[request.match_info["task"]]
+            repo = task._repo_filtered(request.match_info["job"], request.match_info["link"])
+        except KeyError as e:
+            raise web.HTTPNotFound() from e
+        response = web.StreamResponse()
+        await response.prepare(request)
+        async for result in repo:
+            await response.write(result.encode() + b"\n")
+        await response.write_eof()
+        return response
+
+    app.add_routes([web.get("/data/{task}/{link}/{job}", get), web.post("/data/{task}/{link}/{job}", post)])
+    app.add_routes([web.get("/stream/{task}/{link}/{job}", stream)])
 
     async def on_startup(_app):
         await pipeline.open()

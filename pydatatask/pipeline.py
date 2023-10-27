@@ -14,6 +14,7 @@ from typing import (
     Tuple,
     Union,
 )
+from pathlib import Path
 import asyncio
 import logging
 
@@ -47,6 +48,7 @@ class Pipeline:
         agent_secret: str = "insecure",
         agent_port: int = 6132,
         agent_hosts: Optional[Dict[Optional[Host], str]] = None,
+        source_file: Optional[Path] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
@@ -66,6 +68,7 @@ class Pipeline:
         self.agent_secret: str = agent_secret
         self.agent_port: int = agent_port
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
+        self.source_file = source_file
 
     def settings(self, synchronous=False, metadata=True):
         """This method can be called to set properties of the current run.

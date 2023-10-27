@@ -134,9 +134,16 @@ class LinkKind(Enum):
     OutputYamlMetadataFilepath = auto()
     OutputFilepath = auto()
     StreamingOutputFilepath = auto()
+    StreamingInputFilepath = auto()
 
 
-INPUT_KINDS: Set[LinkKind] = {LinkKind.InputId, LinkKind.InputMetadata, LinkKind.InputFilepath, LinkKind.InputRepo}
+INPUT_KINDS: Set[LinkKind] = {
+    LinkKind.InputId,
+    LinkKind.InputMetadata,
+    LinkKind.InputFilepath,
+    LinkKind.InputRepo,
+    LinkKind.StreamingInputFilepath,
+}
 OUTPUT_KINDS: Set[LinkKind] = {
     LinkKind.OutputId,
     LinkKind.OutputYamlMetadataFilepath,
@@ -226,7 +233,7 @@ class Task(ABC):
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         result = self.host.mk_http_get(
             payload_filename,
-            f"{self.agent_url}/{self.name}/{link_name}/{job}",
+            f"{self.agent_url}/data/{self.name}/{link_name}/{job}",
             {"Cookie": "secret=" + self.agent_secret},
         )
         if is_filesystem:
@@ -242,7 +249,7 @@ class Task(ABC):
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         result = self.host.mk_http_post(
             payload_filename,
-            f"{self.agent_url}/{self.name}/{link_name}/{job}",
+            f"{self.agent_url}/data/{self.name}/{link_name}/{job}",
             {"Cookie": "secret=" + self.agent_secret},
         )
         if is_filesystem:
@@ -266,9 +273,10 @@ class Task(ABC):
             raise ValueError("Not sure how to do this off of linux")
         meta_link_name = self.links[link_name].multi_meta
         if meta_link_name is None:
-            raise ValueError("Cannot do watchdir upload without multi_meta")
+            raise ValueError("Cannot do watchdir upload without multi_meta (yet)")
         upload = self.host.mktemp("upload")
         scratch = self.host.mktemp("scratch")
+        finished = self.host.mktemp("finished")
         extra_lines = "\n".join(f"{name}: {json.dumps(value)}" for name, value in extra_info.items())
 
         return (
@@ -285,13 +293,12 @@ class Task(ABC):
                     $(shuf -i0-255 -n1)*0x1000000000000 +
                     $(shuf -i0-127 -n1)*0x100000000000000))
         }}
-        WATCHER_FINISHED=
-        WATCHER_LAST=
         watcher() {{
+            WATCHER_LAST=
             cd {filepath}
             while [ -z "$WATCHER_LAST" ]; do
                 sleep 5
-                if ! [ -z "$WATCHER_FINISHED" ]; then
+                if [ -f {finished} ]; then
                     WATCHER_LAST=1
                 fi
                 for f in *; do
@@ -313,12 +320,45 @@ EOF
         watcher &
         WATCHER_PID=$!
         """,
-            """
+            f"""
         echo "Finishing up"
-        WATCHER_FINISHED=1
+        echo 1 >{finished}
         wait $WATCHER_PID
         """,
         )
+
+    def mk_watchdir_download(self, filepath: str, link_name: str, job: str) -> Any:
+        """Misery and woe.
+
+        If you're trying to debug something and you run across this, just ask rhelmot for help.
+        """
+        # leaky abstraction!
+        if self.host.os != HostOS.Linux:
+            raise ValueError("Not sure how to do this off of linux")
+        scratch = self.host.mktemp("scratch")
+        download = self.host.mktemp("download")
+        stream_url = f"{self.agent_url}/stream/{self.name}/{link_name}/{job}"
+        stream_headers = {"Cookie": f"secret={self.agent_secret}"}
+
+        return f"""
+        {self.host.mk_mkdir(filepath)}
+        {self.host.mk_mkdir(scratch)}
+        watcher() {{
+            cd {filepath}
+            while true; do
+                sleep 5
+                {self.mk_http_get(download, stream_url, stream_headers)}
+                for ID in $(cat {download}); do
+                    if ! [ -e "{scratch}/$ID" ]; then
+                        {self.mk_repo_get(download, link_name, "$ID")}
+                        mv {download} $ID
+                        echo >{scratch}/$ID
+                    fi
+                done
+            done
+        }}
+        watcher &
+        """
 
     def _make_ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be
@@ -400,6 +440,8 @@ EOF
         """
         if is_input is None:
             is_input = kind in INPUT_KINDS
+            if required_for_start is None and kind == LinkKind.StreamingInputFilepath:
+                required_for_start = False
         if is_output is None:
             is_output = kind in OUTPUT_KINDS
         if required_for_start is None:
@@ -438,6 +480,7 @@ EOF
         link = self.links[linkname]
         if link.key is None:
             return link.repo
+
         if link.key == "ALLOC":
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
                 lambda job: self.derived_hash(job, linkname), repomodule.AggregateAndRepository(**self.input)
@@ -474,6 +517,33 @@ EOF
         # self._related_cache[linkname] = result   # this would be nice but we need to flush the cache eventually
         return result
 
+    def _repo_filtered(self, job: str, linkname: str) -> "repomodule.Repository":
+        link = self.links[linkname]
+        if link.kind != LinkKind.StreamingInputFilepath:
+            raise TypeError("Cannot automatically produce a filtered repo unless it's StreamingInput")
+        if link.key is None or link.key == "ALLOC" or callable(link.key):
+            raise TypeError("Bad key for repository filter")
+
+        splitkey = link.key.split(".")
+        related = self._repo_related(splitkey[0])
+        if not isinstance(related, repomodule.MetadataRepository):
+            raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
+
+        async def mapper(info):
+            return str(supergetattr_path(info, splitkey[1:]))
+
+        mapped = related.map(mapper)
+
+        async def filterer(subjob: str) -> bool:
+            return await mapped.info(subjob) == job
+
+        if isinstance(link.repo, repomodule.MetadataRepository):
+            result = repomodule.FilterMetadataRepository(link.repo, filterer)
+        else:
+            result = repomodule.FilterRepository(link.repo, filterer)
+
+        return result
+
     @property
     def ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be
@@ -489,7 +559,10 @@ EOF
     @property
     def input(self):
         """A mapping from link name to repository for all links marked ``is_input``."""
-        return {name: self._repo_related(name) for name, link in self.links.items() if link.is_input}
+        result = {name: self._repo_related(name) for name, link in self.links.items() if link.is_input}
+        if not result:
+            raise ValueError("Every task must have at least one input")
+        return result
 
     @property
     def output(self):
@@ -578,7 +651,7 @@ EOF
                 continue
 
             subjob = orig_job
-            if link.key is not None:
+            if link.key is not None and link.kind != LinkKind.StreamingInputFilepath:
                 if link.key == "ALLOC":
                     subjob = self.derived_hash(orig_job, env_name)
                 elif callable(link.key):

@@ -134,6 +134,10 @@ class Repository(ABC):
             filepath = task.mktemp(job)
             preamble, epilogue = task.mk_watchdir_upload(filepath, link_name, {"parent": job})
             return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
+        if kind == taskmodule.LinkKind.StreamingInputFilepath:
+            filepath = task.mktemp(job)
+            preamble = task.mk_watchdir_download(filepath, link_name, job)
+            return taskmodule.TemplateInfo(filepath, preamble=preamble)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
@@ -252,6 +256,80 @@ class MapRepository(MetadataRepository):
         raise TypeError("Do not try to dump into a map repository lol")
 
 
+class FilterRepository(Repository):
+    """A FilterRepository is a repository which uses arbitrary functions to filter results from a base
+    repository."""
+
+    def __init__(
+        self,
+        base: Repository,
+        filt: Optional[Callable[[str], Awaitable[bool]]],
+        allow_deletes=False,
+    ):
+        """
+        :param func: The function to use to translate the base repository's info results into the mapped info
+                     results.
+        :param filt: Optional: An async function to use to determine whether a given key should be considered part of
+                     the mapped repository.
+        :param allow_deletes: Whether the delete operation will do anything on the mapped repository.
+        """
+        self.base = base
+        self.filter = filt
+        self.allow_deletes = allow_deletes
+
+    def __getstate__(self):
+        return (self.base, self.filter, self.allow_deletes)
+
+    async def contains(self, item):
+        if self.filter is None or await self.filter(item):
+            return await self.base.contains(item)
+        return False
+
+    async def delete(self, job):
+        if self.allow_deletes:
+            await self.base.delete(job)
+
+    async def unfiltered_iter(self):
+        async for item in self.base.unfiltered_iter():
+            if self.filter is None or await self.filter(item):
+                yield item
+
+    async def template(
+        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+    ) -> taskmodule.TemplateInfo:
+        raise TypeError("Not supported yet")
+
+
+class FilterMetadataRepository(FilterRepository, MetadataRepository):
+    """A filter repository that is also a metadata repository."""
+
+    def __init__(
+        self,
+        base: MetadataRepository,
+        filt: Optional[Callable[[str], Awaitable[bool]]],
+        allow_deletes=False,
+    ):
+        super().__init__(base, filt, allow_deletes=allow_deletes)
+
+    base: MetadataRepository
+
+    async def info(self, job):
+        return await self.base.info(job)
+
+    async def info_all(self) -> Dict[str, Any]:
+        result = await self.base.info_all()
+        to_remove = []
+        for k in result:
+            if self.filter is not None and await self.filter(k):
+                to_remove.append(k)
+        for k in to_remove:
+            result.pop(k)
+        return result
+
+    async def dump(self, job: str, data: Any):
+        raise TypeError("Do not try to dump into a filter repository lol")
+
+
 class BlobRepository(Repository, ABC):
     """A blob repository has values which are flat data blobs that can be streamed for reading or writing."""
 
@@ -279,6 +357,24 @@ class BlobRepository(Repository, ABC):
     async def open(self, job, mode="r"):
         """Open the given job's value as a stream for reading or writing, in text or binary mode."""
         raise NotImplementedError
+
+    async def blobdump(self, job: str, value: Union[bytes, str]):
+        """
+        Convenience function: dump the entire contents of a string or bytestring into a job.
+        """
+        if isinstance(value, bytes):
+            async with await self.open(job, "wb") as fp:
+                await fp.write(value)
+        else:
+            async with await self.open(job, "w") as fp:
+                await fp.write(value)
+
+    async def blobinfo(self, job: str) -> bytes:
+        """
+        Convenience function: read the entire contents of a job into a bytestring.
+        """
+        async with await self.open(job, "rb") as fp:
+            return await fp.read()
 
 
 class FileRepositoryBase(Repository, ABC):
