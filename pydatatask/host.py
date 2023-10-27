@@ -38,7 +38,7 @@ class Host:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
             URL="{url}"
-            FILENAME='{filename}'
+            FILENAME="{filename}"
             wget -O- $URL {headers_str} >$FILENAME || curl $URL {headers_str} >$FILENAME
             """
         else:
@@ -50,7 +50,7 @@ class Host:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
             URL="{url}"
-            FILENAME='{filename}'
+            FILENAME="{filename}"
             wget -O- $URL {headers_str} --post-file $FILENAME || curl $URL {headers_str} --data-binary @$FILENAME
             """
         else:
