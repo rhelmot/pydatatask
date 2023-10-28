@@ -1254,7 +1254,7 @@ class InProcessSyncTask(Task):
     async def launch(self, job: str):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
-        l.debug("Launching in-process %s:%s...", self.name, job)
+        l.info("Launching in-process %s:%s...", self.name, job)
         args: Dict[str, Any] = dict(self.links)
         args, preamble, epilogue = await self.build_env(args, job)
         try:
@@ -1383,7 +1383,7 @@ class ExecutorTask(Task):
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def launch(self, job):
-        l.debug("Launching %s:%s with %s...", self.name, job, self.executor)
+        l.info("Launching %s:%s with %s...", self.name, job, self.executor)
         args = dict(self.links)
         args, preamble, epilogue = await self.build_env(args, job)
         start_time = datetime.now(tz=timezone.utc)
@@ -1532,7 +1532,7 @@ class KubeFunctionTask(KubeTask):
     async def _launch_sync(self, job: str):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
-        l.debug("Launching --sync %s:%s...", self.name, job)
+        l.info("Launching --sync %s:%s...", self.name, job)
         args = dict(self.links)
         args, preamble, epilogue = await self.build_env(args, job)
         try:

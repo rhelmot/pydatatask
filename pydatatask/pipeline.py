@@ -153,13 +153,13 @@ class Pipeline:
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
-        l.info("Running update...")
+        # l.debug("Running update...")
         result1 = await self.update_only_update()
         result2 = await self.update_only_launch()
         for res in self.quota_managers:
             await res.flush()
         await localhost_quota_manager.flush()
-        l.debug("Completed update")
+        # l.debug("Completed update")
         return result1 | result2
 
     async def update_only_update(self) -> bool:
@@ -185,7 +185,7 @@ class Pipeline:
             raise Exception("Pipeline must be opened")
 
         task_list = list(self.tasks.values())
-        l.debug("Collecting launchable jobs")
+        # l.debug("Collecting launchable jobs")
         to_gather = await asyncio.gather(*[self.gather_ready_jobs(task) for task in task_list])
         jobs = [
             (
@@ -224,7 +224,7 @@ class Pipeline:
 
                 _, task, job = jobt
                 try:
-                    l.debug("Launching %s:%s", task, job)
+                    l.info("Launching %s:%s", task, job)
                     await self.tasks[task].launch(job)
                 except:  # pylint: disable=bare-except
                     l.exception("Failed to launch %s:%s", task, job)
