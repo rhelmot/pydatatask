@@ -28,7 +28,7 @@ from pydatatask.utils import supergetattr_path
 from .quota import QuotaManager, localhost_quota_manager
 from .repository import Repository
 from .session import Session
-from .task import Task
+from .task import LinkKind, Task
 
 l = logging.getLogger(__name__)
 
@@ -314,8 +314,11 @@ class Pipeline:
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
-                follow = self._make_follow_func(task, link_name, True)
-                rfollow = self._make_follow_func(task, link_name, False)
+                if link.kind == LinkKind.StreamingInputFilepath:
+                    follow = rfollow = None
+                else:
+                    follow = self._make_follow_func(task, link_name, True)
+                    rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
                 attrs["link_name"] = link_name
                 attrs["follow"] = follow
