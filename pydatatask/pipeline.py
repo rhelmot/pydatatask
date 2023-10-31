@@ -369,6 +369,21 @@ class Pipeline:
                     )
         return result
 
+    @property
+    def mermaid_graph(self, all=False) -> str:
+        """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
+        result = ["graph LR"]
+        for node in self.task_graph:
+            if isinstance(node, Task):
+                result.append(f"    {node.name}")
+            else:
+                result.append(f"    {node.name}({node.name})")
+        for u, v, data in self.task_graph.edges(data=True):
+            if not all and data["ulink"] in {'done', 'live', 'logs'}:
+                continue
+            result.append(f"    {u.name} -->|{data['ulink']}| {v.name}")
+        return "\n".join(result)
+
     def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:
         """Iterate the list of repositories that are dependent on the given node of the dependency graph.
 
