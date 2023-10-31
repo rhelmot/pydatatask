@@ -1,6 +1,5 @@
 from typing import List, Union
 from dataclasses import dataclass
-from enum import Enum, auto
 
 import ply.lex as lex
 import ply.yacc as yacc
@@ -115,7 +114,7 @@ def p_expr_name(p):
 
 def p_expr_stringlit(p):
     """expr : STRING_LITERAL"""
-    p[0] = StringLiteral(p[1])
+    p[0] = StringLiteral(p[1][1:-1])
 
 
 def p_expr_intlit(p):
@@ -140,7 +139,7 @@ def p_expr_list(p):
 
 def p_expr_index(p):
     """expr : expr LBRACKET expr RBRACKET"""
-    p[0] = Index(p[1], p[3])
+    p[0] = FunctionCall(FuncExpr("__index__", []), [p[1], p[3]])
 
 
 def p_expr_binop(p):
@@ -160,7 +159,7 @@ def p_expr_binop(p):
     | expr LT expr
     | expr GEQ expr
     | expr LEQ expr"""
-    p[0] = BinExpr(BINOP_TOKEN_MAPPING[p[2]], p[1], p[3])
+    p[0] = FunctionCall(FuncExpr(BINOP_TOKEN_MAPPING[p[2]], []), [p[1], p[3]])
 
 
 def p_expr_unop(p):
@@ -168,7 +167,7 @@ def p_expr_unop(p):
     | TILDE expr
     | PLUS expr %prec UMINUS
     | MINUS expr %prec UMINUS"""
-    p[0] = UnExpr(UNOP_TOKEN_MAPPING[p[1]], p[2])
+    p[0] = FunctionCall(FuncExpr(UNOP_TOKEN_MAPPING[p[1]], []), [p[2]])
 
 
 def p_expr_parentheses(p):
@@ -238,57 +237,31 @@ def p_error(p):
     print(f"Syntax error at line {p.lineno}, position {p.lexpos}: Unexpected token '{p.value}'")
 
 
-class BinOp(Enum):
-    ADD = auto()
-    SUB = auto()
-    MUL = auto()
-    DIV = auto()
-    MOD = auto()
-    BITAND = auto()
-    BITOR = auto()
-    BITXOR = auto()
-    LOGAND = auto()
-    LOGOR = auto()
-    EQ = auto()
-    NE = auto()
-    GT = auto()
-    LT = auto()
-    GE = auto()
-    LE = auto()
-
-
 BINOP_TOKEN_MAPPING = {
-    "+": BinOp.ADD,
-    "-": BinOp.SUB,
-    "*": BinOp.MUL,
-    "/": BinOp.DIV,
-    "%": BinOp.MOD,
-    "&": BinOp.BITAND,
-    "|": BinOp.BITOR,
-    "^": BinOp.BITXOR,
-    "&&": BinOp.LOGAND,
-    "||": BinOp.LOGOR,
-    "==": BinOp.EQ,
-    "!=": BinOp.NE,
-    ">": BinOp.GT,
-    "<": BinOp.LT,
-    ">=": BinOp.GE,
-    "<=": BinOp.LE,
+    "+": "__add__",
+    "-": "__sub__",
+    "*": "__mul__",
+    "/": "__div__",
+    "%": "__mod__",
+    "&": "__bitand__",
+    "|": "__bitor__",
+    "^": "__bitxor__",
+    "&&": "__logand__",
+    "||": "__logor__",
+    "==": "__eq__",
+    "!=": "__ne__",
+    ">": "__gt__",
+    "<": "__lt__",
+    ">=": "__ge__",
+    "<=": "__le__",
 }
 
 
-class UnOp(Enum):
-    INV = auto()
-    NOT = auto()
-    NEG = auto()
-    PLUS = auto()
-
-
 UNOP_TOKEN_MAPPING = {
-    "~": UnOp.INV,
-    "!": UnOp.NOT,
-    "-": UnOp.NEG,
-    "+": UnOp.PLUS,
+    "~": "__inv__",
+    "!": "__not__",
+    "-": "__neg__",
+    "+": "__plus__",
 }
 
 
@@ -300,19 +273,6 @@ class Expression:
 @dataclass
 class IdentExpression(Expression):
     name: str
-
-
-@dataclass
-class BinExpr(Expression):
-    op: BinOp
-    lhs: Expression
-    rhs: Expression
-
-
-@dataclass
-class UnExpr(Expression):
-    op: UnOp
-    child: Expression
 
 
 @dataclass
@@ -345,12 +305,6 @@ class FuncExpr:
 class FunctionCall(Expression):
     function: FuncExpr
     args: List[Expression]
-
-
-@dataclass
-class Index(Expression):
-    child: Expression
-    subscript: Expression
 
 
 @dataclass
