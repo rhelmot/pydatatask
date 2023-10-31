@@ -380,7 +380,7 @@ class Pipeline:
         for node in self.graph:
             result.append(f"    {hash(node)}[{repr(node)[1:-1]}]")
         for u, v, data in self.graph.edges(data=True):
-            result.append(f"    {hash(u)} -->|{data['link_name']} {hash(v)}")
+            result.append(f"    {hash(u)} -->|{data['link_name']}| {hash(v)}")
         return "\n".join(result)
 
     @property
