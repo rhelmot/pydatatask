@@ -225,13 +225,13 @@ def graph(pipeline: Pipeline, out_dir: Optional[Path]):
         f.write("# Task Graph\n\n")
         f.write("```mermaid\n")
         f.write(pipeline.mermaid_task_graph)
-        f.write("```\n\n")
+        f.write("\n```\n\n")
 
     with open(out_dir / "graph.md", "w") as f:
         f.write("# Data Graph\n\n")
         f.write("```mermaid\n")
         f.write(pipeline.mermaid_graph)
-        f.write("```\n\n")
+        f.write("\n```\n\n")
 
     with open(out_dir / "task_graph.dot", "w") as f:
         from networkx.drawing.nx_pydot import write_dot
