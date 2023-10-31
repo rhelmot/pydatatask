@@ -373,7 +373,18 @@ class Pipeline:
         return result
 
     @property
-    def mermaid_graph(self, all=False) -> str:
+    def mermaid_graph(self) -> str:
+        """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
+        result = ["graph LR"]
+
+        for node in self.graph:
+            result.append(f"    {hash(node)}[{repr(node)[1:-1]}]")
+        for u, v, data in self.graph.edges(data=True):
+            result.append(f"    {hash(u)} -->|{data['link_name']} {hash(v)}")
+        return "\n".join(result)
+
+    @property
+    def mermaid_task_graph(self, all=False) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
         for node in self.task_graph:

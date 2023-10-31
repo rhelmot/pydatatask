@@ -25,6 +25,8 @@ The help screen should look something like this:
       -h, --help            show this help message and exit
 """
 
+import os
+from pathlib import Path
 from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Union
 import argparse
 import asyncio
@@ -170,6 +172,10 @@ def main(
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
     parser_shell.set_defaults(func=shell)
 
+    parser_graph = subparsers.add_parser("graph", help="Generate a the pipeline graph visualizations")
+    parser_graph.add_argument("--out-dir", "-o", help="The directory to write the graphs to", default=None)
+    parser_graph.set_defaults(func=graph)
+
     parser_http_agent = subparsers.add_parser(
         "agent-http", help="Launch an http server to accept reads and writes from repositories"
     )
@@ -208,6 +214,32 @@ def shell(pipeline: Pipeline):
     assert pydatatask
     IPython.embed(using="asyncio")
 
+def graph(pipeline: Pipeline, out_dir: Optional[Path]):
+    if out_dir is None:
+        out_dir = Path.cwd() / "latest_graphs"
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    assert os.path.isdir(out_dir)
+    with open(out_dir / "task_graph.md", "w") as f:
+        f.write("# Task Graph\n\n")
+        f.write("```mermaid\n")
+        f.write(pipeline.mermaid_task_graph)
+        f.write("```\n\n")
+
+    with open(out_dir / "graph.md", "w") as f:
+        f.write("# Data Graph\n\n")
+        f.write("```mermaid\n")
+        f.write(pipeline.mermaid_graph)
+        f.write("```\n\n")
+
+    with open(out_dir / "task_graph.dot", "w") as f:
+        from networkx.drawing.nx_pydot import write_dot
+        write_dot(pipeline.task_graph, f)
+
+    with open(out_dir / "graph.dot", "w") as f:
+        from networkx.drawing.nx_pydot import write_dot
+        write_dot(pipeline.graph, f)
 
 async def update(pipeline: Pipeline):
     await pipeline.update()
