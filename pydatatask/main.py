@@ -173,7 +173,7 @@ def main(
     parser_shell.set_defaults(func=shell)
 
     parser_graph = subparsers.add_parser("graph", help="Generate a the pipeline graph visualizations")
-    parser_graph.add_argument("--out-dir", "-o", help="The directory to write the graphs to", default=None)
+    parser_graph.add_argument("--out-dir", "-o", help="The directory to write the graphs to", type=Path, default=None)
     parser_graph.set_defaults(func=graph)
 
     parser_http_agent = subparsers.add_parser(
