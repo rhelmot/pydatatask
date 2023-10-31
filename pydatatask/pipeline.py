@@ -370,7 +370,7 @@ class Pipeline:
         return result
 
     @property
-    def mermaid_graph(self, all=False) -> str:
+    def mermaid_task_graph(self, all=False) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
         for node in self.task_graph:
