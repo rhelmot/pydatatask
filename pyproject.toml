@@ -92,7 +92,9 @@ file = "LICENSE"
 [tool.setuptools]
 zip-safe = false
 package-data = { pydatatask = ["py.typed"] }
-packages = ["pydatatask"]
+
+[tool.setuptools.packages]
+find = {}
 
 [tool.setuptools.dynamic]
 version = {attr = "pydatatask.__version__"}
