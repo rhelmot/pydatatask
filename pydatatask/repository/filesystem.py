@@ -30,7 +30,12 @@ import aiofiles.os
 import aioshutil
 
 from pydatatask.repository import FileRepositoryBase
-from pydatatask.repository.base import BlobRepository, MetadataRepository, job_getter
+from pydatatask.repository.base import (
+    BlobRepository,
+    MetadataRepository,
+    Repository,
+    job_getter,
+)
 from pydatatask.utils import (
     AReadStream,
     AReadStreamBase,
@@ -78,7 +83,7 @@ class FilesystemEntry:
     content_size: Optional[int] = None
 
 
-class FilesystemRepository(abc.ABC):
+class FilesystemRepository(Repository, abc.ABC):
     """The base class for repositories whose members are whole directory structures.
 
     The filesystem schema is somewhat simplified, only allowing files, directories, and symlinks.

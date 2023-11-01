@@ -38,7 +38,8 @@ import aiofiles
 import IPython
 import yaml
 
-from pydatatask.repository.filesystem import FilesystemRepository
+from pydatatask.repository.base import FileRepository, YamlMetadataFileRepository
+from pydatatask.repository.filesystem import DirectoryRepository, FilesystemRepository
 from pydatatask.utils import AReadStreamBase, AWriteStreamBase, async_copyfile
 
 from .pipeline import Pipeline
@@ -75,6 +76,7 @@ __all__ = (
 def main(
     pipeline: Pipeline,
     instrument: Optional[Callable[[argparse._SubParsersAction], None]] = None,
+    has_local_fs: bool = True,
 ):
     """The pydatatask main function! Call this with the pipeline you've constructed to parse ``sys.argv`` and
     display the pipeline administration interface.
@@ -178,9 +180,22 @@ def main(
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
     parser_shell.set_defaults(func=shell)
 
-    parser_graph = subparsers.add_parser("graph", help="Generate a the pipeline graph visualizations")
-    parser_graph.add_argument("--out-dir", "-o", help="The directory to write the graphs to", type=Path, default=None)
-    parser_graph.set_defaults(func=graph)
+    if has_local_fs:
+        parser_graph = subparsers.add_parser("graph", help="Generate a the pipeline graph visualizations")
+        parser_graph.add_argument(
+            "--out-dir", "-o", help="The directory to write the graphs to", type=Path, default=None
+        )
+        parser_graph.set_defaults(func=graph)
+
+        parser_backup = subparsers.add_parser("backup", help="Copy contents of repositories to a given folder")
+        parser_backup.add_argument("backup_dir", help="The directory to backup to")
+        parser_backup.add_argument("repos", nargs="+", help="The repositories to back up")
+        parser_backup.set_defaults(func=action_backup)
+
+        parser_restore = subparsers.add_parser("restore", help="Copy contents of repositories from a given folder")
+        parser_restore.add_argument("backup_dir", help="The directory to restore from")
+        parser_restore.add_argument("repos", nargs="+", help="The repositories to restore")
+        parser_restore.set_defaults(func=action_restore)
 
     parser_http_agent = subparsers.add_parser(
         "agent-http", help="Launch an http server to accept reads and writes from repositories"
@@ -521,3 +536,71 @@ async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta:
     else:
         log.warning("Task is not ready to launch - use -f to force")
         return 1
+
+
+async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str]):
+    backup_base = Path(backup_dir)
+    jobs = []
+    for repo_name in repos:
+        repo_base = backup_base / repo_name
+        task, repo_basename = repo_name.split(".")
+        repo = pipeline.tasks[task].links[repo_basename].repo
+        if isinstance(repo, BlobRepository):
+            new_repo = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            await new_repo.validate()
+            jobs.append(_repo_copy_blob(repo, new_repo))
+        elif isinstance(repo, MetadataRepository):
+            new_repo = YamlMetadataFileRepository(repo_base, extension=".yaml")
+            await new_repo.validate()
+            jobs.append(_repo_copy_meta(repo, new_repo))
+        elif isinstance(repo, FilesystemRepository):
+            new_repo = DirectoryRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+        else:
+            print("Warning: cannot backup", repo)
+
+    await asyncio.gather(*jobs)
+
+
+async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str]):
+    backup_base = Path(backup_dir)
+    jobs = []
+    for repo_name in repos:
+        repo_base = backup_base / repo_name
+        task, repo_basename = repo_name.split(".")
+        repo = pipeline.tasks[task].links[repo_basename].repo
+        if isinstance(repo, BlobRepository):
+            new_repo = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            await new_repo.validate()
+            jobs.append(_repo_copy_blob(new_repo, repo))
+        elif isinstance(repo, MetadataRepository):
+            new_repo = YamlMetadataFileRepository(repo_base, extension=".yaml")
+            await new_repo.validate()
+            jobs.append(_repo_copy_meta(new_repo, repo))
+        elif isinstance(repo, FilesystemRepository):
+            new_repo = DirectoryRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            await new_repo.validate()
+            jobs.append(_repo_copy_fs(new_repo, repo))
+        else:
+            print("Warning: cannot backup", repo)
+
+    await asyncio.gather(*jobs)
+
+
+async def _repo_copy_blob(repo_src: BlobRepository, repo_dst: BlobRepository):
+    async for ident in repo_src:
+        async with await repo_src.open(ident, "rb") as fp_r, await repo_dst.open(ident, "wb") as fp_w:
+            await async_copyfile(fp_r, fp_w)
+
+
+async def _repo_copy_meta(repo_src: MetadataRepository, repo_dst: MetadataRepository):
+    for ident, data in (await repo_src.info_all()).items():
+        await repo_dst.dump(ident, data)
+
+
+async def _repo_copy_fs(repo_src: FilesystemRepository, repo_dst: FilesystemRepository):
+    async for ident in repo_src:
+        cursor = repo_dst.dump(ident)
+        await cursor.__anext__()
+        async for member in repo_src.iter_members(ident):
+            await cursor.asend(member)
+        await cursor.aclose()
