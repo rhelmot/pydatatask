@@ -962,6 +962,7 @@ class ProcessTask(Task):
         executor: "Executor" = localhost_manager,
         quota_manager: "QuotaManager" = localhost_quota_manager,
         job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
+        timeout: Optional[timedelta] = None,
         pids: Optional["repomodule.MetadataRepository"] = None,
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
@@ -979,6 +980,7 @@ class ProcessTask(Task):
         :param job_quota: The amount of resources an individual job should contribute to the quota. Note that this
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
+        :param timeout: The amount of time that a job may take before it is terminated, or None for no timeout.
         :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
                      linked as "live" with ``is_status, inhibits_start, inhibits_output``.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
@@ -1023,6 +1025,7 @@ class ProcessTask(Task):
         self._manager: Optional[AbstractProcessManager] = None
         self.warned = False
         self.window = window
+        self.timeout = timeout
 
         self.quota_manager.register(self._get_load)
 
@@ -1083,6 +1086,10 @@ class ProcessTask(Task):
         self.warned = False
         job_map = await self.pids.info_all()
         pid_map = {meta["pid"]: job for job, meta in job_map.items()}
+        now = datetime.now(tz=timezone.utc)
+        timeout_set = {
+            job for job, meta in job_map.items() if self.timeout is not None and now - meta["start_time"] > self.timeout
+        }
         expected_live = set(pid_map)
         try:
             live_pids = await self.manager.get_live_pids(expected_live)
@@ -1095,7 +1102,13 @@ class ProcessTask(Task):
                 job = pid_map[pid]
                 start_time = job_map[job]["start_time"]
                 coros.append(self._reap(job, start_time))
+            for pid in timeout_set - died:
+                job = pid_map[pid]
+                start_time = job_map[job]["start_time"]
+                l.info("%s:%s timed out", self.name, job)
+                coros.append(self._timeout_reap(job, pid, start_time))
             await asyncio.gather(*coros)
+
         return bool(expected_live)
 
     async def launch(self, job: str):
@@ -1160,7 +1173,7 @@ class ProcessTask(Task):
                 pass
             raise
 
-    async def _reap(self, job: str, start_time: datetime):
+    async def _reap(self, job: str, start_time: datetime, timeout: bool = False):
         try:
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
@@ -1176,13 +1189,25 @@ class ProcessTask(Task):
                 async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
                     code = int(await fp1.read())
                 await self.done.dump(
-                    job, {"return_code": code, "start_time": start_time, "end_time": datetime.now(tz=timezone.utc)}
+                    job,
+                    {
+                        "return_code": code,
+                        "start_time": start_time,
+                        "end_time": datetime.now(tz=timezone.utc),
+                        "timeout": timeout,
+                    },
                 )
             await self.manager.rmtree(self.basedir / job)
             await self.pids.delete(job)
             await self.quota_manager.relinquish(self.job_quota)
         except Exception:
             l.error("Could not reap process for %s:%s", self, job, exc_info=True)
+
+    async def _timeout_reap(self, job: str, pid: str, start_time: datetime):
+        try:
+            await self.manager.kill(job)
+        finally:
+            await self._reap(job, start_time)
 
 
 class FunctionTaskProtocol(Protocol):
@@ -1570,6 +1595,7 @@ class ContainerTask(Task):
         quota_manager: "QuotaManager" = localhost_quota_manager,
         job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
         window: timedelta = timedelta(minutes=1),
+        timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
         done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
@@ -1590,6 +1616,7 @@ class ContainerTask(Task):
         :param environ: Additional environment variables to set on the target container before running the task.
         :param window: How recently a container must have been launched in order to contribute to the container
                        rate-limiting.
+        :param timeout: How long a task can take before it is killed for taking too long, or None for no timeout.
         :param done: Optional: A metadata repository in which to dump some information about the container's lifetime
                                and termination on completion. Linked as "done" with
                                ``inhibits_start, required_for_output, is_status``.
@@ -1618,6 +1645,7 @@ class ContainerTask(Task):
         self.privileged = privileged
         self.tty = tty
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
+        self.timeout = timeout
 
         self.quota_manager.register(self._get_load)
 
@@ -1656,7 +1684,7 @@ class ContainerTask(Task):
         return self.job_quota * count - Quota(launches=count - recent)
 
     async def update(self) -> bool:
-        has_any, reaped = await self.manager.update(self.name)
+        has_any, reaped = await self.manager.update(self.name, timeout=self.timeout)
         for job, (log, done) in reaped.items():
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:

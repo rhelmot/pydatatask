@@ -1,7 +1,8 @@
 """This module houses the container manager executors."""
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from itertools import chain
 import asyncio
 
 from kubernetes_asyncio.client import V1Pod
@@ -54,17 +55,21 @@ class AbstractContainerManager(ABC, Executor):
     async def kill(self, task: str, job: str):
         """Kill the container associated with the given task and job.
 
-        This does not need to be done gracefully by any stretch.
+        This does not need to be done gracefully by any stretch. It should wipe any resources associated with the job, so it does not show up as a finished task next time `update` is called.
         """
         raise NotImplementedError
 
     @abstractmethod
-    async def update(self, task: str) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    async def update(
+        self, task: str, timeout: Optional[timedelta] = None
+    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
         """Perform routine maintenence on the running set of jobs for the given task.
 
         Should return a tuple of a bool indicating whether any jobs were running before this function was called, and a
         dict mapping finished job names to a tuple of the output logs from the job and a dict with any metadata left
         over from the job.
+
+        If any job has been alive for longer than timeout, kill it and return it as part of the finished jobs.
         """
         raise NotImplementedError
 
@@ -157,7 +162,9 @@ class DockerContainerManager(AbstractContainerManager):
         await cont.kill()
         await cont.delete()
 
-    async def update(self, task: str) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    async def update(
+        self, task: str, timeout: Optional[timedelta] = None
+    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers))
         infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos]
@@ -167,14 +174,30 @@ class DockerContainerManager(AbstractContainerManager):
             for (name, info), container in zip(infos_and_names, containers)
             if info["State"]["Status"] in ("exited",) and name is not None
         ]
-        results = await asyncio.gather(*(self._cleanup(container, info) for info, container, _ in dead))
-        return activity, {name: result for (_, _, name), result in zip(dead, results)}
+        now = datetime.now(tz=timezone.utc)
+        timed_out = [
+            (info, container, name)
+            for (name, info), container in zip(infos_and_names, containers)
+            if info["State"]["Status"] not in ("exited",)
+            and name is not None
+            and timeout is not None
+            and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout
+        ]
+        await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out))
+        results = await asyncio.gather(
+            *chain(
+                (self._cleanup(container, info) for info, container, _ in dead),
+                (self._cleanup(container, info, True) for info, container, _ in timed_out),
+            )
+        )
+        return activity, {name: result for (_, _, name), result in zip(chain(dead, timed_out), results)}
 
     async def _cleanup(
-        self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any]
+        self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
     ) -> Tuple[bytes, Dict[str, Any]]:
         log = "".join(line for line in await container.log(stdout=True, stderr=True)).encode()
         await container.delete()
+        info["timed_out"] = timed_out
         return (log, info)
 
 
@@ -248,19 +271,32 @@ class KubeContainerManager(AbstractContainerManager):
         for pod in pods:
             await self.cluster.delete(pod)
 
-    async def update(self, task: str) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    async def update(
+        self, task: str, timeout: Optional[timedelta] = None
+    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
         pods = await self.cluster.query(job=None, task=task)
         finished_pods = [pod for pod in pods if pod.status.phase in ("Succeeded", "Failed")]
-        results = await asyncio.gather(*(self._cleanup(pod) for pod in finished_pods))
+        now = datetime.now(tz=timezone.utc)
+        timeout_pods = [
+            pod
+            for pod in pods
+            if pod.status.phase not in ("Succeeded", "Failed")
+            and timeout is not None
+            and now - pod.metadata.creation_timestamp > timeout
+        ]
+        results = await asyncio.gather(
+            *chain((self._cleanup(pod) for pod in finished_pods), (self._cleanup(pod, True) for pod in timeout_pods))
+        )
         return bool(pods), {pod.metadata.labels["job"]: result for pod, result in zip(pods, results)}
 
-    async def _cleanup(self, pod: V1Pod) -> Tuple[bytes, Dict[str, Any]]:
+    async def _cleanup(self, pod: V1Pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
         log = await self.cluster.logs(pod)
         await self.cluster.delete(pod)
         return (
             log.encode(),
             {
-                "reason": pod.status.phsae,
+                "reason": pod.status.phase if not timeout else "Timeout",
+                "timed_out": timeout,
                 "start_time": pod.metadata.creation_timestamp,
                 "end_time": datetime.now(tz=timezone.utc),
                 "image": pod.status.container_statuses[0].image,
