@@ -57,6 +57,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
 
                         subprocess.run("find /tmp/pydatatask", shell=True, check=True)
                         subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout", shell=True, check=True)
+                        subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=True)
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
