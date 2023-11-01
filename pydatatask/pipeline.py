@@ -387,8 +387,9 @@ class Pipeline:
             'noProgress': 'fill:red,color:black',
             'unknown': 'fill:grey,color:black',
         }
+
     @property
-    def mermaid_graph(self) -> str:
+    async def mermaid_graph(self) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
         for maturity, style in self.mermaid_task_maturity_styles.items():
@@ -406,7 +407,7 @@ class Pipeline:
         return "\n".join(result)
 
     @property
-    def mermaid_task_graph(self, all=False) -> str:
+    async def mermaid_task_graph(self, all=False) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
         for maturity, style in self.mermaid_task_maturity_styles.items():
@@ -418,10 +419,14 @@ class Pipeline:
                 result.append(f"    {node.name}:::{maturity_class}")
             else:
                 result.append(f"    {node.name}({node.name})")
+
         for u, v, data in self.task_graph.edges(data=True):
             if not all and data["ulink"] in {"done", "live", "logs"}:
                 continue
-            result.append(f"    {u.name} -->|{data['ulink']}| {v.name}")
+
+            repo: Repository = data['repo']
+            ids = [repo_val_id async for repo_val_id in repo]
+            result.append(f"    {u.name} -->|{data['ulink']}: {len(ids)}| {v.name}")
         return "\n".join(result)
 
     def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:

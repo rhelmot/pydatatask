@@ -221,7 +221,7 @@ def shell(pipeline: Pipeline):
     IPython.embed(using="asyncio")
 
 
-def graph(pipeline: Pipeline, out_dir: Optional[Path]):
+async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
     if out_dir is None:
         out_dir = Path.cwd() / "latest_graphs"
 
@@ -231,13 +231,13 @@ def graph(pipeline: Pipeline, out_dir: Optional[Path]):
     with open(out_dir / "task_graph.md", "w") as f:
         f.write("# Task Graph\n\n")
         f.write("```mermaid\n")
-        f.write(pipeline.mermaid_task_graph)
+        f.write(await pipeline.mermaid_task_graph)
         f.write("\n```\n\n")
 
     with open(out_dir / "graph.md", "w") as f:
         f.write("# Data Graph\n\n")
         f.write("```mermaid\n")
-        f.write(pipeline.mermaid_graph)
+        f.write(await pipeline.mermaid_graph)
         f.write("\n```\n\n")
 
     with open(out_dir / "task_graph.dot", "w") as f:
