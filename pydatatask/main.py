@@ -170,7 +170,7 @@ def main(
         help="Do not store metadata related to task completion",
         dest="meta",
     )
-    parser_run.add_argument(
+    parser_launch.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
     parser_launch.set_defaults(func=launch)
