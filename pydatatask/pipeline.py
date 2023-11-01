@@ -14,6 +14,7 @@ from typing import (
     Tuple,
     Union,
 )
+from datetime import timedelta
 from pathlib import Path
 import asyncio
 import logging
@@ -49,6 +50,7 @@ class Pipeline:
         agent_port: int = 6132,
         agent_hosts: Optional[Dict[Optional[Host], str]] = None,
         source_file: Optional[Path] = None,
+        long_running_timeout: Optional[timedelta] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
@@ -70,6 +72,7 @@ class Pipeline:
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
         self.source_file = source_file
         self.fail_fast = False
+        self.long_running_timeout = long_running_timeout
 
     def settings(self, synchronous=False, metadata=True, fail_fast=False):
         """This method can be called to set properties of the current run.
@@ -108,6 +111,12 @@ class Pipeline:
         for task in self.tasks.values():
             task.agent_secret = self.agent_secret
             task.agent_url = f"http://{self.agent_hosts.get(task.host, self.agent_hosts[None])}:{self.agent_port}"
+            if (
+                self.long_running_timeout is not None
+                and task.long_running
+                and (task.timeout is None or task.timeout < self.long_running_timeout)
+            ):
+                task.timeout = self.long_running_timeout
 
         graph = self.task_graph
         u: Task

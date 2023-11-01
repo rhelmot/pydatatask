@@ -182,6 +182,7 @@ class Task(ABC):
         ready: Optional["repomodule.Repository"] = None,
         disabled: bool = False,
         long_running: bool = False,
+        timeout: Optional[timedelta] = None,
     ):
         self.name = name
         self._ready = ready
@@ -195,6 +196,7 @@ class Task(ABC):
         self.long_running = long_running
         self.annotations: Dict[str, str] = {}
         self.fail_fast = False
+        self.timeout = timeout
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -750,6 +752,7 @@ class KubeTask(Task):
         done: Optional["repomodule.MetadataRepository"],
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
+        long_running: bool = False,
         env: Optional[Dict[str, Any]] = None,
         ready: Optional["repomodule.Repository"] = None,
     ):
@@ -773,14 +776,13 @@ class KubeTask(Task):
         It is highly recommended to provide one or more of ``done`` or ``logs`` so that at least one link is present
         with ``inhibits_start``.
         """
-        super().__init__(name, ready)
+        super().__init__(name, ready, long_running=long_running, timeout=timeout)
 
         self.template = template
         self.quota_manager = quota_manager
         self._executor = executor
         self._podman: Optional[PodManager] = None
         self.logs = logs
-        self.timeout = timeout
         self.done = done
         self.env = env if env is not None else {}
         self.warned = False
@@ -970,6 +972,7 @@ class ProcessTask(Task):
         pids: Optional["repomodule.MetadataRepository"] = None,
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
+        long_running: bool = False,
         done: Optional["repomodule.MetadataRepository"] = None,
         stdin: Optional["repomodule.BlobRepository"] = None,
         stdout: Optional["repomodule.BlobRepository"] = None,
@@ -1010,7 +1013,7 @@ class ProcessTask(Task):
         It is highly recommended to provide at least one of ``done``, ``stdout``, or ``stderr``, so that at least one
         link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready)
+        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout)
 
         if pids is None:
             pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
@@ -1029,7 +1032,6 @@ class ProcessTask(Task):
         self._manager: Optional[AbstractProcessManager] = None
         self.warned = False
         self.window = window
-        self.timeout = timeout
 
         self.quota_manager.register(self._get_load)
 
@@ -1327,6 +1329,7 @@ class ExecutorTask(Task):
         executor: FuturesExecutor,
         done: "repomodule.MetadataRepository",
         host: Optional[Host] = None,
+        long_running: bool = False,
         ready: Optional["repomodule.Repository"] = None,
         func: Optional[Callable] = None,
     ):
@@ -1339,7 +1342,7 @@ class ExecutorTask(Task):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, ready)
+        super().__init__(name, ready, long_running=long_running)
 
         if host is None:
             if isinstance(executor, ThreadPoolExecutor):
@@ -1605,6 +1608,7 @@ class ContainerTask(Task):
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
+        long_running: bool = False,
         done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
@@ -1635,7 +1639,7 @@ class ContainerTask(Task):
         It is highly recommended to provide at least one of ``done`` or ``logs`` so that at least one
         link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready)
+        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout)
 
         self.template = template
         self.entrypoint = entrypoint
@@ -1653,7 +1657,6 @@ class ContainerTask(Task):
         self.privileged = privileged
         self.tty = tty
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
-        self.timeout = timeout
 
         self.quota_manager.register(self._get_load)
 

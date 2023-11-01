@@ -21,7 +21,7 @@ from typing import (
     get_origin,
 )
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import os
 import random
@@ -102,6 +102,7 @@ class TaskSpec:
     done: Optional[str] = None
     links: Dict[str, LinkSpec] = field(default_factory=dict)
     annotations: Dict[str, Any] = field(default_factory=dict)
+    long_running: bool = False
 
 
 @_dataclass_serial
@@ -215,6 +216,7 @@ class PipelineStaging:
         self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
         self.repos_promised_by_parents: Set[str] = set()
         self.executors_promised_by_parents: Set[str] = set()
+        self.long_running_timeout: Optional[timedelta] = None
 
         if filepath is None:
             if basedir is None:
@@ -396,6 +398,7 @@ class PipelineStaging:
             agent_secret=self.spec.agent_secret,
             agent_version=self.spec.agent_version,
             source_file=self.basedir / self.filename,
+            long_running_timeout=self.long_running_timeout,
         )
 
     def allocate(

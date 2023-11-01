@@ -1,5 +1,7 @@
 from typing import Callable, Dict
+from datetime import timedelta
 from pathlib import Path
+import argparse
 import asyncio
 import sys
 import tempfile
@@ -69,15 +71,41 @@ def main():
         "local": default_allocators_local(),
         "temp": default_allocators_temp(),
     }
-    allocators = all_allocators[sys.argv[1]]
+
+    parser = argparse.ArgumentParser(
+        description="Produce a lockfile allocating executors and repositories for a given pipeline"
+    )
+    parser.add_argument(
+        "--repo-local",
+        action="store_const",
+        dest="repo_allocator",
+        const="local",
+        help="Allocate repositories on local filesystem",
+    )
+    parser.add_argument(
+        "--repo-temp", action="store_const", dest="repo_allocator", const="temp", help="Allocate repositories in-memory"
+    )
+    parser.add_argument("--name", help="The name of the app for automatically generated executors")
+    parser.add_argument(
+        "--long-running-timeout",
+        help="Cap the execution of long running tasks to the given numberr of minutes",
+        type=lambda s: timedelta(minutes=int(s)),
+    )
+    parsed = parser.parse_args()
+
+    if parsed.repo_allocator is None:
+        raise ValueError("Must provide --repo-* to specify repository storage")
+
+    allocators = all_allocators[parsed.repo_allocator]
 
     cfgpath = find_config()
     if cfgpath is None:
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
     spec = PipelineStaging(cfgpath)
-    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": cfgpath.name}))
+    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}))
     locked.filename = cfgpath.with_suffix(".lock").name
+    locked.long_running_timeout = parsed.long_running_timeout
 
     locked.spec.agent_hosts[None] = asyncio.run(get_ip())
     locked.save()

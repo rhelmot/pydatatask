@@ -529,6 +529,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "environ": make_dict_parser("environ", str, str),
+                "long_running": parse_bool,
                 "done": make_picker("Repository", repos),
                 "stdin": make_picker("Repository", repos),
                 "stdout": make_picker("Repository", repos),
@@ -554,6 +555,7 @@ def build_task_picker(
                 "env": make_dict_parser("environ", str, str),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
+                "long_running": parse_bool,
             },
         ),
         "Container": make_annotated_constructor(
@@ -576,6 +578,7 @@ def build_task_picker(
                 "links": links_constructor,
                 "privileged": parse_bool,
                 "tty": parse_bool,
+                "long_running": parse_bool,
             },
         ),
     }
