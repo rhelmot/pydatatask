@@ -35,6 +35,9 @@ dependencies = [
     "typing-extensions>=4.8.0",
     "aiohttp>=3.9.0b0",
     "pydot",
+    "dash",
+    "plotly",
+    "pygraphviz",
 ]
 
 [project.scripts]

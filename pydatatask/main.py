@@ -49,6 +49,8 @@ from . import repository as repomodule
 from . import task as taskmodule
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
+from .visualize import run_viz
+
 
 try:
     from . import fuse
@@ -207,6 +209,9 @@ def main(
     )
     parser_http_agent.set_defaults(func=http_agent)
     parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
+
+    parser_viz = subparsers.add_parser("viz", help="Show Visualization of Running Pipeline")
+    parser_viz.set_defaults(func=run_viz)
 
     if fuse is not None:
         parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
