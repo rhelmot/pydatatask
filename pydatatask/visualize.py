@@ -7,7 +7,6 @@ from dash.dependencies import Input, Output
 import pygraphviz as pgv
 import tempfile
 
-
 external_stylesheets = [
     {
         "selector": "body",
