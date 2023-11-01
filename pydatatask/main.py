@@ -190,7 +190,8 @@ def main(
 
         parser_backup = subparsers.add_parser("backup", help="Copy contents of repositories to a given folder")
         parser_backup.add_argument("backup_dir", help="The directory to backup to")
-        parser_backup.add_argument("repos", nargs="+", help="The repositories to back up")
+        parser_backup.add_argument("--all", dest="all_repos", action="store_true", help="Backup all repositories")
+        parser_backup.add_argument("repos", nargs="*", help="The repositories to back up")
         parser_backup.set_defaults(func=action_backup)
 
         parser_restore = subparsers.add_parser("restore", help="Copy contents of repositories from a given folder")
@@ -535,8 +536,19 @@ async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta:
         return 1
 
 
-async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str]):
+async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
+    if all_repos:
+        if repos:
+            raise ValueError("Do you want specific repos or all repos? Make up your mind!")
+        repos = list(
+            {
+                link.repo: f"{taskname}.{linkname}"
+                for taskname, task in pipeline.tasks.items()
+                for linkname, link in task.links.items()
+            }.values()
+        )
+
     jobs = []
     for repo_name in repos:
         repo_base = backup_base / repo_name
