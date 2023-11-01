@@ -63,6 +63,7 @@ class Host:
             mkdir {output_filename}
             cd {output_filename}
             tar -xf {input_filename}
+            cd -
             """
         else:
             raise TypeError(self.os)
@@ -73,6 +74,7 @@ class Host:
             return f"""
             cd {input_filename}
             tar -cf {output_filename} .
+            cd -
             """
         else:
             raise TypeError(self.os)
