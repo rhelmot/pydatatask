@@ -213,6 +213,9 @@ def main(
     parser_viz = subparsers.add_parser("viz", help="Show Visualization of Running Pipeline")
     parser_viz.set_defaults(func=run_viz)
 
+    parser_viz = subparsers.add_parser("viz", help="Show Visualization of Running Pipeline")
+    parser_viz.set_defaults(func=run_viz)
+
     if fuse is not None:
         parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
         parser_fuse.set_defaults(func=fuse.main)
