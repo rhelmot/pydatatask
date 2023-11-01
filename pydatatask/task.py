@@ -193,6 +193,7 @@ class Task(ABC):
         self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
+        self.annotations: Dict[str, str] = {}
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"

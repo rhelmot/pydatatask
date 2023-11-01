@@ -251,23 +251,36 @@ timedelta_constructor = make_constructor(
 )
 
 
+def make_annotated_constructor(
+    name: str, constructor: Callable[..., _T], schema: Dict[str, Any]
+) -> Callable[[Any], _T]:
+    def inner_constructor(**kwargs):
+        annotations = kwargs.pop("annotations", {})
+        result = constructor(**kwargs)
+        result.annotations.update(annotations)  # type: ignore
+        return result
+
+    schema["annotations"] = lambda x: x
+    return make_constructor(name, inner_constructor, schema)
+
+
 def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
     """Generate a function which will dispatch a dict into all known repository constructors.
 
     This function can be extended through the ``pydatatask.repository_constructors`` entrypoint.
     """
     kinds: Dict[str, Callable[[Any], Repository]] = {
-        "InProcessMetadata": make_constructor(
+        "InProcessMetadata": make_annotated_constructor(
             "InProcessMetadataRepository",
             InProcessMetadataRepository,
             {},
         ),
-        "InProcessBlob": make_constructor(
+        "InProcessBlob": make_annotated_constructor(
             "InProcessBlobRepository",
             InProcessBlobRepository,
             {},
         ),
-        "File": make_constructor(
+        "File": make_annotated_constructor(
             "FileRepository",
             FileRepository,
             {
@@ -276,7 +289,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "case_insensitive": parse_bool,
             },
         ),
-        "Directory": make_constructor(
+        "Directory": make_annotated_constructor(
             "DirectoryRepository",
             DirectoryRepository,
             {
@@ -286,7 +299,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "discard_empty": parse_bool,
             },
         ),
-        "YamlFile": make_constructor(
+        "YamlFile": make_annotated_constructor(
             "YamlMetadataFileRepository",
             YamlMetadataFileRepository,
             {
@@ -295,7 +308,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "case_insensitive": parse_bool,
             },
         ),
-        "S3Bucket": make_constructor(
+        "S3Bucket": make_annotated_constructor(
             "S3BucketRepository",
             S3BucketRepository,
             {
@@ -307,7 +320,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "incluster_endpoint": str,
             },
         ),
-        "YamlMetadataS3Bucket": make_constructor(
+        "YamlMetadataS3Bucket": make_annotated_constructor(
             "YamlMetadataS3Repository",
             YamlMetadataS3Repository,
             {
@@ -319,7 +332,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "incluster_endpoint": str,
             },
         ),
-        "DockerRegistry": make_constructor(
+        "DockerRegistry": make_annotated_constructor(
             "DockerRepository",
             DockerRepository,
             {
@@ -328,7 +341,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "repository": str,
             },
         ),
-        "MongoMetadata": make_constructor(
+        "MongoMetadata": make_annotated_constructor(
             "MongoMetadataRepository",
             MongoMetadataRepository,
             {
@@ -503,7 +516,7 @@ def build_task_picker(
     )
     links_constructor = make_dict_parser("links", str, link_constructor)
     kinds = {
-        "Process": make_constructor(
+        "Process": make_annotated_constructor(
             "ProcessTask",
             ProcessTask,
             {
@@ -526,7 +539,7 @@ def build_task_picker(
                 "links": links_constructor,
             },
         ),
-        "Kubernetes": make_constructor(
+        "Kubernetes": make_annotated_constructor(
             "KubeTask",
             KubeTask,
             {
@@ -543,7 +556,7 @@ def build_task_picker(
                 "links": links_constructor,
             },
         ),
-        "Container": make_constructor(
+        "Container": make_annotated_constructor(
             "ContainerTask",
             ContainerTask,
             {

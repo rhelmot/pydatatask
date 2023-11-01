@@ -436,6 +436,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
     fashion."""
 
     def __init__(self, blobs: BlobRepository, meta: MetadataRepository, pathsep="/"):
+        super().__init__()
         self.blobs = blobs
         self.meta = meta
         self.pathsep = pathsep

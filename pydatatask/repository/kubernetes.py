@@ -19,6 +19,7 @@ class LiveKubeRepository(Repository):
     """
 
     def __init__(self, task: "KubeTask"):
+        super().__init__()
         self.task = task
 
     def __getstate__(self):
@@ -55,6 +56,7 @@ class LiveContainerRepository(Repository):
     """
 
     def __init__(self, task: "ContainerTask"):
+        super().__init__()
         self.task = task
 
     def __getstate__(self):

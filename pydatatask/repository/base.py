@@ -56,6 +56,9 @@ class Repository(ABC):
     A repository can be async-iterated to get a listing of its members.
     """
 
+    def __init__(self):
+        self.annotations: Dict[str, str] = {}
+
     CHARSET = CHARSET_START_END = string.ascii_letters + string.digits
 
     @classmethod
@@ -210,6 +213,7 @@ class MapRepository(MetadataRepository):
                      the mapped repository.
         :param allow_deletes: Whether the delete operation will do anything on the mapped repository.
         """
+        super().__init__()
         self.base = base
         self.func = func
         self.filter = filt
@@ -273,6 +277,7 @@ class FilterRepository(Repository):
                      the mapped repository.
         :param allow_deletes: Whether the delete operation will do anything on the mapped repository.
         """
+        super().__init__()
         self.base = base
         self.filter = filt
         self.allow_deletes = allow_deletes
@@ -386,6 +391,7 @@ class FileRepositoryBase(Repository, ABC):
     """
 
     def __init__(self, basedir: Union[str, Path], extension: str = "", case_insensitive: bool = False):
+        super().__init__()
         self.basedir = Path(basedir)
         self.extension = extension
         self.case_insensitive = case_insensitive
@@ -438,6 +444,7 @@ class FunctionCallMetadataRepository(MetadataRepository):
     """A metadata repository which contains a function used to generate the info for each job."""
 
     def __init__(self, info: Callable[[str], Any], domain: Repository):
+        super().__init__()
         self._info = info
         self._domain = domain
 
@@ -485,6 +492,7 @@ class RelatedItemRepository(Repository):
         :param prefetch_lookup: Whether to cache the entirety of the translator repository in memory to improve
                                 performance.
         """
+        super().__init__()
         self.base_repository = base_repository
         self.translator_repository = translator_repository
         self.allow_deletes = allow_deletes
@@ -583,6 +591,7 @@ class FixedItemRepository:
     """
 
     def __init__(self, repo: Repository, job: str):
+        super().__init__()
         self._repo = repo
         self._job = job
 
@@ -601,6 +610,7 @@ class AggregateAndRepository(Repository):
     """A repository which is said to contain a job if all its children also contain that job."""
 
     def __init__(self, **children: Repository):
+        super().__init__()
         assert children
         self.children = children
 
@@ -630,6 +640,7 @@ class AggregateOrRepository(Repository):
     """A repository which is said to contain a job if any of its children also contain that job."""
 
     def __init__(self, **children: Repository):
+        super().__init__()
         assert children
         self.children = children
 
@@ -661,6 +672,7 @@ class BlockingRepository(Repository):
     """A class that is said to contain a job if ``source`` contains it and ``unless`` does not contain it."""
 
     def __init__(self, source: Repository, unless: Repository, enumerate_unless=True):
+        super().__init__()
         self.source = source
         self.unless = unless
         self.enumerate_unless = enumerate_unless
@@ -726,6 +738,7 @@ class ExecutorLiveRepo(Repository):
     """
 
     def __init__(self, task: "taskmodule.ExecutorTask"):
+        super().__init__()
         self.task = task
 
     def __getstate__(self):
@@ -751,6 +764,7 @@ class InProcessMetadataRepository(MetadataRepository):
     the process terminates."""
 
     def __init__(self, data: Optional[Dict[str, Any]] = None):
+        super().__init__()
         self.data: Dict[str, Any] = data if data is not None else {}
 
     def __getstate__(self):
@@ -787,6 +801,7 @@ class InProcessBlobStream:
     """
 
     def __init__(self, repo: "InProcessBlobRepository", job: str):  # pylint: disable=missing-function-docstring
+        super().__init__()
         self.repo = repo
         self.job = job
         self.data = io.BytesIO(repo.data.get(job, b""))
@@ -818,6 +833,7 @@ class InProcessBlobRepository(BlobRepository):
     process terminates."""
 
     def __init__(self, data: Optional[Dict[str, bytes]] = None):
+        super().__init__()
         self.data = data if data is not None else {}
 
     def __getstate__(self):

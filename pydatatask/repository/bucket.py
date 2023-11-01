@@ -80,6 +80,7 @@ class S3BucketRepositoryBase(Repository):
         bucket: str,
         endpoints: Optional[Dict[Optional[Host], str]] = None,
     ):
+        super().__init__()
         self._client = client
         self.bucket = bucket
         self.endpoints = endpoints or {}

@@ -19,6 +19,7 @@ class MongoMetadataRepository(MetadataRepository):
         :param collection: A callable returning a motor async collection.
         :param subcollection: Optional: the name of a subcollection within the collection in which to store data.
         """
+        super().__init__()
         self._database = database
         self._collection = collection
 

@@ -31,6 +31,7 @@ class DockerRepository(Repository):
         :param domain: The registry domain to connect to, e.g. ``index.docker.io``.
         :param repository: The repository to store images in within the domain, e.g. ``myname/myrepo``.
         """
+        super().__init__()
         self._registry = registry
         self.domain = domain
         self.repository = repository
