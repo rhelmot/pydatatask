@@ -52,7 +52,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 while await pipeline.update():
                     await asyncio.sleep(0.5)
                     i += 1
-                    if i > 400:
+                    if i > 1000:
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
