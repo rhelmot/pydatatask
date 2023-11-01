@@ -194,6 +194,7 @@ class Task(ABC):
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
         self.annotations: Dict[str, str] = {}
+        self.fail_fast = False
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -940,6 +941,8 @@ class KubeTask(Task):
                 await self.handle_timeout(pod)
                 await self._cleanup(pod, "Timeout")
         except Exception:
+            if self.fail_fast:
+                raise
             l.exception("Failed to update kube task %s:%s", self.name, pod.metadata.name)
 
     async def handle_timeout(self, pod: V1Pod):
@@ -1095,6 +1098,8 @@ class ProcessTask(Task):
         try:
             live_pids = await self.manager.get_live_pids(expected_live)
         except Exception:
+            if self.fail_fast:
+                raise
             l.error("Could not load live PIDs for %s", self, exc_info=True)
         else:
             died = expected_live - live_pids
@@ -1202,6 +1207,8 @@ class ProcessTask(Task):
             await self.pids.delete(job)
             await self.quota_manager.relinquish(self.job_quota)
         except Exception:
+            if self.fail_fast:
+                raise
             l.error("Could not reap process for %s:%s", self, job, exc_info=True)
 
     async def _timeout_reap(self, job: str, pid: str, start_time: datetime):

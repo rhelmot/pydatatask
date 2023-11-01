@@ -69,17 +69,20 @@ class Pipeline:
         self.agent_port: int = agent_port
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
         self.source_file = source_file
+        self.fail_fast = False
 
-    def settings(self, synchronous=False, metadata=True):
+    def settings(self, synchronous=False, metadata=True, fail_fast=False):
         """This method can be called to set properties of the current run.
 
         :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
             launch phase succeeds.
         :param metadata: Whether jobs will store their completion metadata.
         """
+        self.fail_fast = fail_fast
         for task in self.tasks.values():
             task.synchronous = synchronous
             task.metadata = metadata
+            task.fail_fast = fail_fast
 
     async def _validate(self):
         seen_repos = set()
@@ -227,6 +230,8 @@ class Pipeline:
                     l.info("Launching %s:%s", task, job)
                     await self.tasks[task].launch(job)
                 except:  # pylint: disable=bare-except
+                    if self.fail_fast:
+                        raise
                     l.exception("Failed to launch %s:%s", task, job)
 
         for prio_queue in jobs_by_priority:
@@ -393,7 +398,7 @@ class Pipeline:
             else:
                 result.append(f"    {node.name}({node.name})")
         for u, v, data in self.task_graph.edges(data=True):
-            if not all and data["ulink"] in {'done', 'live', 'logs'}:
+            if not all and data["ulink"] in {"done", "live", "logs"}:
                 continue
             result.append(f"    {u.name} -->|{data['ulink']}| {v.name}")
         return "\n".join(result)

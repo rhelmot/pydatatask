@@ -25,12 +25,12 @@ The help screen should look something like this:
       -h, --help            show this help message and exit
 """
 
-import os
-from pathlib import Path
 from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Union
+from pathlib import Path
 import argparse
 import asyncio
 import logging
+import os
 import re
 
 from aiohttp import web
@@ -92,6 +92,9 @@ def main(
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
     parser_run.add_argument("--verbose", action="store_true", help="Only evaluates tasks-to-launch once")
+    parser_run.add_argument(
+        "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -167,6 +170,9 @@ def main(
         help="Do not store metadata related to task completion",
         dest="meta",
     )
+    parser_run.add_argument(
+        "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
     parser_launch.set_defaults(func=launch)
 
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
@@ -214,6 +220,7 @@ def shell(pipeline: Pipeline):
     assert pydatatask
     IPython.embed(using="asyncio")
 
+
 def graph(pipeline: Pipeline, out_dir: Optional[Path]):
     if out_dir is None:
         out_dir = Path.cwd() / "latest_graphs"
@@ -235,11 +242,14 @@ def graph(pipeline: Pipeline, out_dir: Optional[Path]):
 
     with open(out_dir / "task_graph.dot", "w") as f:
         from networkx.drawing.nx_pydot import write_dot
+
         write_dot(pipeline.task_graph, f)
 
     with open(out_dir / "graph.dot", "w") as f:
         from networkx.drawing.nx_pydot import write_dot
+
         write_dot(pipeline.graph, f)
+
 
 async def update(pipeline: Pipeline):
     await pipeline.update()
@@ -310,7 +320,16 @@ def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
     web.run_app(app, host=host, port=port)
 
 
-async def run(pipeline: Pipeline, forever: bool, launch_once: bool, timeout: Optional[float], verbose: bool = False):
+async def run(
+    pipeline: Pipeline,
+    forever: bool,
+    launch_once: bool,
+    timeout: Optional[float],
+    verbose: bool = False,
+    fail_fast: bool = False,
+):
+    pipeline.settings(fail_fast=fail_fast)
+
     async def update_only_update_flush():
         await pipeline.update_only_update()
         for res in pipeline.quota_managers:
@@ -493,9 +512,9 @@ async def inject_data_inner(item: Repository, job: str, stream: AReadStreamBase)
         raise TypeError(type(item))
 
 
-async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool):
+async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool, fail_fast: bool):
     task = pipeline.tasks[task_name]
-    pipeline.settings(sync, meta)
+    pipeline.settings(sync, meta, fail_fast)
 
     if force or await task.ready.contains(job):
         await task.launch(job)
