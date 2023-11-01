@@ -387,22 +387,10 @@ class Pipeline:
         return result
 
     @property
-    def mermaid_task_maturity_styles(self):
-        """Styles for mermaid_graph."""
-        return {
-            "fullyIntegrated": "fill:green,color:black",
-            "missingPydatataskFeatures": "fill:lightgreen,color:black,stroke:red,stroke-width:2px,stroke-dasharray: 5, 5",
-            "mostlyComplete": "fill:yellow,color:black",
-            "inProgress": "fill:orange,color:black",
-            "noProgress": "fill:red,color:black",
-            "unknown": "fill:grey,color:black",
-        }
-
-    @property
     async def mermaid_graph(self) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
-        for maturity, style in self.mermaid_task_maturity_styles.items():
+        for maturity, style in MERMAID_TASK_MATURITY_STYLES.items():
             result.append(f"    classDef {maturity} {style}")
 
         for node in self.graph:
@@ -410,7 +398,7 @@ class Pipeline:
             if isinstance(node, Task):
                 maturity_class = node.annotations.get("maturity", "unknown")
                 assert (
-                    maturity_class in self.mermaid_task_maturity_styles
+                    maturity_class in MERMAID_TASK_MATURITY_STYLES
                 ), f"Unknown maturity class {maturity_class} in {node}"
                 result.append(f"    {hash(node)}:::{maturity_class}")
 
@@ -422,13 +410,13 @@ class Pipeline:
     async def mermaid_task_graph(self) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
-        for maturity, style in self.mermaid_task_maturity_styles.items():
+        for maturity, style in MERMAID_TASK_MATURITY_STYLES.items():
             result.append(f"    classDef {maturity} {style}")
         for node in self.task_graph:
             if isinstance(node, Task):
                 maturity_class = node.annotations.get("maturity", "unknown")
                 assert (
-                    maturity_class in self.mermaid_task_maturity_styles
+                    maturity_class in MERMAID_TASK_MATURITY_STYLES
                 ), f"Unknown maturity class {maturity_class} in {node}"
                 result.append(f"    {node.name}:::{maturity_class}")
             else:
@@ -454,3 +442,13 @@ class Pipeline:
         else:
             yield node
             yield from self.graph.successors(node)
+
+
+MERMAID_TASK_MATURITY_STYLES = {
+    "fullyIntegrated": "fill:green,color:black",
+    "missingPydatataskFeatures": "fill:lightgreen,color:black,stroke:red,stroke-width:2px,stroke-dasharray: 5, 5",
+    "mostlyComplete": "fill:yellow,color:black",
+    "inProgress": "fill:orange,color:black",
+    "noProgress": "fill:red,color:black",
+    "unknown": "fill:grey,color:black",
+}

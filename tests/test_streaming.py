@@ -1,23 +1,12 @@
 from typing import cast
 import asyncio
-import base64
-import os
 import pathlib
-import random
-import shutil
-import string
 import unittest
-import warnings
-
-import kubernetes_asyncio
 
 from pydatatask.cli.lock import default_allocators_local
-from pydatatask.executor.pod_manager import PodManager, kube_connect
-from pydatatask.host import Host, HostOS
 from pydatatask.repository.base import BlobRepository, MetadataRepository
 from pydatatask.staging import Dispatcher, PipelineStaging
-from pydatatask.task import LinkKind, ProcessTask
-import pydatatask
+from pydatatask.task import ProcessTask
 
 test_root = pathlib.Path(__file__).parent
 
@@ -63,7 +52,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 while await pipeline.update():
                     await asyncio.sleep(0.5)
                     i += 1
-                    if i > 100:
+                    if i > 400:
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}

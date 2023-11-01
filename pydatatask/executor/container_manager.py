@@ -55,7 +55,8 @@ class AbstractContainerManager(ABC, Executor):
     async def kill(self, task: str, job: str):
         """Kill the container associated with the given task and job.
 
-        This does not need to be done gracefully by any stretch. It should wipe any resources associated with the job, so it does not show up as a finished task next time `update` is called.
+        This does not need to be done gracefully by any stretch. It should wipe any resources associated with the job,
+        so it does not show up as a finished task next time `update` is called.
         """
         raise NotImplementedError
 
