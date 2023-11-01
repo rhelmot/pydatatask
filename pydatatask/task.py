@@ -541,10 +541,10 @@ EOF
         async def filterer(subjob: str) -> bool:
             return await mapped.info(subjob) == job
 
-        if isinstance(link.repo, repomodule.MetadataRepository):
-            result = repomodule.FilterMetadataRepository(link.repo, filterer)
-        else:
+        if not isinstance(link.repo, repomodule.MetadataRepository):
             result = repomodule.FilterRepository(link.repo, filterer)
+        else:
+            result = repomodule.FilterMetadataRepository(link.repo, filterer)
 
         return result
 
@@ -1215,7 +1215,7 @@ class ProcessTask(Task):
 
     async def _timeout_reap(self, job: str, pid: str, start_time: datetime):
         try:
-            await self.manager.kill(job)
+            await self.manager.kill(pid)
         finally:
             await self._reap(job, start_time)
 

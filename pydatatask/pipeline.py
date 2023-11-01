@@ -388,13 +388,14 @@ class Pipeline:
 
     @property
     def mermaid_task_maturity_styles(self):
+        """Styles for mermaid_graph."""
         return {
-            'fullyIntegrated': 'fill:green,color:black',
-            'missingPydatataskFeatures': 'fill:lightgreen,color:black,stroke:red,stroke-width:2px,stroke-dasharray: 5, 5',
-            'mostlyComplete': 'fill:yellow,color:black',
-            'inProgress': 'fill:orange,color:black',
-            'noProgress': 'fill:red,color:black',
-            'unknown': 'fill:grey,color:black',
+            "fullyIntegrated": "fill:green,color:black",
+            "missingPydatataskFeatures": "fill:lightgreen,color:black,stroke:red,stroke-width:2px,stroke-dasharray: 5, 5",
+            "mostlyComplete": "fill:yellow,color:black",
+            "inProgress": "fill:orange,color:black",
+            "noProgress": "fill:red,color:black",
+            "unknown": "fill:grey,color:black",
         }
 
     @property
@@ -407,33 +408,37 @@ class Pipeline:
         for node in self.graph:
             result.append(f"    {hash(node)}[{repr(node)[1:-1]}]")
             if isinstance(node, Task):
-                maturity_class = node.annotations.get('maturity', 'unknown')
-                assert maturity_class in self.mermaid_task_maturity_styles, f"Unknown maturity class {maturity_class} in {node}"
+                maturity_class = node.annotations.get("maturity", "unknown")
+                assert (
+                    maturity_class in self.mermaid_task_maturity_styles
+                ), f"Unknown maturity class {maturity_class} in {node}"
                 result.append(f"    {hash(node)}:::{maturity_class}")
 
-        for u, v, data in self.graph.edges(data=True):
+        for u, v, data in self.graph.edges(data=True):  # type: ignore[misc]
             result.append(f"    {hash(u)} -->|{data['link_name']}| {hash(v)}")
         return "\n".join(result)
 
     @property
-    async def mermaid_task_graph(self, all=False) -> str:
+    async def mermaid_task_graph(self) -> str:
         """A mermaid graph of the pipeline, suitable for rendering with the mermaid library."""
         result = ["graph LR"]
         for maturity, style in self.mermaid_task_maturity_styles.items():
             result.append(f"    classDef {maturity} {style}")
         for node in self.task_graph:
             if isinstance(node, Task):
-                maturity_class = node.annotations.get('maturity', 'unknown')
-                assert maturity_class in self.mermaid_task_maturity_styles, f"Unknown maturity class {maturity_class} in {node}"
+                maturity_class = node.annotations.get("maturity", "unknown")
+                assert (
+                    maturity_class in self.mermaid_task_maturity_styles
+                ), f"Unknown maturity class {maturity_class} in {node}"
                 result.append(f"    {node.name}:::{maturity_class}")
             else:
                 result.append(f"    {node.name}({node.name})")
 
-        for u, v, data in self.task_graph.edges(data=True):
-            if not all and data["ulink"] in {"done", "live", "logs"}:
+        for u, v, data in self.task_graph.edges(data=True):  # type: ignore[misc]
+            if data["ulink"] in {"done", "live", "logs"}:
                 continue
 
-            repo: Repository = data['repo']
+            repo: Repository = data["repo"]
             ids = [repo_val_id async for repo_val_id in repo]
             result.append(f"    {u.name} -->|{data['ulink']}: {len(ids)}| {v.name}")
         return "\n".join(result)

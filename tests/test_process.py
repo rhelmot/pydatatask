@@ -162,7 +162,7 @@ echo 'goodbye world!' >&2
             procman,
             quota,
             pydatatask.Quota.parse("100m", "100m"),
-            repo_pids,
+            pids=repo_pids,
             environ={},
             done=repo_done,
             stdin=repo_stdin,

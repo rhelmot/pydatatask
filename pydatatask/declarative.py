@@ -254,6 +254,9 @@ timedelta_constructor = make_constructor(
 def make_annotated_constructor(
     name: str, constructor: Callable[..., _T], schema: Dict[str, Any]
 ) -> Callable[[Any], _T]:
+    """Generate a constructor which allows the passing of an "annotations" key even if the constructor does not take
+    one."""
+
     def inner_constructor(**kwargs):
         annotations = kwargs.pop("annotations", {})
         result = constructor(**kwargs)

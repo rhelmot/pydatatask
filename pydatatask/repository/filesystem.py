@@ -446,6 +446,16 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         self.meta = meta
         self.pathsep = pathsep
 
+    def __getstate__(self):
+        return (self.blobs, self.meta, self.pathsep)
+
+    async def delete(self, job: str):
+        # UHHHHHHHHHHHHHHHHHHHHHHHH WHERE REFCOUNTING
+        await self.meta.delete(job)
+
+    def unfiltered_iter(self):
+        return self.meta.unfiltered_iter()
+
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         meta = await self.meta.info(job)
         if not isinstance(meta, list):

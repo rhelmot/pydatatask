@@ -96,9 +96,15 @@ class QuotaManager:
         :param quota: The resource limit that should be applied to the sum of all tasks using this manager.
         """
         self.quota = quota
-        self._lock = Lock()
+        self.__lock: Optional[Lock] = None
         self._cached: Optional[Quota] = None
         self._registered_getters: List[Callable[[], Awaitable[Quota]]] = []
+
+    @property
+    def _lock(self):
+        if self.__lock is None:
+            self.__lock = Lock()
+        return self.__lock
 
     def register(self, func: Callable[[], Awaitable[Quota]]):
         """Register an async callback which will be used to load the current resource utilization on process start.

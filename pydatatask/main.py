@@ -34,6 +34,7 @@ import os
 import re
 
 from aiohttp import web
+from networkx.drawing.nx_pydot import write_dot
 import aiofiles
 import IPython
 import yaml
@@ -243,26 +244,22 @@ async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
     os.makedirs(out_dir, exist_ok=True)
 
     assert os.path.isdir(out_dir)
-    with open(out_dir / "task_graph.md", "w") as f:
+    with open(out_dir / "task_graph.md", "w", encoding="utf-8") as f:
         f.write("# Task Graph\n\n")
         f.write("```mermaid\n")
         f.write(await pipeline.mermaid_task_graph)
         f.write("\n```\n\n")
 
-    with open(out_dir / "graph.md", "w") as f:
+    with open(out_dir / "graph.md", "w", encoding="utf-8") as f:
         f.write("# Data Graph\n\n")
         f.write("```mermaid\n")
         f.write(await pipeline.mermaid_graph)
         f.write("\n```\n\n")
 
-    with open(out_dir / "task_graph.dot", "w") as f:
-        from networkx.drawing.nx_pydot import write_dot
-
+    with open(out_dir / "task_graph.dot", "w", encoding="utf-8") as f:
         write_dot(pipeline.task_graph, f)
 
-    with open(out_dir / "graph.dot", "w") as f:
-        from networkx.drawing.nx_pydot import write_dot
-
+    with open(out_dir / "graph.dot", "w", encoding="utf-8") as f:
         write_dot(pipeline.graph, f)
 
 
@@ -546,15 +543,19 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str]):
         task, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task].links[repo_basename].repo
         if isinstance(repo, BlobRepository):
-            new_repo = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
-            await new_repo.validate()
-            jobs.append(_repo_copy_blob(repo, new_repo))
+            new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            await new_repo_file.validate()
+            jobs.append(_repo_copy_blob(repo, new_repo_file))
         elif isinstance(repo, MetadataRepository):
-            new_repo = YamlMetadataFileRepository(repo_base, extension=".yaml")
-            await new_repo.validate()
-            jobs.append(_repo_copy_meta(repo, new_repo))
+            new_repo_meta = YamlMetadataFileRepository(repo_base, extension=".yaml")
+            await new_repo_meta.validate()
+            jobs.append(_repo_copy_meta(repo, new_repo_meta))
         elif isinstance(repo, FilesystemRepository):
-            new_repo = DirectoryRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            new_repo_fs = DirectoryRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
+            await new_repo_fs.validate()
+            jobs.append(_repo_copy_fs(repo, new_repo_fs))
         else:
             print("Warning: cannot backup", repo)
 
@@ -569,17 +570,19 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str]):
         task, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task].links[repo_basename].repo
         if isinstance(repo, BlobRepository):
-            new_repo = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
-            await new_repo.validate()
-            jobs.append(_repo_copy_blob(new_repo, repo))
+            new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+            await new_repo_file.validate()
+            jobs.append(_repo_copy_blob(new_repo_file, repo))
         elif isinstance(repo, MetadataRepository):
-            new_repo = YamlMetadataFileRepository(repo_base, extension=".yaml")
-            await new_repo.validate()
-            jobs.append(_repo_copy_meta(new_repo, repo))
+            new_repo_meta = YamlMetadataFileRepository(repo_base, extension=".yaml")
+            await new_repo_meta.validate()
+            jobs.append(_repo_copy_meta(new_repo_meta, repo))
         elif isinstance(repo, FilesystemRepository):
-            new_repo = DirectoryRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
-            await new_repo.validate()
-            jobs.append(_repo_copy_fs(new_repo, repo))
+            new_repo_fs = DirectoryRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
+            await new_repo_fs.validate()
+            jobs.append(_repo_copy_fs(new_repo_fs, repo))
         else:
             print("Warning: cannot backup", repo)
 

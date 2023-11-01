@@ -425,7 +425,7 @@ class PipelineStaging:
         result.spec.agent_version = datetime.now().isoformat()
         result.spec.agent_secret = str(random.randint(10**40, 10**41))
         result.spec.agent_hosts = {}
-        result.filename = Path(self.filename).with_suffix(".lock")
+        result.filename = str(Path(self.filename).with_suffix(".lock"))
         spec.path = str(self.basedir / self.filename)
         return result
 

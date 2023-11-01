@@ -408,7 +408,7 @@ class SSHLinuxManager(AbstractProcessManager):
             env=environ,
         )
         pid = await p.stdout.readline()
-        return pid.decode().strip()
+        return pid.strip()
 
 
 localhost_manager = LocalLinuxManager("default")

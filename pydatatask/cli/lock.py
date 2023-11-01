@@ -80,6 +80,7 @@ def main():
         action="store_const",
         dest="repo_allocator",
         const="local",
+        default="local",
         help="Allocate repositories on local filesystem",
     )
     parser.add_argument(
@@ -92,9 +93,6 @@ def main():
         type=lambda s: timedelta(minutes=int(s)),
     )
     parsed = parser.parse_args()
-
-    if parsed.repo_allocator is None:
-        raise ValueError("Must provide --repo-* to specify repository storage")
 
     allocators = all_allocators[parsed.repo_allocator]
 
