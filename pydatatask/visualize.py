@@ -7,6 +7,7 @@ from dash.dependencies import Input, Output
 import pygraphviz as pgv
 import tempfile
 
+
 external_stylesheets = [
     {
         "selector": "body",
@@ -82,45 +83,6 @@ def create_quiver_plot(G, pos):
                               line=dict(width=0.8, color='#888'))
     return quiver.data[0]
 
-# def remove_extraneous_nodes(G):
-    # node_dict = {}
-    # nodes_to_remove = set()
-    # edges_to_add = []
-    # for edge in list(G.edges()).copy():
-        # if edge[0].startswith("ContainerTask"):
-            # if edge[0] not in node_dict:
-                # data_dict = {"in_edges": [], "in_data": [], "out_edges": [], "out_data": []}
-                # node_dict[edge[0]] = data_dict
-            # data_dict = node_dict[edge[0]]
-            # if G.out_degree(edge[1]) == 0:
-                # data_dict["out_data"].append(edge[1])
-                # G.remove_node(edge[1])
-            # elif any(x[1] == edge[0] for x in G.out_edges(edge[1])):
-                # data_dict["in_data"].append(edge[1])
-                # G.remove_node(edge[1])
-            # else:
-                # data_dict["out_edges"].append(edge[1])
-        # elif edge[1].startswith("ContainerTask"):
-            # if edge[1] not in node_dict:
-                # data_dict = {"in_edges": [], "in_data": [], "out_edges": [], "out_data": []}
-                # node_dict[edge[1]] = data_dict
-            # data_dict = node_dict[edge[1]]
-            # if any(x[0] == edge[1] for x in G.in_edges(edge[0])):
-                # data_dict["in_data"].append(edge[0])
-                # if edge[0] in G:
-                    # G.remove_node(edge[0])
-            # else:
-                # if edge[0] not in data_dict["in_data"]:
-                    # data_dict["in_edges"].append(edge[0])
-                    # edges = [(x[0], edge[1]) for x in G.in_edges(edge[0])]
-                    # edges_to_add.extend(edges)
-                    # if edges:
-                        # nodes_to_remove.add(edge[0])
-# 
-    # G.remove_nodes_from(nodes_to_remove)
-    # G.add_edges_from(edges_to_add)
-    # return G, node_dict
-
 COLORS = {
     "failed": "red",
     "success": "blue",
@@ -147,6 +109,7 @@ def update_graph(n):
 
     annotations = []
     for node, (x, y) in pos.items():
+        print(node.live)
         annotations.append(
             dict(
                 x=x,
