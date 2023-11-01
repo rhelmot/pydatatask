@@ -95,7 +95,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         if self.docker_path is None:
-            raise unittest.SkipTest("No mongodb endpoint configured and docker is not installed")
+            raise unittest.SkipTest("Docker is not installed")
         self.port = random.randrange(0x4000, 0x8000)
         name = f"pydatatask-test-{self.test_id}"
         p = await asyncio.create_subprocess_exec(

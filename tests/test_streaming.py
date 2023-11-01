@@ -11,7 +11,7 @@ from pydatatask.task import ProcessTask
 test_root = pathlib.Path(__file__).parent
 
 
-class TestKube(unittest.IsolatedAsyncioTestCase):
+class TestStreaming(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
 
@@ -52,7 +52,11 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 while await pipeline.update():
                     await asyncio.sleep(0.5)
                     i += 1
-                    if i > 1000:
+                    if i > 100:
+                        import subprocess
+
+                        subprocess.run("find /tmp/pydatatask", shell=True, check=True)
+                        subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout")
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
