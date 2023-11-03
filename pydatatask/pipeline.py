@@ -3,6 +3,8 @@
 Relationships between the tasks are implicit, defined by which repositories they share.
 """
 
+from __future__ import annotations
+
 from typing import (
     Awaitable,
     Callable,
@@ -23,13 +25,12 @@ import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
 
 from pydatatask.host import Host
-from pydatatask.repository.base import MetadataRepository
 from pydatatask.utils import supergetattr_path
 
+from . import repository as repomodule
+from . import task as taskmodule
 from .quota import QuotaManager, localhost_quota_manager
-from .repository import Repository
 from .session import Session
-from .task import LinkKind, Task
 
 l = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class Pipeline:
 
     def __init__(
         self,
-        tasks: Iterable[Task],
+        tasks: Iterable[taskmodule.Task],
         session: Session,
         quota_managers: Iterable[QuotaManager],
         priority: Optional[Callable[[str, str], int]] = None,
@@ -60,7 +61,7 @@ class Pipeline:
         :param priority: Optional: A function which takes a task and job name and returns an integer priority. No jobs
                          will be scheduled unless all higher-priority jobs (larger numbers) have already been scheduled.
         """
-        self.tasks: Dict[str, Task] = {task.name: task for task in tasks}
+        self.tasks: Dict[str, taskmodule.Task] = {task.name: task for task in tasks}
         self._opened = False
         self.session = session
         self.quota_managers = list(quota_managers)
@@ -119,8 +120,8 @@ class Pipeline:
                 task.timeout = self.long_running_timeout
 
         graph = self.task_graph
-        u: Task
-        v: Task
+        u: taskmodule.Task
+        v: taskmodule.Task
         for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
             if u is v or u.long_running or attrs["multi"]:
                 continue
@@ -249,7 +250,7 @@ class Pipeline:
 
         return True
 
-    async def gather_ready_jobs(self, task: Task) -> Set[str]:
+    async def gather_ready_jobs(self, task: taskmodule.Task) -> Set[str]:
         """Collect all jobs that are ready to be launched for a given task."""
         result: Set[str] = set()
         if task.disabled:
@@ -275,7 +276,7 @@ class Pipeline:
         return result
 
     def _make_follow_func(
-        self, task: Task, link_name: str, along: bool
+        self, task: taskmodule.Task, link_name: str, along: bool
     ) -> Optional[Callable[[str], Awaitable[List[str]]]]:
         link = task.links[link_name]
         if link.key is None:
@@ -307,7 +308,7 @@ class Pipeline:
 
         splitkey = link.key.split(".")
         related = task._repo_related(splitkey[0])
-        if not isinstance(related, MetadataRepository):
+        if not isinstance(related, repomodule.MetadataRepository):
             raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
         async def mapper(info):
@@ -333,7 +334,10 @@ class Pipeline:
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
-                multi = link.kind in (LinkKind.StreamingInputFilepath, LinkKind.StreamingOutputFilepath)
+                multi = link.kind in (
+                    taskmodule.LinkKind.StreamingInputFilepath,
+                    taskmodule.LinkKind.StreamingOutputFilepath,
+                )
                 follow = self._make_follow_func(task, link_name, True)
                 rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
@@ -370,13 +374,13 @@ class Pipeline:
     def task_graph(self) -> "networkx.classes.multidigraph.MultiDiGraph":
         """A directed dependency graph of just the tasks, derived from the links between tasks and repositories."""
         result: "networkx.classes.multidigraph.MultiDiGraph" = networkx.MultiDiGraph()
-        for repo in [node for node in self.graph if isinstance(node, Repository)]:
+        for repo in [node for node in self.graph if isinstance(node, repomodule.Repository)]:
             in_edges = list(self.graph.in_edges(repo, data=True))
             out_edges = list(self.graph.out_edges(repo, data=True))
             for u, _, udata in in_edges:  # type: ignore[misc]
-                assert isinstance(u, Task)
+                assert isinstance(u, taskmodule.Task)
                 for _, v, vdata in out_edges:  # type: ignore[misc]
-                    assert isinstance(v, Task)
+                    assert isinstance(v, taskmodule.Task)
                     follow = self._combine_follows(udata["follow"], vdata["follow"])
                     rfollow = self._combine_follows(vdata["rfollow"], udata["rfollow"])
                     result.add_edge(
@@ -400,13 +404,13 @@ class Pipeline:
 
         for node in self.graph:
             result.append(f"    {hash(node)}[{repr(node)[1:-1]}]")
-            if isinstance(node, Task):
+            if isinstance(node, taskmodule.Task):
                 maturity_class = node.annotations.get("maturity", "unknown")
                 assert (
                     maturity_class in MERMAID_TASK_MATURITY_STYLES
                 ), f"Unknown maturity class {maturity_class} in {node}"
                 result.append(f"    {hash(node)}:::{maturity_class}")
-            elif isinstance(node, Repository):
+            elif isinstance(node, repomodule.Repository):
                 ids = [repo_val_id async for repo_val_id in node]
                 result[-1] = result[-1][:-1] + f": {len(ids)}]"
             else:
@@ -423,7 +427,7 @@ class Pipeline:
         for maturity, style in MERMAID_TASK_MATURITY_STYLES.items():
             result.append(f"    classDef {maturity} {style}")
         for node in self.task_graph:
-            if isinstance(node, Task):
+            if isinstance(node, taskmodule.Task):
                 maturity_class = node.annotations.get("maturity", "unknown")
                 assert (
                     maturity_class in MERMAID_TASK_MATURITY_STYLES
@@ -436,12 +440,14 @@ class Pipeline:
             if data["ulink"] in {"done", "live", "logs"}:
                 continue
 
-            repo: Repository = data["repo"]
+            repo: repomodule.Repository = data["repo"]
             ids = [repo_val_id async for repo_val_id in repo]
             result.append(f"    {u.name} -->|{data['ulink']}: {len(ids)}| {v.name}")
         return "\n".join(result)
 
-    def dependants(self, node: Union[Repository, Task], recursive: bool) -> Iterable[Union[Repository, Task]]:
+    def dependants(
+        self, node: Union[repomodule.Repository, taskmodule.Task], recursive: bool
+    ) -> Iterable[Union[repomodule.Repository, taskmodule.Task]]:
         """Iterate the list of repositories that are dependent on the given node of the dependency graph.
 
         :param node: The starting point of the graph traversal.

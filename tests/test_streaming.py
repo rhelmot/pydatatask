@@ -1,9 +1,10 @@
 from typing import cast
 import asyncio
 import pathlib
+import subprocess
 import unittest
 
-from pydatatask.cli.lock import default_allocators_local
+from pydatatask.cli.lock import default_allocators_temp
 from pydatatask.repository.base import BlobRepository, MetadataRepository
 from pydatatask.staging import Dispatcher, PipelineStaging
 from pydatatask.task import ProcessTask
@@ -17,7 +18,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming(self):
         staging = PipelineStaging(test_root / "content" / "streaming_input.yaml")
-        allocated = staging.allocate(default_allocators_local(), Dispatcher("LocalLinux", {"app": "test_streaming"}))
+        allocated = staging.allocate(default_allocators_temp(), Dispatcher("TempLinux", {"app": "test_streaming"}))
         allocated.save()
         allocated = PipelineStaging(test_root / "content" / "streaming_input.lock")
         pipeline = allocated.instantiate()
@@ -54,13 +55,10 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.5)
                     i += 1
                     if i > 100:
-                        import subprocess
-
                         subprocess.run("find /tmp/pydatatask", shell=True, check=True)
                         subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout", shell=True, check=True)
                         subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=True)
                         assert False, "Pipeline timeout"
-                await asyncio.sleep(1)
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
                 allMeta = [await outputMeta.info(key) for key in keys]

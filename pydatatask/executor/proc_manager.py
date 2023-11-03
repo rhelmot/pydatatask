@@ -24,6 +24,7 @@ import shlex
 import signal
 import sys
 
+from aiohttp import web
 import aiofiles
 import aioshutil
 import asyncssh
@@ -33,6 +34,7 @@ import yaml
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.main import build_agent_app
 from pydatatask.session import Ephemeral
 
 from ..utils import _StderrIsStdout
@@ -220,7 +222,7 @@ class LocalLinuxManager(AbstractProcessManager):
     async def open(self, path, mode):
         return aiofiles.open(path, mode)
 
-    async def agent_live(self) -> Tuple[Optional[str], Optional[str]]:
+    async def _agent_live(self) -> Tuple[Optional[str], Optional[str]]:
         """Determine whether the agent is alive.
 
         If so, return (pid, version_string). Otherwise, return (None, None)
@@ -240,7 +242,7 @@ class LocalLinuxManager(AbstractProcessManager):
         return None, None
 
     async def teardown_agent(self):
-        pid, _ = await self.agent_live()
+        pid, _ = await self._agent_live()
         if pid is not None:
             await self.kill(pid)
 
@@ -248,7 +250,7 @@ class LocalLinuxManager(AbstractProcessManager):
         if pipeline.source_file is None:
             raise ValueError("Cannot start a pipeline without a source_file")
             # if you really need this look into forking instead of subprocessing
-        pid, version = await self.agent_live()
+        pid, version = await self._agent_live()
         if pid is not None:
             if version == pipeline.agent_version:
                 return
@@ -412,3 +414,26 @@ class SSHLinuxManager(AbstractProcessManager):
 
 
 localhost_manager = LocalLinuxManager("default")
+
+
+class InProcessLocalLinuxManager(LocalLinuxManager):
+    """A process manager for the local linux system which can launch an http agent inside the current process."""
+
+    def __init__(self, app: str, local_path: Union[Path, str] = "/tmp/pydatatask"):
+        super().__init__(app, local_path)
+
+        self.runner: Optional[web.AppRunner] = None
+
+    async def teardown_agent(self):
+        if self.runner is not None:
+            await self.runner.cleanup()
+            self.runner = None
+
+    async def launch_agent(self, pipeline):
+        if self.runner is not None:
+            return
+        app = build_agent_app(pipeline)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "localhost", pipeline.agent_port)
+        await site.start()

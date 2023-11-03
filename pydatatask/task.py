@@ -7,6 +7,8 @@ Tasks are related to Repositories by Links. Links are created by
 
 .. autodata:: STDOUT
 """
+from __future__ import annotations
+
 from typing import (
     Any,
     Awaitable,
@@ -49,16 +51,10 @@ import jinja2.compiler
 import sonyflake
 import yaml
 
-from pydatatask.executor import Executor
-from pydatatask.executor.container_manager import (
-    AbstractContainerManager,
-    localhost_docker_manager,
-)
 from pydatatask.host import LOCAL_HOST, Host, HostOS
 
+from . import executor as execmodule
 from . import repository as repomodule
-from .executor.pod_manager import PodManager
-from .executor.proc_manager import AbstractProcessManager, localhost_manager
 from .quota import Quota, QuotaManager, localhost_quota_manager
 from .utils import (
     STDOUT,
@@ -745,7 +741,7 @@ class KubeTask(Task):
     def __init__(
         self,
         name: str,
-        executor: Executor,
+        executor: "execmodule.Executor",
         quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"],
@@ -781,7 +777,7 @@ class KubeTask(Task):
         self.template = template
         self.quota_manager = quota_manager
         self._executor = executor
-        self._podman: Optional[PodManager] = None
+        self._podman: Optional["execmodule.PodManager"] = None
         self.logs = logs
         self.done = done
         self.env = env if env is not None else {}
@@ -822,7 +818,7 @@ class KubeTask(Task):
         return self.podman.host
 
     @property
-    def podman(self) -> PodManager:
+    def podman(self) -> execmodule.PodManager:
         """The pod manager instance for this task.
 
         Will raise an error if the manager is provided by an unopened session.
@@ -965,7 +961,7 @@ class ProcessTask(Task):
         self,
         name: str,
         template: str,
-        executor: "Executor" = localhost_manager,
+        executor: Optional[execmodule.Executor] = None,
         quota_manager: "QuotaManager" = localhost_quota_manager,
         job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
         timeout: Optional[timedelta] = None,
@@ -1028,8 +1024,8 @@ class ProcessTask(Task):
         self.job_quota = copy.copy(job_quota)
         self.job_quota.launches = 1
         self.quota_manager = quota_manager
-        self._executor = executor
-        self._manager: Optional[AbstractProcessManager] = None
+        self._executor = executor or execmodule.localhost_manager
+        self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
         self.window = window
 
@@ -1050,7 +1046,7 @@ class ProcessTask(Task):
         return self.manager.host
 
     @property
-    def manager(self) -> "AbstractProcessManager":
+    def manager(self) -> execmodule.AbstractProcessManager:
         """The process manager for this task.
 
         Will raise an error if the manager comes from a session which is closed.
@@ -1498,7 +1494,7 @@ class KubeFunctionTask(KubeTask):
     def __init__(
         self,
         name: str,
-        executor: Executor,
+        executor: "execmodule.Executor",
         quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"] = None,
@@ -1602,7 +1598,7 @@ class ContainerTask(Task):
         image: str,
         template: str,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
-        executor: Executor = localhost_docker_manager,
+        executor: Optional[execmodule.Executor] = None,
         quota_manager: "QuotaManager" = localhost_quota_manager,
         job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
         window: timedelta = timedelta(minutes=1),
@@ -1650,8 +1646,8 @@ class ContainerTask(Task):
         self.job_quota = copy.copy(job_quota)
         self.job_quota.launches = 1
         self.quota_manager = quota_manager
-        self._executor = executor
-        self._manager: Optional[AbstractContainerManager] = None
+        self._executor = executor or execmodule.localhost_docker_manager
+        self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
         self.window = window
         self.privileged = privileged
@@ -1678,7 +1674,7 @@ class ContainerTask(Task):
         return self.manager.host
 
     @property
-    def manager(self) -> AbstractContainerManager:
+    def manager(self) -> execmodule.AbstractContainerManager:
         """The process manager for this task.
 
         Will raise an error if the manager comes from a session which is closed.

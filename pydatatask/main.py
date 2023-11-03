@@ -25,7 +25,9 @@ The help screen should look something like this:
       -h, --help            show this help message and exit
 """
 
-from typing import Awaitable, Callable, Dict, Iterable, List, Optional, Set, Union
+from __future__ import annotations
+
+from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 from pathlib import Path
 import argparse
 import asyncio
@@ -39,20 +41,17 @@ import aiofiles
 import IPython
 import yaml
 
-from pydatatask.repository.base import FileRepository, YamlMetadataFileRepository
-from pydatatask.repository.filesystem import DirectoryRepository, FilesystemRepository
 from pydatatask.utils import AReadStreamBase, AWriteStreamBase, async_copyfile
 
+from . import repository as repomodule
+from . import task as taskmodule
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
-from .repository import BlobRepository, MetadataRepository, Repository
-from .task import Link, Task
 
-fuse: Optional[Callable[[Pipeline, str, bool], Awaitable[None]]]
 try:
-    from .fuse import main as fuse
+    from . import fuse
 except ModuleNotFoundError:
-    fuse = None
+    fuse = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 token_re = re.compile(r"\w+\.\w+")
@@ -205,12 +204,10 @@ def main(
     )
     parser_http_agent.set_defaults(func=http_agent)
     parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
-    parser_http_agent.add_argument("--port", help="The port to listen on", default=6132, type=int)
-    parser_http_agent.add_argument("--secret", help="The token to use for authentication", required=True)
 
     if fuse is not None:
         parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
-        parser_fuse.set_defaults(func=fuse)
+        parser_fuse.set_defaults(func=fuse.main)
         parser_fuse.add_argument("path", help="The mountpoint")
         parser_fuse.add_argument("--verbose", "-v", dest="debug", action="store_true", help="Show FUSE debug logging")
 
@@ -269,12 +266,17 @@ async def update(pipeline: Pipeline):
     await pipeline.update()
 
 
-def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
+def http_agent(pipeline: Pipeline, host: str) -> None:
+    app = build_agent_app(pipeline, True)
+    web.run_app(app, host=host, port=pipeline.agent_port)
+
+
+def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Application:
     app = web.Application()
 
     def authorize(f):
         async def inner(request: web.Request) -> web.StreamResponse:
-            if request.cookies.get("secret", None) != secret:
+            if request.cookies.get("secret", None) != pipeline.agent_secret:
                 raise web.HTTPForbidden()
             return await f(request)
 
@@ -292,7 +294,7 @@ def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
 
     @authorize
     @parse
-    async def get(request: web.Request, repo: Repository, job: str) -> web.StreamResponse:
+    async def get(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
         response = web.StreamResponse()
         await response.prepare(request)
         await cat_data_inner(repo, job, response)
@@ -301,7 +303,7 @@ def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
 
     @authorize
     @parse
-    async def post(request: web.Request, repo: Repository, job: str) -> web.StreamResponse:
+    async def post(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
         await inject_data_inner(repo, job, request.content)
         return web.Response(text=job)
 
@@ -328,10 +330,10 @@ def http_agent(pipeline: Pipeline, host: str, port: int, secret: str):
     async def on_shutdown(_app):
         await pipeline.close()
 
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
-
-    web.run_app(app, host=host, port=port)
+    if owns_pipeline:
+        app.on_startup.append(on_startup)
+        app.on_shutdown.append(on_shutdown)
+    return app
 
 
 async def run(
@@ -362,7 +364,7 @@ async def run(
             raise TimeoutError("Pipeline run timeout")
 
 
-def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[Link]:
+def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
     seen = set()
     for task in pipeline.tasks.values():
         for link in task.links.values():
@@ -375,7 +377,7 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[Link]:
 
 
 async def print_status(pipeline: Pipeline, all_repos: bool):
-    async def inner(repo: Repository):
+    async def inner(repo: repomodule.Repository):
         the_sum = 0
         async for _ in repo:
             the_sum += 1
@@ -397,7 +399,7 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
 
 
 async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
-    async def inner(repo: Repository):
+    async def inner(repo: repomodule.Repository):
         return [j for j in job if await repo.contains(j)]
 
     link_list = list(get_links(pipeline, all_repos))
@@ -416,7 +418,7 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
 
 
 async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
-    item: Union[Task, Repository]
+    item: Union[taskmodule.Task, repomodule.Repository]
     if "." in data:
         taskname, reponame = data.split(".")
         item = pipeline.tasks[taskname].links[reponame].repo
@@ -424,7 +426,7 @@ async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[
         item = pipeline.tasks[data]
 
     for dependant in pipeline.dependants(item, recursive):
-        if isinstance(dependant, Repository):
+        if isinstance(dependant, repomodule.Repository):
             if job[0] == "__all__":
                 jobs = [x async for x in dependant]
                 check = False
@@ -453,7 +455,7 @@ async def list_data(pipeline: Pipeline, data: List[str]):
 
 
 class TaskNamespace:
-    def __init__(self, task: Task):
+    def __init__(self, task: taskmodule.Task):
         self.task = task
         self.repos: Dict[str, Set[str]] = {}
 
@@ -478,18 +480,18 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
         return 1
 
 
-async def cat_data_inner(item: Repository, job: str, stream: AWriteStreamBase):
-    if isinstance(item, BlobRepository):
+async def cat_data_inner(item: repomodule.Repository, job: str, stream: AWriteStreamBase):
+    if isinstance(item, repomodule.BlobRepository):
         async with await item.open(job, "rb") as fp:
             await async_copyfile(fp, stream)
-    elif isinstance(item, MetadataRepository):
+    elif isinstance(item, repomodule.MetadataRepository):
         data_bytes = await item.info(job)
         data_str = yaml.safe_dump(data_bytes, None)
         if isinstance(data_str, str):
             await stream.write(data_str.encode())
         else:
             await stream.write(data_str)
-    elif isinstance(item, FilesystemRepository):
+    elif isinstance(item, repomodule.FilesystemRepository):
         await item.get_tarball(job, stream)
     else:
         raise TypeError(type(item))
@@ -509,18 +511,18 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
         return 1
 
 
-async def inject_data_inner(item: Repository, job: str, stream: AReadStreamBase):
-    if isinstance(item, BlobRepository):
+async def inject_data_inner(item: repomodule.Repository, job: str, stream: AReadStreamBase):
+    if isinstance(item, repomodule.BlobRepository):
         async with await item.open(job, "wb") as fp:
             await async_copyfile(stream, fp)
-    elif isinstance(item, MetadataRepository):
+    elif isinstance(item, repomodule.MetadataRepository):
         data = await stream.read()
         try:
             data_obj = yaml.safe_load(data)
         except yaml.YAMLError as e:
             raise ValueError(e.args[0]) from e
         await item.dump(job, data_obj)
-    elif isinstance(item, FilesystemRepository):
+    elif isinstance(item, repomodule.FilesystemRepository):
         await item.dump_tarball(job, stream)
     else:
         raise TypeError(type(item))
@@ -561,16 +563,18 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         repo_base = backup_base / repo_name
         task_name, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task_name].links[repo_basename].repo
-        if isinstance(repo, BlobRepository):
-            new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+        if isinstance(repo, repomodule.BlobRepository):
+            new_repo_file = repomodule.FileRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
             await new_repo_file.validate()
             jobs.append(_repo_copy_blob(repo, new_repo_file))
-        elif isinstance(repo, MetadataRepository):
-            new_repo_meta = YamlMetadataFileRepository(repo_base, extension=".yaml")
+        elif isinstance(repo, repomodule.MetadataRepository):
+            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
             await new_repo_meta.validate()
             jobs.append(_repo_copy_meta(repo, new_repo_meta))
-        elif isinstance(repo, FilesystemRepository):
-            new_repo_fs = DirectoryRepository(
+        elif isinstance(repo, repomodule.FilesystemRepository):
+            new_repo_fs = repomodule.DirectoryRepository(
                 repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
             )
             await new_repo_fs.validate()
@@ -593,16 +597,18 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
         repo_base = backup_base / repo_name
         task_name, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task_name].links[repo_basename].repo
-        if isinstance(repo, BlobRepository):
-            new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
+        if isinstance(repo, repomodule.BlobRepository):
+            new_repo_file = repomodule.FileRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
             await new_repo_file.validate()
             jobs.append(_repo_copy_blob(new_repo_file, repo))
-        elif isinstance(repo, MetadataRepository):
-            new_repo_meta = YamlMetadataFileRepository(repo_base, extension=".yaml")
+        elif isinstance(repo, repomodule.MetadataRepository):
+            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
             await new_repo_meta.validate()
             jobs.append(_repo_copy_meta(new_repo_meta, repo))
-        elif isinstance(repo, FilesystemRepository):
-            new_repo_fs = DirectoryRepository(
+        elif isinstance(repo, repomodule.FilesystemRepository):
+            new_repo_fs = repomodule.DirectoryRepository(
                 repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
             )
             await new_repo_fs.validate()
@@ -613,18 +619,18 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
     await asyncio.gather(*jobs)
 
 
-async def _repo_copy_blob(repo_src: BlobRepository, repo_dst: BlobRepository):
+async def _repo_copy_blob(repo_src: repomodule.BlobRepository, repo_dst: repomodule.BlobRepository):
     async for ident in repo_src:
         async with await repo_src.open(ident, "rb") as fp_r, await repo_dst.open(ident, "wb") as fp_w:
             await async_copyfile(fp_r, fp_w)
 
 
-async def _repo_copy_meta(repo_src: MetadataRepository, repo_dst: MetadataRepository):
+async def _repo_copy_meta(repo_src: repomodule.MetadataRepository, repo_dst: repomodule.MetadataRepository):
     for ident, data in (await repo_src.info_all()).items():
         await repo_dst.dump(ident, data)
 
 
-async def _repo_copy_fs(repo_src: FilesystemRepository, repo_dst: FilesystemRepository):
+async def _repo_copy_fs(repo_src: repomodule.FilesystemRepository, repo_dst: repomodule.FilesystemRepository):
     async for ident in repo_src:
         cursor = repo_dst.dump(ident)
         await cursor.__anext__()

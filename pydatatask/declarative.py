@@ -20,7 +20,11 @@ import motor.motor_asyncio
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.executor.pod_manager import PodManager, kube_connect
-from pydatatask.executor.proc_manager import LocalLinuxManager, SSHLinuxManager
+from pydatatask.executor.proc_manager import (
+    InProcessLocalLinuxManager,
+    LocalLinuxManager,
+    SSHLinuxManager,
+)
 from pydatatask.host import Host, HostOS
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import (
@@ -368,6 +372,14 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
     This function can be extended through the ``pydatatask.executor_constructors`` entrypoint.
     """
     kinds: Dict[str, Callable[[Any], Executor]] = {
+        "TempLinux": make_constructor(
+            "InProcessLocalLinuxManager",
+            InProcessLocalLinuxManager,
+            {
+                "app": str,
+                "local_path": str,
+            },
+        ),
         "LocalLinux": make_constructor(
             "LocalLinuxManager",
             LocalLinuxManager,

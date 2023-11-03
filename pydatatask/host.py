@@ -39,7 +39,7 @@ class Host:
             return f"""
             URL="{url}"
             FILENAME="{filename}"
-            wget -O- $URL {headers_str} >$FILENAME || curl $URL {headers_str} >$FILENAME
+            wget -q -O- $URL {headers_str} >$FILENAME || curl -s $URL {headers_str} >$FILENAME || echo "download of $URL failed"
             """
         else:
             raise TypeError(self.os)
@@ -51,7 +51,7 @@ class Host:
             return f"""
             URL="{url}"
             FILENAME="{filename}"
-            wget -O- $URL {headers_str} --post-file $FILENAME || curl $URL {headers_str} --data-binary @$FILENAME
+            wget -q -O- $URL {headers_str} --post-file $FILENAME || curl -s $URL {headers_str} --data-binary @$FILENAME || echo "upload of $URL failed"
             """
         else:
             raise TypeError(self.os)
