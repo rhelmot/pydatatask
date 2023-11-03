@@ -408,10 +408,9 @@ class Pipeline:
                 result.append(f"    {hash(node)}:::{maturity_class}")
             elif isinstance(node, Repository):
                 ids = [repo_val_id async for repo_val_id in node]
-                result[-1] = result[-1][:-1] + f': {len(ids)}]'
+                result[-1] = result[-1][:-1] + f": {len(ids)}]"
             else:
                 assert False, f"Unknown node type {type(node)}"
-
 
         for u, v, data in self.graph.edges(data=True):  # type: ignore[misc]
             result.append(f"    {hash(u)} -->|{data['link_name']}| {hash(v)}")
