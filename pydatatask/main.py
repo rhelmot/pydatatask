@@ -189,14 +189,15 @@ def main(
         parser_graph.set_defaults(func=graph)
 
         parser_backup = subparsers.add_parser("backup", help="Copy contents of repositories to a given folder")
-        parser_backup.add_argument("backup_dir", help="The directory to backup to")
         parser_backup.add_argument("--all", dest="all_repos", action="store_true", help="Backup all repositories")
+        parser_backup.add_argument("backup_dir", help="The directory to backup to")
         parser_backup.add_argument("repos", nargs="*", help="The repositories to back up")
         parser_backup.set_defaults(func=action_backup)
 
         parser_restore = subparsers.add_parser("restore", help="Copy contents of repositories from a given folder")
+        parser_restore.add_argument("--all", dest="all_repos", action="store_true", help="Restore all repositories")
         parser_restore.add_argument("backup_dir", help="The directory to restore from")
-        parser_restore.add_argument("repos", nargs="+", help="The repositories to restore")
+        parser_restore.add_argument("repos", nargs="*", help="The repositories to restore")
         parser_restore.set_defaults(func=action_restore)
 
     parser_http_agent = subparsers.add_parser(
@@ -541,19 +542,25 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
     if all_repos:
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
-        repos = list(
-            {
-                link.repo: f"{taskname}.{linkname}"
-                for taskname, task in pipeline.tasks.items()
-                for linkname, link in task.links.items()
-            }.values()
-        )
+        repos = list(pipeline.tasks)
+    new_repos = []
+    for repo_name in repos:
+        if "." in repo_name:
+            new_repos.append(repo_name)
+        else:
+            task = pipeline.tasks[repo_name]
+            new_repos.extend(
+                {
+                    link.repo: f"{repo_name}.{linkname}" for linkname, link in task.links.items() if not link.is_status
+                }.values()
+            )
+    repos = new_repos
 
     jobs = []
     for repo_name in repos:
         repo_base = backup_base / repo_name
-        task, repo_basename = repo_name.split(".")
-        repo = pipeline.tasks[task].links[repo_basename].repo
+        task_name, repo_basename = repo_name.split(".")
+        repo = pipeline.tasks[task_name].links[repo_basename].repo
         if isinstance(repo, BlobRepository):
             new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
             await new_repo_file.validate()
@@ -574,13 +581,18 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
     await asyncio.gather(*jobs)
 
 
-async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str]):
+async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
+    if all_repos:
+        if repos:
+            raise ValueError("Do you want specific repos or all repos? Make up your mind!")
+        repos = [x.name for x in backup_base.iterdir()]
+
     jobs = []
     for repo_name in repos:
         repo_base = backup_base / repo_name
-        task, repo_basename = repo_name.split(".")
-        repo = pipeline.tasks[task].links[repo_basename].repo
+        task_name, repo_basename = repo_name.split(".")
+        repo = pipeline.tasks[task_name].links[repo_basename].repo
         if isinstance(repo, BlobRepository):
             new_repo_file = FileRepository(repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", "")))
             await new_repo_file.validate()

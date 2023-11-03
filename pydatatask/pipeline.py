@@ -122,7 +122,7 @@ class Pipeline:
         u: Task
         v: Task
         for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
-            if u is v or u.long_running:
+            if u is v or u.long_running or attrs["multi"]:
                 continue
             for name, link in list(u.links.items()):
                 link_attrs = {}
@@ -260,7 +260,12 @@ class Pipeline:
         return result
 
     @staticmethod
-    def _make_single_func(func: Callable[[str], Awaitable[List[str]]]) -> Callable[[str], Awaitable[str]]:
+    def _make_single_func(
+        func: Optional[Callable[[str], Awaitable[List[str]]]]
+    ) -> Optional[Callable[[str], Awaitable[str]]]:
+        if func is None:
+            return None
+
         async def result(job):
             out = await func(job)
             if not out:
@@ -328,15 +333,14 @@ class Pipeline:
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
-                if link.kind == LinkKind.StreamingInputFilepath:
-                    follow = rfollow = None
-                else:
-                    follow = self._make_follow_func(task, link_name, True)
-                    rfollow = self._make_follow_func(task, link_name, False)
+                multi = link.kind in (LinkKind.StreamingInputFilepath, LinkKind.StreamingOutputFilepath)
+                follow = self._make_follow_func(task, link_name, True)
+                rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
                 attrs["link_name"] = link_name
                 attrs["follow"] = follow
                 attrs["rfollow"] = rfollow
+                attrs["multi"] = multi
                 repo = attrs.pop("repo")
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
                     result.add_edge(repo, task, **attrs)
@@ -383,6 +387,7 @@ class Pipeline:
                         repo=repo,
                         ulink=udata["link_name"],
                         vlink=vdata["link_name"],
+                        multi=udata["multi"] or vdata["multi"],
                     )
         return result
 
