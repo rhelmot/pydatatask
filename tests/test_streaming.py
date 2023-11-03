@@ -28,7 +28,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
         inputBlob = cast(BlobRepository, task.links["input"].repo)
         outputBlob = cast(BlobRepository, task.links["output"].repo)
         outputMeta = cast(MetadataRepository, task.links["outputMeta"].repo)
-        logs = cast(BlobRepository, task.links["stdout"].repo)
+        # logs = cast(BlobRepository, task.links["stdout"].repo)
         await task.manager.launch_agent(pipeline)
         try:
             async with pipeline:
@@ -60,7 +60,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                         subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout", shell=True, check=True)
                         subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=True)
                         assert False, "Pipeline timeout"
-                print(await logs.blobinfo("1"))
+                await asyncio.sleep(1)
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
                 allMeta = [await outputMeta.info(key) for key in keys]
