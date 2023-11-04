@@ -31,16 +31,15 @@ import asyncssh
 import psutil
 import yaml
 
+from pydatatask.agent import build_agent_app
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
-from pydatatask.main import build_agent_app
 from pydatatask.session import Ephemeral
 
 from ..utils import _StderrIsStdout
 
 if TYPE_CHECKING:
-    from ..pipeline import Pipeline
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
 
 __all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
