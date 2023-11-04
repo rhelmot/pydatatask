@@ -99,6 +99,7 @@ def main(
     parser_run.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
+    parser_run.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -280,8 +281,9 @@ async def run(
     timeout: Optional[float],
     verbose: bool = False,
     fail_fast: bool = False,
+    tasks: Optional[List[str]] = None,
 ):
-    pipeline.settings(fail_fast=fail_fast)
+    pipeline.settings(fail_fast=fail_fast, task_allowlist=tasks)
 
     async def update_only_update_flush():
         await pipeline.update_only_update()

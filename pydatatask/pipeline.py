@@ -75,7 +75,7 @@ class Pipeline:
         self.fail_fast = False
         self.long_running_timeout = long_running_timeout
 
-    def settings(self, synchronous=False, metadata=True, fail_fast=False):
+    def settings(self, synchronous=False, metadata=True, fail_fast=False, task_allowlist: Optional[List[str]] = None):
         """This method can be called to set properties of the current run.
 
         :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
@@ -87,6 +87,8 @@ class Pipeline:
             task.synchronous = synchronous
             task.metadata = metadata
             task.fail_fast = fail_fast
+            if task_allowlist and task.name not in task_allowlist:
+                task.disabled = True
 
     async def _validate(self):
         seen_repos = set()
