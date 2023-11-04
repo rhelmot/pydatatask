@@ -31,7 +31,7 @@ import asyncssh
 import psutil
 import yaml
 
-from pydatatask.agent import build_agent_app
+from pydatatask import agent
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
@@ -431,7 +431,7 @@ class InProcessLocalLinuxManager(LocalLinuxManager):
     async def launch_agent(self, pipeline):
         if self.runner is not None:
             return
-        app = build_agent_app(pipeline)
+        app = agent.build_agent_app(pipeline)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "localhost", pipeline.agent_port)
