@@ -121,10 +121,10 @@ class Repository(ABC):
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
             return taskmodule.TemplateInfo(FixedItemRepository(self, job))
         if kind == taskmodule.LinkKind.InputFilepath:
-            filepath = task.mktemp(f'input-{link_name}-{job}')
+            filepath = task.mktemp(f"input-{link_name}-{job}")
             return taskmodule.TemplateInfo(filepath, preamble=task.mk_repo_get(filepath, link_name, job))
         if kind == taskmodule.LinkKind.OutputFilepath:
-            filepath = task.mktemp(f'output-{link_name}-{job}')
+            filepath = task.mktemp(f"output-{link_name}-{job}")
             preamble = (
                 task.mk_mkdir(filepath)
                 if isinstance(task.links[link_name].repo, repomodule.FilesystemRepository)
@@ -134,11 +134,11 @@ class Repository(ABC):
                 filepath, epilogue=task.mk_repo_put(filepath, link_name, job), preamble=preamble
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
-            filepath = task.mktemp(f'streaming-output-{link_name}-{job}')
+            filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
             preamble, epilogue = task.mk_watchdir_upload(filepath, link_name, {"parent": job})
             return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
-            filepath = task.mktemp(f'streaming-input-{link_name}-{job}')
+            filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
             preamble = task.mk_watchdir_download(filepath, link_name, job)
             return taskmodule.TemplateInfo(filepath, preamble=preamble)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
