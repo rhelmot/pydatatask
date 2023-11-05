@@ -849,7 +849,7 @@ class KubeTask(Task):
         env_input.update(self.env)
         env, preamble, epilogue = await self.build_env(env_input, job)
         if preamble or epilogue:
-            raise Exception("TODO: preamble and epilogue for KubeTask")
+            raise Exception("TODO: preamble and epilogue and error handling for KubeTask")
         env["job"] = job
         env["task"] = self.name
         env["argv0"] = os.path.basename(sys.argv[0])
@@ -1150,11 +1150,15 @@ class ProcessTask(Task):
                 if asyncio.iscoroutine(item):
                     item.close()
             async with await self.manager.open(exe_path, "w") as fp:
+                await fp.write("set -e\n")
                 for p in preamble:
                     await fp.write(p)
+                await fp.write("set +e\n(\nset -e\n")
                 await fp.write(exe_txt)
+                await fp.write(")\nRETCODE=$?\nset -e\n")
                 for p in epilogue:
                     await fp.write(p)
+                await fp.write("exit $RETCODE")
             pid = await self.manager.spawn(
                 [str(exe_path)], self.environ, str(cwd), str(self.basedir / job / "return_code"), stdin, stdout, stderr
             )
@@ -1713,7 +1717,21 @@ class ContainerTask(Task):
         env_src["task"] = self.name
         env, preamble, epilogue = await self.build_env(env_src, job)
         exe_txt = await render_template(self.template, env)
-        exe_txt = "\n".join(preamble + [exe_txt] + epilogue)
+        exe_txt = "\n".join(
+            [
+                "set -e",
+                *preamble,
+                "set +e",
+                "(",
+                "set -e",
+                exe_txt,
+                ")",
+                "RETCODE=$?",
+                "set -e",
+                *epilogue,
+                "exit $RETCODE",
+            ]
+        )
         for item in env.values():
             if asyncio.iscoroutine(item):
                 item.close()
