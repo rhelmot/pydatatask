@@ -135,11 +135,15 @@ class Repository(ABC):
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
             filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
-            preamble, epilogue = task.mk_watchdir_upload(filepath, link_name, {
-                "parent": job,
-                "task": task.name,
-                "link_name": link_name,
-            })
+            preamble, epilogue = task.mk_watchdir_upload(
+                filepath,
+                link_name,
+                {
+                    "parent": job,
+                    "task": task.name,
+                    "link_name": link_name,
+                },
+            )
             return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
             filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
