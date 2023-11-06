@@ -164,3 +164,98 @@ def str_to_int(a: str) -> int:
 @builtin("str")
 def int_to_str(a: int) -> str:
     return str(a)
+
+@builtin("__sub__")
+def int_sub(a: int, b: int) -> int:
+    return a - b
+
+
+@builtin("__mul__")
+def int_mul(a: int, b: int) -> int:
+    return a * b
+
+@builtin("__mul__")
+def str_mul(a: str, b: int) -> str:
+    return a * b
+
+
+@builtin("__div__")
+def int_div(a: int, b: int) -> int:
+    return int(a / b)
+
+
+@builtin("__mod__")
+def int_mod(a: int, b: int) -> int:
+    return a % b
+
+@builtin("__bitand__")
+def int_bitand(a: int, b: int) -> int:
+    return a & b
+
+@builtin("__bitand__")
+def bool_bitand(a: bool, b: bool) -> bool:
+    return a & b
+
+@builtin("__bitor__")
+def int_bitor(a: int, b: int) -> int:
+    return a | b
+
+@builtin("__bitor__")
+def bool_bitor(a: bool, b: bool) -> bool:
+    return a | b
+
+@builtin("__bitxor__")
+def int_bitxor(a: int, b: int) -> int:
+    return a ^ b
+
+@builtin("__bitxor__")
+def bool_bitxor(a: bool, b: bool) -> bool:
+    return a ^ b
+
+@builtin("__gt__")
+def int_gt(a: int, b: int) -> bool:
+    return a > b
+
+@builtin("__gt__")
+def str_gt(a: str, b: str) -> bool:
+    return a > b
+
+@builtin("__gt__")
+def bool_gt(a: bool, b: bool) -> bool:
+    return a > b
+
+@builtin("__lt__")
+def int_lt(a: int, b: int) -> bool:
+    return a < b
+
+@builtin("__lt__")
+def str_lt(a: str, b: str) -> bool:
+    return a < b
+
+@builtin("__lt__")
+def bool_lt(a: bool, b: bool) -> bool:
+    return a < b
+
+@builtin("__ge__")
+def int_ge(a: int, b: int) -> bool:
+    return a >= b
+
+@builtin("__ge__")
+def str_ge(a: str, b: str) -> bool:
+    return a >= b
+
+@builtin("__ge__")
+def bool_ge(a: bool, b: bool) -> bool:
+    return a >= b
+
+@builtin("__le__")
+def int_le(a: int, b: int) -> bool:
+    return a <= b
+
+@builtin("__le__")
+def str_le(a: str, b: str) -> bool:
+    return a <= b
+
+@builtin("__le__")
+def bool_le(a: bool, b: bool) -> bool:
+    return a <= b
