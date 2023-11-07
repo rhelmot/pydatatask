@@ -97,14 +97,6 @@ class TaskVisualizer:
         queue.put(result)
 
     def sync_function(self, node):
-        if (
-            node in self.nodes
-            and "done" in self.nodes[node]
-            and self.nodes[node]["done"] > 0
-            and self.nodes[node]["live"] == 0
-        ):
-            return self.nodes[node]
-
         queue = Queue()
 
         process = Process(target=self.run_async, args=(queue, self.get_all_repo_info, node))
