@@ -156,12 +156,6 @@ class TaskVisualizer:
                     )
                 )
 
-            edge_x = []
-            edge_y = []
-            done_edge_x = []
-            done_edge_y = []
-            live_edge_x = []
-            live_edge_y = []
             fig = go.Figure()
             for edge in new_graph.edges():
                 x0, y0 = pos[edge[0]]
