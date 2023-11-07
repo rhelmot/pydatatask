@@ -1,21 +1,18 @@
-import networkx as nx
-import tempfile
-import asyncio
-
 # from queue import Queue
 from typing import Tuple
 from concurrent.futures import ThreadPoolExecutor
-from multiprocessing import Process, Queue
 from math import log2
-
-import dash
-import pygraphviz as pgv
-import plotly.graph_objects as go
-import plotly.figure_factory as ff
+from multiprocessing import Process, Queue
+import asyncio
+import tempfile
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
-
+import dash
+import networkx as nx
+import plotly.figure_factory as ff
+import plotly.graph_objects as go
+import pygraphviz as pgv
 
 app = dash.Dash("pydatatask")
 
@@ -170,10 +167,10 @@ class TaskVisualizer:
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
 
-                if edge[0] in self.nodes and self.nodes[edge[0]]["done"] > 0:
-                    line_color = self.status_colors["success"]
-                elif edge[0] in self.nodes and self.nodes[edge[0]]["live"] > 0:
+                if edge[0] in self.nodes and self.nodes[edge[0]]["live"] > 0:
                     line_color = self.status_colors["running"]
+                elif edge[0] in self.nodes and self.nodes[edge[0]]["done"] > 0:
+                    line_color = self.status_colors["success"]
                 else:
                     line_color = self.status_colors["pending"]
 
@@ -181,7 +178,11 @@ class TaskVisualizer:
                 width = int(log2(max_size)) + 1
                 print(width)
 
-                fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], line=dict(width=width, color=line_color), mode="lines"))
+                fig.add_trace(
+                    go.Scatter(
+                        x=[x0, x1, None], y=[y0, y1, None], line=dict(width=width, color=line_color), mode="lines"
+                    )
+                )
 
             node_x = [pos[node][0] for node in new_graph.nodes()]
             node_y = [pos[node][1] for node in new_graph.nodes()]
@@ -197,7 +198,7 @@ class TaskVisualizer:
             fig.update_layout(
                 title="pydatatask visualizer",
                 showlegend=False,
-                uirevision='some-constant-value',
+                uirevision="some-constant-value",
                 margin=dict(b=0, l=0, r=0, t=40),
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
