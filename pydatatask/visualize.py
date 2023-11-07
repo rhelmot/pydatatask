@@ -6,6 +6,7 @@ import asyncio
 from typing import Tuple
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Process, Queue
+from math import log2
 
 import dash
 import pygraphviz as pgv
@@ -82,11 +83,15 @@ class TaskVisualizer:
         quiver = ff.create_quiver(edge_x, edge_y, dx, dy, scale=1, arrow_scale=0.1, line=dict(width=0.8, color="#888"))
         return quiver.data[0]
 
-    async def get_live_and_done(self, node):
-        repo_count = {}
+    async def get_all_repo_info(self, node):
+        repo_count = {"exit_codes": set()}
         for link in node.links:
             count = 0
-            async for _ in node.links[link].repo:
+            async for job in node.links[link].repo:
+                if link == "done":
+                    exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
+                    if exit_code is not None:
+                        repo_count["exit_codes"].add(exit_code)
                 count += 1
             repo_count[link] = count
 
@@ -102,7 +107,7 @@ class TaskVisualizer:
 
         queue = Queue()
 
-        process = Process(target=self.run_async, args=(queue, self.get_live_and_done, node))
+        process = Process(target=self.run_async, args=(queue, self.get_all_repo_info, node))
         process.start()
         process.join()
 
@@ -133,6 +138,10 @@ class TaskVisualizer:
                 else:
                     node_color = self.status_colors["pending"]
 
+                if any(x != 0 for x in results["exit_codes"]):
+                    border_color = "red"
+                else:
+                    border_color = "black"
                 annotations.append(
                     dict(
                         x=x,
@@ -143,7 +152,7 @@ class TaskVisualizer:
                         showarrow=False,
                         font=dict(size=10, color="white"),
                         bgcolor=node_color,
-                        bordercolor="black",
+                        bordercolor=border_color,
                         borderwidth=2,
                         borderpad=4,
                         hovertext="<br>".join(f"{k}:{v}" for k, v in self.nodes[node].items()),
@@ -156,36 +165,24 @@ class TaskVisualizer:
             done_edge_y = []
             live_edge_x = []
             live_edge_y = []
+            fig = go.Figure()
             for edge in new_graph.edges():
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
 
                 if edge[0] in self.nodes and self.nodes[edge[0]]["done"] > 0:
-                    done_edge_x.extend([x0, x1, None])
-                    done_edge_y.extend([y0, y1, None])
+                    line_color = self.status_colors["success"]
                 elif edge[0] in self.nodes and self.nodes[edge[0]]["live"] > 0:
-                    live_edge_x.extend([x0, x1, None])
-                    live_edge_y.extend([y0, y1, None])
+                    line_color = self.status_colors["running"]
                 else:
-                    edge_x.extend([x0, x1, None])
-                    edge_y.extend([y0, y1, None])
+                    line_color = self.status_colors["pending"]
 
-            fig = go.Figure()
+                max_size = max(x for x in self.nodes[edge[0]].values() if isinstance(x, int))
+                width = int(log2(max_size)) + 1
+                print(width)
 
-            # fig.add_trace(create_quiver_plot(new_graph, pos))
-            fig.add_trace(go.Scatter(x=edge_x, y=edge_y, line=dict(width=1, color="#888"), mode="lines"))
+                fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None], line=dict(width=width, color=line_color), mode="lines"))
 
-            fig.add_trace(
-                go.Scatter(
-                    x=done_edge_x, y=done_edge_y, line=dict(width=1, color=self.status_colors["success"]), mode="lines"
-                )
-            )
-
-            fig.add_trace(
-                go.Scatter(
-                    x=live_edge_x, y=live_edge_y, line=dict(width=1, color=self.status_colors["running"]), mode="lines"
-                )
-            )
             node_x = [pos[node][0] for node in new_graph.nodes()]
             node_y = [pos[node][1] for node in new_graph.nodes()]
 
@@ -200,7 +197,7 @@ class TaskVisualizer:
             fig.update_layout(
                 title="pydatatask visualizer",
                 showlegend=False,
-                # uirevision='some-constant-value',
+                uirevision='some-constant-value',
                 margin=dict(b=0, l=0, r=0, t=40),
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
