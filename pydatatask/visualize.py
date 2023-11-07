@@ -154,6 +154,8 @@ class TaskVisualizer:
             edge_y = []
             done_edge_x = []
             done_edge_y = []
+            live_edge_x = []
+            live_edge_y = []
             for edge in new_graph.edges():
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
@@ -161,6 +163,9 @@ class TaskVisualizer:
                 if edge[0] in self.nodes and self.nodes[edge[0]]["done"] > 0:
                     done_edge_x.extend([x0, x1, None])
                     done_edge_y.extend([y0, y1, None])
+                elif edge[0] in self.nodes and self.nodes[edge[0]]["live"] > 0:
+                    live_edge_x.extend([x0, x1, None])
+                    live_edge_y.extend([y0, y1, None])
                 else:
                     edge_x.extend([x0, x1, None])
                     edge_y.extend([y0, y1, None])
@@ -176,6 +181,11 @@ class TaskVisualizer:
                 )
             )
 
+            fig.add_trace(
+                go.Scatter(
+                    x=live_edge_x, y=live_edge_y, line=dict(width=1, color=self.status_colors["running"]), mode="lines"
+                )
+            )
             node_x = [pos[node][0] for node in new_graph.nodes()]
             node_y = [pos[node][1] for node in new_graph.nodes()]
 
