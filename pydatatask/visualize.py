@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from math import log2
 from multiprocessing import Process, Queue
 import asyncio
-import tempfile
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -12,7 +11,6 @@ import dash
 import networkx as nx
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
-import pygraphviz as pgv
 
 app = dash.Dash("pydatatask")
 
@@ -123,8 +121,6 @@ class TaskVisualizer:
             annotations = []
             for node, (x, y) in pos.items():
                 results = self.sync_function(node)
-                if "done" not in results:
-                    print(node, results)
                 if results is not None:
                     if results["live"] > 0:
                         node_color = self.status_colors["running"]
@@ -170,7 +166,6 @@ class TaskVisualizer:
 
                 max_size = max(x for x in self.nodes[edge[0]].values() if isinstance(x, int))
                 width = int(log2(max_size)) + 1
-                print(width)
 
                 fig.add_trace(
                     go.Scatter(
