@@ -140,7 +140,13 @@ class TaskVisualizer:
                         yref="y",
                         text=node.name,
                         showarrow=False,
+<<<<<<< HEAD
                         font=dict(size=16, color="white"),
+||||||| constructed merge base
+                        font=dict(size=10, color="white"),
+=======
+                        font=dict(size=14, color="white"),
+>>>>>>> fixes
                         bgcolor=node_color,
                         bordercolor=border_color,
                         borderwidth=2,
@@ -162,7 +168,7 @@ class TaskVisualizer:
                     line_color = self.status_colors["pending"]
 
                 max_size = max(x for x in self.nodes[edge[0]].values() if isinstance(x, int))
-                width = int(log2(max_size)) + 1
+                width = max(max_size.bit_length(), 1)
 
                 fig.add_trace(
                     go.Scatter(

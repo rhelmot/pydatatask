@@ -39,7 +39,7 @@ class Host:
             return f"""
             URL="{url}"
             FILENAME="{filename}"
-            if [ -d "$FILENAME" ]; then echo "mk_http_get target is a directory" && false; fi
+            if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
             wget -q -O- $URL {headers_str} >$FILENAME || curl -s $URL {headers_str} >$FILENAME || (echo "download of $URL failed" && false)
             """
         else:
@@ -50,9 +50,10 @@ class Host:
         if self.os == HostOS.Linux:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
+            set -x
             URL="{url}"
             FILENAME="{filename}"
-            if ! [ -f "$FILENAME" ]; then echo "mk_http_post target is not a file" && false; fi
+            if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
             wget -q -O- $URL {headers_str} --post-file $FILENAME || curl -s $URL {headers_str} --data-binary @$FILENAME || (echo "upload of $URL failed" && false)
             """
         else:
