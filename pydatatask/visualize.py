@@ -188,7 +188,7 @@ class TaskVisualizer:
                 margin=dict(b=0, l=0, r=0, t=40),
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                hoverlabel=dict(font_color="white", front_size=16),
+                hoverlabel=dict(font_color="white", font_size=16),
                 annotations=annotations,
             )
 
