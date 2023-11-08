@@ -140,13 +140,7 @@ class TaskVisualizer:
                         yref="y",
                         text=node.name,
                         showarrow=False,
-<<<<<<< HEAD
-                        font=dict(size=16, color="white"),
-||||||| constructed merge base
-                        font=dict(size=10, color="white"),
-=======
                         font=dict(size=14, color="white"),
->>>>>>> fixes
                         bgcolor=node_color,
                         bordercolor=border_color,
                         borderwidth=2,
