@@ -122,7 +122,7 @@ class TaskVisualizer:
 
         This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
         """
-        queue = Queue()
+        queue: Queue = Queue()
 
         process = Process(target=self.run_async, args=(queue, self.get_task_info, node))
         process.start()
