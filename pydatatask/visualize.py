@@ -1,9 +1,5 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
-# from queue import Queue
-from typing import Tuple
-from concurrent.futures import ThreadPoolExecutor
-from math import log2
 from multiprocessing import Process, Queue
 import asyncio
 
@@ -136,7 +132,7 @@ class TaskVisualizer:
         """Registers the update callback for the graph."""
 
         @app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
-        def update_graph(n):
+        def update_graph(_):
             """Updates the graph plot based on the current state of the pipeline.
 
             Gray nodes -> not scheduled Green nodes -> running blue nodes -> done nodes with red outline -> at least one
@@ -231,7 +227,7 @@ def run_viz(pipeline):
 
     Starts the visualizer and runs the dash server.
     """
-    tv = TaskVisualizer(pipeline)
+    TaskVisualizer(pipeline)
     app.run_server(debug=True)
 
 
