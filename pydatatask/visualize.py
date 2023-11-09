@@ -1,3 +1,5 @@
+"""Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
+
 # from queue import Queue
 from typing import Tuple
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +18,11 @@ app = dash.Dash("pydatatask")
 
 
 class TaskVisualizer:
+    """The class that does the rendering of the task graph.
+
+    Runs alongside the main pipeline and updates the graph interactively.
+    """
+
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.status_colors = {
@@ -28,6 +35,11 @@ class TaskVisualizer:
         self.register_callbacks()
 
     def left_to_right_layout(self, G, ranksep=0.1):
+        """Returns node positions for the graph laid out from laid to right.
+
+        This layout is what ends up getting shown in the visualizer. This layout is fixed and the pixel positions
+        returned are what is used to draw the lines in the diagram.
+        """
         A = nx.nx_agraph.to_agraph(G)
         A.layout(prog="dot", args=f"-Grankdir=LR -Granksep={ranksep}")  # Left to Right layout
         pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args=f"-Grankdir=LR -Granksep={ranksep}")
@@ -35,6 +47,7 @@ class TaskVisualizer:
 
     @staticmethod
     def generate_layout():
+        """Sets up the graph view with the area and the update timeout."""
         graph_layout = dcc.Graph(
             id="network-graph", style={"width": "100%", "height": "90vh"}, config={"doubleClick": "reset+autosize"}
         )
@@ -44,6 +57,7 @@ class TaskVisualizer:
         return html.Div([graph_layout, interval_layout], style=style)
 
     def create_rectangle_shapes(self, pos, width=60, height=30):
+        """Renders the pipeline node rectangles."""
         shapes = []
         for _, (x, y) in pos.items():
             shape = {
@@ -62,6 +76,10 @@ class TaskVisualizer:
         return shapes
 
     def create_quiver_plot(self, G, pos):
+        """Currently unused AFAICT.
+
+        Can probably be removed.
+        """
         edge_x = []
         edge_y = []
         dx = []
@@ -79,6 +97,7 @@ class TaskVisualizer:
         return quiver.data[0]
 
     async def get_all_repo_info(self, node):
+        """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
         repo_count = {"exit_codes": set()}
         for link in node.links:
             count = 0
@@ -93,10 +112,15 @@ class TaskVisualizer:
         return repo_count
 
     def run_async(self, queue, coroutine, *args):
+        """Doesn't really need docs lol."""
         result = asyncio.run(coroutine(*args))
         queue.put(result)
 
     def sync_function(self, node):
+        """Collects a bunch of stuff in a separate subprocess.
+
+        This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
+        """
         queue = Queue()
 
         process = Process(target=self.run_async, args=(queue, self.get_all_repo_info, node))
@@ -109,8 +133,15 @@ class TaskVisualizer:
         return result
 
     def register_callbacks(self):
+        """Registers the update callback for the graph."""
+
         @app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
         def update_graph(n):
+            """Updates the graph plot based on the current state of the pipeline.
+
+            Gray nodes -> not scheduled Green nodes -> running blue nodes -> done nodes with red outline -> at least one
+            task of this component failed
+            """
             pl = self.pipeline
             new_graph = pl.task_graph
             pos = self.left_to_right_layout(new_graph)
@@ -196,6 +227,10 @@ class TaskVisualizer:
 
 
 def run_viz(pipeline):
+    """Entrypoint for `pd viz`.
+
+    Starts the visualizer and runs the dash server.
+    """
     tv = TaskVisualizer(pipeline)
     app.run_server(debug=True)
 
