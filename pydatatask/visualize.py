@@ -1,5 +1,6 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
+from typing import Any, Dict
 from multiprocessing import Process, Queue
 import asyncio
 
@@ -28,6 +29,7 @@ class TaskVisualizer:
             "pending": "gray",
         }
         self.nodes = {}
+        self.exit_codes = {}
         self.register_callbacks()
 
     def left_to_right_layout(self, G, ranksep=0.1):
@@ -89,23 +91,26 @@ class TaskVisualizer:
             dx.append(x1 - x0)
             dy.append(y1 - y0)
 
-        quiver = ff.create_quiver(edge_x, edge_y, dx, dy, scale=1, arrow_scale=0.1, line=dict(width=0.8, color="#888"))
+        quiver = ff.create_quiver(
+            edge_x, edge_y, dx, dy, scale=1, arrow_scale=0.1, line={"width": 0.8, "color": "#888"}
+        )
         return quiver.data[0]
 
-    async def get_all_repo_info(self, node):
+    async def get_task_info(self, node):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
-        repo_count = {"exit_codes": set()}
+        repo_entry_counts: Dict[Any, int] = {}
+        exit_codes = set()
         for link in node.links:
             count = 0
             async for job in node.links[link].repo:
                 if link == "done":
                     exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
                     if exit_code is not None:
-                        repo_count["exit_codes"].add(exit_code)
+                        exit_codes.add(exit_code)
                 count += 1
-            repo_count[link] = count
+            repo_entry_counts[link] = count
 
-        return repo_count
+        return exit_codes, repo_entry_counts
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
@@ -119,14 +124,15 @@ class TaskVisualizer:
         """
         queue = Queue()
 
-        process = Process(target=self.run_async, args=(queue, self.get_all_repo_info, node))
+        process = Process(target=self.run_async, args=(queue, self.get_task_info, node))
         process.start()
         process.join()
 
-        result = queue.get()
+        exit_codes, result = queue.get()
 
         self.nodes[node] = result
-        return result
+        self.exit_codes[node] = exit_codes
+        return exit_codes, result
 
     def register_callbacks(self):
         """Registers the update callback for the graph."""
@@ -144,7 +150,7 @@ class TaskVisualizer:
 
             annotations = []
             for node, (x, y) in pos.items():
-                results = self.sync_function(node)
+                exit_codes, results = self.sync_function(node)
                 if results is not None:
                     if results["live"] > 0:
                         node_color = self.status_colors["running"]
@@ -155,25 +161,22 @@ class TaskVisualizer:
                 else:
                     node_color = self.status_colors["pending"]
 
-                if any(x != 0 for x in results["exit_codes"]):
-                    border_color = "red"
-                else:
-                    border_color = "black"
+                border_color = "red" if any(x != 0 for x in exit_codes) else "black"
                 annotations.append(
-                    dict(
-                        x=x,
-                        y=y,
-                        xref="x",
-                        yref="y",
-                        text=node.name,
-                        showarrow=False,
-                        font=dict(size=14, color="white"),
-                        bgcolor=node_color,
-                        bordercolor=border_color,
-                        borderwidth=2,
-                        borderpad=4,
-                        hovertext="<br>".join(f"{k}:{v}" for k, v in self.nodes[node].items()),
-                    )
+                    {
+                        "x": x,
+                        "y": y,
+                        "xref": "x",
+                        "yref": "y",
+                        "text": node.name,
+                        "showarrow": False,
+                        "font": {"size": 14, "color": "white"},
+                        "bgcolor": node_color,
+                        "bordercolor": border_color,
+                        "borderwidth": 2,
+                        "borderpad": 4,
+                        "hovertext": "<br>".join(f"{k}:{v}" for k, v in self.nodes[node].items()),
+                    }
                 )
 
             fig = go.Figure()
@@ -193,7 +196,7 @@ class TaskVisualizer:
 
                 fig.add_trace(
                     go.Scatter(
-                        x=[x0, x1, None], y=[y0, y1, None], line=dict(width=width, color=line_color), mode="lines"
+                        x=[x0, x1, None], y=[y0, y1, None], line={"width": width, "color": line_color}, mode="lines"
                     )
                 )
 
@@ -212,10 +215,10 @@ class TaskVisualizer:
                 title="pydatatask visualizer",
                 showlegend=False,
                 uirevision="some-constant-value",
-                margin=dict(b=0, l=0, r=0, t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                hoverlabel=dict(font_color="white", font_size=16),
+                margin={"b": 0, "l": 0, "r": 0, "t": 40},
+                xaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
+                yaxis={"showgrid": False, "zeroline": False, "showticklabels": False},
+                hoverlabel={"font_color": "white", "font_size": 16},
                 annotations=annotations,
             )
 
