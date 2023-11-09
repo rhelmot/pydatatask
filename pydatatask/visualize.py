@@ -227,7 +227,7 @@ class TaskVisualizer:
 
 
 def run_viz(pipeline):
-    """Entrypoint for `pd viz`.
+    """Entrypoint for "pd viz".
 
     Starts the visualizer and runs the dash server.
     """
