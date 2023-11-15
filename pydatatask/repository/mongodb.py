@@ -1,6 +1,4 @@
-"""
-This module contains repositories for interacting with MongoDB as a data store.
-"""
+"""This module contains repositories for interacting with MongoDB as a data store."""
 from typing import Any, Callable, Dict, Optional
 
 import motor.core
@@ -10,34 +8,34 @@ from .base import MetadataRepository, job_getter
 
 
 class MongoMetadataRepository(MetadataRepository):
-    """
-    A metadata repository using a mongodb collection as the backing store.
-    """
+    """A metadata repository using a mongodb collection as the backing store."""
 
     def __init__(
         self,
-        collection: Callable[[], motor.core.AgnosticCollection],
-        subcollection: Optional[str],
+        database: Callable[[], motor.core.AgnosticCollection],
+        collection: str,
     ):
         """
         :param collection: A callable returning a motor async collection.
         :param subcollection: Optional: the name of a subcollection within the collection in which to store data.
         """
+        super().__init__()
+        self._database = database
         self._collection = collection
-        self._subcollection = subcollection
+
+    def __getstate__(self):
+        return (self.collection,)  # uhhhhhh not enough!
 
     def __repr__(self):
-        return f"<{type(self).__name__} {self._subcollection}>"
+        return f"<{type(self).__name__} {self._collection}>"
 
     @property
     def collection(self) -> motor.core.AgnosticCollection:
+        """The motor async collection data will be stored in.
+
+        If this is provided by an unopened session, raise an error.
         """
-        The motor async collection data will be stored in. If this is provided by an unopened session, raise an error.
-        """
-        result = self._collection()
-        if self._subcollection is not None:
-            result = result[self._subcollection]
-        return result
+        return self._database()[self._collection]
 
     async def contains(self, item):
         return await self.collection.count_documents({"_id": item}) != 0
@@ -51,10 +49,10 @@ class MongoMetadataRepository(MetadataRepository):
 
     @job_getter
     async def info(self, job):
-        """
-        The info of a mongo metadata repository is the literal value stored in the repository with identifier ``job``.
-        """
-        result = await self.collection.find_one({"_id": job})
+        """The info of a mongo metadata repository is the literal value stored in the repository with identifier
+        ``job``."""
+        # WHY does mypy think this doesn't work
+        result: Optional[Any] = await self.collection.find_one({"_id": job})  # type: ignore[func-returns-value]
         if result is None:
             result = {}
         return result

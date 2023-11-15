@@ -1,6 +1,4 @@
-"""
-This module contains repositories for interacting with docker registries.
-"""
+"""This module contains repositories for interacting with docker registries."""
 
 from typing import Callable
 import base64
@@ -15,9 +13,9 @@ from .base import Repository, job_getter
 
 
 class DockerRepository(Repository):
-    """
-    A docker repository is, well, an actual docker repository hosted in some registry somewhere. Keys translate to tags
-    on this repository.
+    """A docker repository is, well, an actual docker repository hosted in some registry somewhere.
+
+    Keys translate to tags on this repository.
     """
 
     def __init__(
@@ -33,14 +31,19 @@ class DockerRepository(Repository):
         :param domain: The registry domain to connect to, e.g. ``index.docker.io``.
         :param repository: The repository to store images in within the domain, e.g. ``myname/myrepo``.
         """
+        super().__init__()
         self._registry = registry
         self.domain = domain
         self.repository = repository
 
+    def __getstate__(self):
+        return (self.domain, self.repository)
+
     @property
     def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
-        """
-        The ``docker_registry_client_async`` client object. If this is provided by an unopened session, raise an error.
+        """The ``docker_registry_client_async`` client object.
+
+        If this is provided by an unopened session, raise an error.
         """
         return self._registry()
 
@@ -61,8 +64,7 @@ class DockerRepository(Repository):
 
     @job_getter
     async def info(self, job):
-        """
-        The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
+        """The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
 
         .. code::
 
@@ -75,6 +77,7 @@ class DockerRepository(Repository):
 
     def _dxf_auth(self, dxf_obj, response):
         # what a fucking hack
+        assert self.registry.credentials is not None
         for pattern, credentials in self.registry.credentials.items():
             if pattern.fullmatch(self.domain):
                 result = credentials
@@ -103,6 +106,7 @@ class DockerRepository(Repository):
             auth=self._dxf_auth,
             insecure=not self.registry.ssl,
         )
-        d.push_blob(data=random_data, digest=random_digest)
+        # type stubs seem to be wrong
+        d.push_blob(data=random_data, digest=random_digest)  # type: ignore
         d.set_alias(job, random_digest)
         d.del_alias(job)

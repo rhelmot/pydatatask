@@ -1,22 +1,20 @@
-"""
-This module contains repositories and other classes for interacting with S3-compatible bucket stores.
-"""
+"""This module contains repositories and other classes for interacting with S3-compatible bucket stores."""
 
-from typing import Callable, Optional
+from typing import Dict, Literal, Optional, overload
 import io
 
 from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 
+from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.session import Ephemeral
 from pydatatask.utils import AReadText, AWriteText
 
-from .base import BlobRepository, YamlMetadataRepository, job_getter
+from .base import BlobRepository, Repository, YamlMetadataRepository, job_getter
 
 
 class S3BucketBinaryWriter:
-    """
-    A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`.
-    """
+    """A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`."""
 
     def __init__(self, repo: "S3BucketRepository", job: str):
         self.repo = repo
@@ -31,9 +29,7 @@ class S3BucketBinaryWriter:
         await self.close()
 
     async def close(self):
-        """
-        Close and flush the data to the bucket.
-        """
+        """Close and flush the data to the bucket."""
         self.buffer.seek(0, io.SEEK_END)
         size = self.buffer.tell()
         self.buffer.seek(0, io.SEEK_SET)
@@ -46,29 +42,24 @@ class S3BucketBinaryWriter:
         )
 
     async def write(self, data: bytes):
-        """
-        Write some data to the stream.
-        """
+        """Write some data to the stream."""
         self.buffer.write(data)
 
 
 class S3BucketReader:
-    """
-    A class for streaming byte data from an `S3BucketRepository`.
-    """
+    """A class for streaming byte data from an `S3BucketRepository`."""
 
     def __init__(self, body):
         self.body = body
 
     async def close(self):
-        """
-        Close and release the stream.
-        """
+        """Close and release the stream."""
         self.body.close()
 
     async def read(self, n=None):  # pylint: disable=unused-argument :(
-        """
-        Read the entire body of the blob. Due to API limitations, we can't read less than that at once...
+        """Read the entire body of the blob.
+
+        Due to API limitations, we can't read less than that at once...
         """
         return await self.body.read()
 
@@ -80,42 +71,57 @@ class S3BucketReader:
         await self.body.__aexit__(exc_type, exc_val, exc_tb)
 
 
-class S3BucketInfo:
-    """
-    The data structure returned from :meth:`S3BucketRepository.info`.
+class S3BucketRepositoryBase(Repository):
+    """A base class for repositories that store their contents in S3-compatible buckets."""
 
-    :ivar uri: The s3 URI of the current job's resource, e.g. ``s3://bucket/prefix/job.ext``. ``str(info)`` will also
-               return this.
-    :ivar endpoint: The URL of the API server providing the S3 interface.
-    :ivar bucket: The name of the bucket objects are stored in.
-    :ivar prefix: How to prefix an object name such that it will fit into this repository.
-    :ivar suffix: How to suffix an object name such that it will fit into this repository.
-    """
-
-    def __init__(self, endpoint: str, uri: str, bucket: str, prefix: str, suffix: str):
-        self.endpoint = endpoint
-        self.uri = uri
-        self.prefix = prefix
-        self.suffix = suffix
+    def __init__(
+        self,
+        client: Ephemeral[S3Client],
+        bucket: str,
+        endpoints: Optional[Dict[Optional[Host], str]] = None,
+    ):
+        super().__init__()
+        self._client = client
         self.bucket = bucket
+        self.endpoints = endpoints or {}
 
-    def __str__(self):
-        return self.uri
+    def __getstate__(self):
+        return (self.endpoints, self.bucket)
+
+    @property
+    def client(self):
+        """The aiobotocore S3 client.
+
+        This will raise an error if the client comes from a session which is not opened.
+        """
+        return self._client()
+
+    def get_endpoint(self, host: Host) -> str:
+        """Given a host, return the endpoint that makes sense."""
+        if host == LOCAL_HOST:
+            return self.client._endpoint.host  # type: ignore
+        endpoint = self.endpoints.get(host, None)
+        if endpoint is None:
+            endpoint = self.endpoints.get(None, None)
+        if endpoint is None:
+            raise ValueError(f"No endpoint specified from host {host}")
+        return endpoint
 
 
-class S3BucketRepository(BlobRepository):
-    """
-    A repository where keys are paths in a S3 bucket. Provides a streaming interface to the corresponding blobs.
+class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
+    """A repository where keys are paths in a S3 bucket.
+
+    Provides a streaming interface to the corresponding blobs.
     """
 
     def __init__(
         self,
-        client: Callable[[], S3Client],
+        client: Ephemeral[S3Client],
         bucket: str,
         prefix: str = "",
         suffix: str = "",
         mimetype: str = "application/octet-stream",
-        incluster_endpoint: Optional[str] = None,
+        endpoints: Optional[Dict[Optional[Host], str]] = None,
     ):
         """
         :param client: A callable returning an aiobotocore S3 client connected and authenticated to the server you wish
@@ -129,19 +135,13 @@ class S3BucketRepository(BlobRepository):
         :param incluster_endpoint: Optional: An endpoint URL to provide as the result of info() queries instead of
                                    extracting the URL from ``client``.
         """
-        self._client = client
-        self.bucket = bucket
+        super().__init__(client, bucket, endpoints)
         self.prefix = prefix
         self.suffix = suffix
         self.mimetype = mimetype
-        self.incluster_endpoint = incluster_endpoint
 
-    @property
-    def client(self):
-        """
-        The aiobotocore S3 client. This will raise an error if the client comes from a session which is not opened.
-        """
-        return self._client()
+    def __getstate__(self):
+        return (super().__getstate__(), self.prefix, self.suffix, self.mimetype)
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"
@@ -171,10 +171,24 @@ class S3BucketRepository(BlobRepository):
                 raise
 
     def object_name(self, job):
-        """
-        Return the object name for the given job.
-        """
+        """Return the object name for the given job."""
         return f"{self.prefix}{job}{self.suffix}"
+
+    @overload
+    async def open(self, job: str, mode: Literal["r"]) -> AReadText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["w"]) -> AWriteText:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["rb"]) -> S3BucketReader:
+        ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["wb"]) -> S3BucketBinaryWriter:
+        ...
 
     @job_getter
     async def open(self, job, mode="r"):
@@ -193,27 +207,12 @@ class S3BucketRepository(BlobRepository):
         else:
             raise ValueError(mode)
 
-    @job_getter
-    async def info(self, job):
-        """
-        Return an `S3BucketInfo` corresponding to the given job.
-        """
-        return S3BucketInfo(
-            self.incluster_endpoint or self.client._endpoint.host,  # type: ignore
-            f"s3://{self.bucket}/{self.object_name(job)}",
-            self.bucket,
-            self.prefix,
-            self.suffix,
-        )
-
     async def delete(self, job):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
 
 
 class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
-    """
-    A metadata repository based on a s3 bucket repository.
-    """
+    """A metadata repository based on a s3 bucket repository."""
 
     def __init__(self, client, bucket, prefix, suffix=".yaml", mimetype="text/yaml"):
         super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)

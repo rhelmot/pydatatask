@@ -1,47 +1,96 @@
-"""
-Various utility classes and functions that are used throughout the codebase but don't belong anywhere in particular.
-"""
+"""Various utility classes and functions that are used throughout the codebase but don't belong anywhere in
+particular."""
 
-from typing import AsyncContextManager, List, Optional, Protocol
+from typing import (
+    Any,
+    AsyncContextManager,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Generic,
+    List,
+    Optional,
+    Protocol,
+    TypeVar,
+    Union,
+)
+from hashlib import md5
+import asyncio
 import codecs
+import pickle
+import struct
+import time
+
+from typing_extensions import Buffer, ParamSpec
+
+_T = TypeVar("_T")
 
 
-class AReadStream(Protocol, AsyncContextManager):
-    """
-    A protocol for reading data from an asynchronous stream.
-    """
+class ReadStream(Protocol):
+    """A protocol for reading data from a stream."""
 
-    async def read(self, n: Optional[int] = None) -> bytes:
-        """
-        Read and return up to ``n`` bytes, or if unspecified, the rest of the stream.
-        """
+    def read(self, n: int = -1, /) -> bytes:
+        """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
 
-    async def close(self) -> None:
-        """
-        Close and release the stream.
-        """
+    def close(self) -> Any:
+        """Close and release the stream."""
 
 
-class AWriteStream(Protocol, AsyncContextManager):
-    """
-    A protocol for writing data to an asynchronous stream.
-    """
+class WriteStream(Protocol):
+    """A protocol for writing data to an stream."""
 
-    async def write(self, data: bytes):
-        """
-        Write ``data`` to the stream.
-        """
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``data`` to the stream."""
 
-    async def close(self) -> None:
-        """
-        Close and release the stream.
-        """
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
 
 
-async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=1024 * 1024):
-    """
-    Stream data from ``copyfrom`` to ``copyto``.
-    """
+class AReadStreamBase(Protocol):
+    """A protocol for reading data from an asynchronous stream (bass boosted)."""
+
+    async def read(self, n: int = -1, /) -> bytes:
+        """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+
+
+class AReadStream(Protocol):
+    """A protocol for reading data from an asynchronous stream."""
+
+    async def read(self, n: int = -1, /) -> bytes:
+        """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
+
+
+class AWriteStreamBase(Protocol):
+    """A protocol for writing data to an asynchronous stream (bass boosted)."""
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> Any:
+        """Write ``data`` to the stream."""
+
+
+class AWriteStream(Protocol):
+    """A protocol for writing data to an asynchronous stream."""
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``data`` to the stream."""
+
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
+
+
+class AReadStreamManager(AReadStream, AsyncContextManager, Protocol):
+    """A protocol for reading data from an asynchronous stream with context management."""
+
+
+class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
+    """A protocol for writing data to an asynchronous stream with context management."""
+
+
+async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, blocksize=1024 * 16):
+    """Stream data from ``copyfrom`` to ``copyto``."""
     while True:
         data = await copyfrom.read(blocksize)
         if not data:
@@ -50,9 +99,7 @@ async def async_copyfile(copyfrom: AReadStream, copyto: AWriteStream, blocksize=
 
 
 class AReadText:
-    """
-    An async version of :external:class:`io.TextIOWrapper` which can only handle reading.
-    """
+    """An async version of :external:class:`io.TextIOWrapper` which can only handle reading."""
 
     def __init__(
         self,
@@ -67,9 +114,7 @@ class AReadText:
         self.chunksize = chunksize
 
     async def read(self, n: Optional[int] = None) -> str:
-        """
-        Read up to ``n`` chars from the string, or the rest of the stream if not provided.
-        """
+        """Read up to ``n`` chars from the string, or the rest of the stream if not provided."""
         while n is None or len(self.buffer) < n:
             data = await self.base.read(self.chunksize)
             self.buffer += self.decoder.decode(data, final=not bool(data))
@@ -82,10 +127,8 @@ class AReadText:
             result, self.buffer = self.buffer, ""
         return result
 
-    async def close(self):
-        """
-        Close and release the stream.
-        """
+    async def close(self) -> None:
+        """Close and release the stream."""
         await self.base.close()
 
     async def __aenter__(self):
@@ -96,9 +139,7 @@ class AReadText:
 
 
 class AWriteText:
-    """
-    An async version of ``io.TextIOWrapper`` which can only handle writing.
-    """
+    """An async version of ``io.TextIOWrapper`` which can only handle writing."""
 
     def __init__(self, base: AWriteStream, encoding="utf-8", errors="strict"):
         self.base = base
@@ -106,15 +147,11 @@ class AWriteText:
         self.errors = errors
 
     async def write(self, data: str):
-        """
-        Write ``data`` to the stream.
-        """
+        """Write ``data`` to the stream."""
         await self.base.write(data.encode(self.encoding, self.errors))
 
-    async def close(self):
-        """
-        Close and release the stream.
-        """
+    async def close(self) -> None:
+        """Close and release the stream."""
         await self.base.close()
 
     async def __aenter__(self):
@@ -125,9 +162,7 @@ class AWriteText:
 
 
 async def async_copyfile_str(copyfrom: AReadText, copyto: AWriteText, blocksize=1024 * 1024):
-    """
-    Stream text from ``copyfrom`` to ``copyto``.
-    """
+    """Stream text from ``copyfrom`` to ``copyto``."""
     while True:
         data = await copyfrom.read(blocksize)
         if not data:
@@ -136,8 +171,7 @@ async def async_copyfile_str(copyfrom: AReadText, copyto: AWriteText, blocksize=
 
 
 async def roundrobin(iterables: List):
-    """
-    An async version of the itertools roundrobin recipe.
+    """An async version of the itertools roundrobin recipe.
 
     roundrobin('ABC', 'D', 'EF') --> A D E B F C
     """
@@ -150,3 +184,233 @@ async def roundrobin(iterables: List):
             iterables.pop(i)
         else:
             i += 1
+
+
+class _AACM(Generic[_T]):
+    def __init__(self, live: AsyncIterator[_T]):
+        self.live = live
+
+    async def __aenter__(self) -> _T:
+        assert self.live is not None
+        return await self.live.__anext__()
+
+    async def __aexit__(self, exc_type, exc_value, exc_tb):
+        pass
+
+
+P = ParamSpec("P")
+
+
+def asyncasynccontextmanager(
+    f: Callable[P, AsyncIterator[_T]]
+) -> Callable[P, Coroutine[Any, Any, AsyncContextManager[_T]]]:
+    """Like asynccontextmanager but needs to be awaited first."""
+
+    async def inner(*args, **kwargs):
+        return _AACM(f(*args, **kwargs))
+
+    return inner
+
+
+def supergetattr(item: Any, key: str) -> Any:
+    """Like getattr but also tries getitem."""
+    try:
+        return getattr(item, key)
+    except AttributeError:
+        return item[key]
+
+
+def supergetattr_path(item: Any, keys: List[str]) -> Any:
+    """Calls supergetattr repeatedly for each key in a list."""
+    for key in keys:
+        item = supergetattr(item, key)
+    return item
+
+
+class AsyncReaderQueueStream:
+    """A stream queue whose writer is synchronous-nonblocking and whose reader is asynchronous."""
+
+    def __init__(self) -> None:
+        self.buffer: List[Optional[bytes]] = []
+        self.readptr = (0, 0)
+        self.closed = False
+
+    def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Add data to the queue."""
+        self.buffer.append(bytes(data))
+        return len(data)
+
+    def close(self) -> Any:
+        """Mark the queue as closed, so reads will terminate."""
+        self.closed = True
+        r: asyncio.Future[None] = asyncio.Future()
+        r.set_result(None)
+        return r
+
+    async def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self.closed:
+                    break
+                await asyncio.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+    def tell(self) -> int:
+        """It's a secret to everybody!"""
+        return 0
+
+
+class AsyncWriterQueueStream:
+    """A stream queue whose writer is asynchronous-blocking and whose reader is synchronous."""
+
+    def __init__(self) -> None:
+        self.buffer: List[Optional[bytes]] = []
+        self.bufsize = 0
+        self.max_bufsize = 1024 * 16 * 8
+        self.readptr = (0, 0)
+        self.closed = False
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Add data to the queue."""
+        while self.bufsize >= self.max_bufsize:
+            await asyncio.sleep(0.01)
+        self.bufsize += len(data)
+        self.buffer.append(bytes(data))
+        return len(data)
+
+    def close(self) -> Any:
+        """Mark the queue as closed, so reads will terminate."""
+        self.closed = True
+        r: asyncio.Future[None] = asyncio.Future()
+        r.set_result(None)
+        return r
+
+    def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self.closed:
+                    break
+                time.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.bufsize -= len(buf)
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+    def tell(self) -> int:
+        """It's a secret to everybody!"""
+        return 0
+
+
+class QueueStream:
+    """A stream queue with synchronous-nonblocking reader and synchronous-blocking writer."""
+
+    def __init__(self) -> None:
+        self.buffer: List[Optional[bytes]] = []
+        self.readptr = (0, 0)
+        self._closed = False
+
+    def close(self) -> None:
+        """Add data to the queue."""
+        self._closed = True
+
+    def write(self, data: Buffer, /) -> int:
+        """Add data to the queue."""
+        b = bytes(data)
+        self.buffer.append(b)
+        return len(b)
+
+    def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self._closed:
+                    break
+                time.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+
+class _StderrIsStdout:
+    pass
+
+
+STDOUT = _StderrIsStdout()
+
+_hash_unpacker = struct.Struct("<QQ")
+
+
+def crypto_hash(x: Any) -> int:
+    """Perform a 64 bit cryptographic hash of the given item.
+
+    A dark woeful blight passes over the land. In its foreboding mists you begin to hear creatures laughing and dancing.
+    "Did you miss us?" they say, gleeful with mischief.
+
+    You pass a vial of holy declarative configuration over your eyes and shout, "Begone, foul demons! I have not
+    summoned ye! Collision-resistent hashing is a valiant and unsullied tool, and its association with the misery of
+    hash-consing shall not poison its well of wonders!"
+
+    The demons laugh some more. "But dearly beloved, you shall never rid yourself of hash collisions that fall from
+    misconfigurations, and misconfigurations there shall be!"
+
+    You weep.
+    """
+    return _hash_unpacker.unpack(md5(pickle.dumps(x)).digest())[0]

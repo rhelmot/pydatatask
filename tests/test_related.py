@@ -17,8 +17,6 @@ class TestRelated(unittest.IsolatedAsyncioTestCase):
         assert await related1.contains("456")
         assert not await related1.contains("lksfdlkfd")
         with self.assertRaises(LookupError):
-            await related1.info("lkjfdslkj")
-        with self.assertRaises(LookupError):
             await related1.open("lkjfdslkj", "w")
 
         base2 = pydatatask.InProcessMetadataRepository({"123": "weh!"})
@@ -28,6 +26,29 @@ class TestRelated(unittest.IsolatedAsyncioTestCase):
         await related2.delete("456")
         assert [x async for x in base2] == []
         await related2.delete("lsdlkjfj")
+
+    async def test_allocated(self):
+        source = pydatatask.InProcessMetadataRepository({"aa": 1})
+        dest = pydatatask.InProcessMetadataRepository()
+        done = pydatatask.InProcessMetadataRepository()
+
+        @pydatatask.InProcessSyncTask("task", done)
+        async def task(source, dest, **kwargs):
+            await dest.dump(await source.info() + 1)
+
+        task.link("source", source, kind=pydatatask.LinkKind.InputRepo)
+        task.link("dest", dest, kind=pydatatask.LinkKind.OutputRepo, key="ALLOC", inhibits_start=True)
+
+        pipeline = pydatatask.Pipeline([task], pydatatask.Session(), [])
+        async with pipeline:
+            assert await pipeline.update()
+            assert not await pipeline.update()
+            assert "aa" not in dest.data
+            assert "aa" in done.data
+            assert list(dest.data.values()) == [2]
+            assert list(dest.data.keys()) == [str(task.derived_hash("aa", "dest"))]
+            await done.delete("aa")
+            assert not await pipeline.update()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ jobs:
     name: Build and Test
     if: always()
     strategy:
+      fail-fast: false
       matrix:
         python:
           - version: '3.8'
@@ -17,8 +18,8 @@ jobs:
             env: 'py310'
           - version: '3.11'
             env: 'py311'
-              #          - version: '3.12-dev'
-              #            env: 'py312'
+          - version: '3.12'
+            env: 'py312'
     runs-on: ubuntu-latest
     env:
       PYTHON: ${{ matrix.python.version }}

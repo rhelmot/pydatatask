@@ -1,5 +1,7 @@
 # pylint: disable=missing-class-docstring,missing-module-docstring,missing-function-docstring,unused-argument
 # pylint: disable=import-error
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 import os
 
@@ -8,14 +10,9 @@ from pydatafs.files import Directory, File, RWBufferedFile, Symlink
 from pydatafs.filesystem import PyDataFS
 import yaml
 
+from . import repository as repomodule
+from . import task as taskmodule
 from .pipeline import Pipeline
-from .repository import (
-    BlobRepository,
-    FileRepositoryBase,
-    MetadataRepository,
-    Repository,
-)
-from .task import Link, Task
 
 if TYPE_CHECKING:
     from pyfuse3 import FileHandleT, FileNameT, InodeT
@@ -48,7 +45,7 @@ class TaskListDir(Directory):
 
 
 class TaskDir(Directory):
-    def __init__(self, task: Task):
+    def __init__(self, task: taskmodule.Task):
         self.task = task
         super().__init__()
 
@@ -70,15 +67,15 @@ class TaskDir(Directory):
 
 
 class RepoDir(Directory):
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: repomodule.Repository):
         self.repo = repo
         super().__init__()
 
-        if isinstance(repo, MetadataRepository):
+        if isinstance(repo, repomodule.MetadataRepository):
             self.job_builder = self.metadata_builder
-        elif isinstance(repo, FileRepositoryBase):
+        elif isinstance(repo, repomodule.FileRepositoryBase):
             self.job_builder = self.symlink_builder
-        elif isinstance(repo, BlobRepository):
+        elif isinstance(repo, repomodule.BlobRepository):
             self.job_builder = self.blob_builder
         else:
             self.job_builder = self.empty_builder
@@ -91,12 +88,14 @@ class RepoDir(Directory):
 
     def metadata_builder(self, job: str):
         async def content():
+            assert isinstance(self.repo, repomodule.MetadataRepository)
             if not await self.repo.contains(job):
                 return bytearray()
             data = await self.repo.info(job)
             return bytearray(yaml.safe_dump(data).encode())
 
         async def writeback(data_bytes):
+            assert isinstance(self.repo, repomodule.MetadataRepository)
             if not data_bytes:
                 # we are PROBABLY doing open(x, O_TRUNC)
                 # do not sync this. nobody wants the empty string to be valid yaml. fuck you
@@ -115,17 +114,19 @@ class RepoDir(Directory):
         )
 
     def symlink_builder(self, job: str):
-        assert isinstance(self.repo, FileRepositoryBase)
+        assert isinstance(self.repo, repomodule.FileRepositoryBase)
         return Symlink((self.repo, job), str(self.repo.fullpath(job)))
 
     def blob_builder(self, job: str):
         async def content():
+            assert isinstance(self.repo, repomodule.BlobRepository)
             if not await self.repo.contains(job):
                 return bytearray()
             async with await self.repo.open(job, "rb") as fp:
                 return bytearray(await fp.read())
 
         async def writeback(data):
+            assert isinstance(self.repo, repomodule.BlobRepository)
             async with await self.repo.open(job, "wb") as fp:
                 await fp.write(data)
 
@@ -152,19 +153,19 @@ class RepoDir(Directory):
         return None
 
     async def create(self, name: str, mode, flags) -> File:
-        if isinstance(self.repo, MetadataRepository):
-            return self.job_builder(name)
-        elif isinstance(self.repo, FileRepositoryBase):
+        if isinstance(self.repo, repomodule.MetadataRepository):
+            return self.job_builder(name)  # type: ignore
+        elif isinstance(self.repo, repomodule.FileRepositoryBase):
             raise FSInvalidError()
         else:
-            return self.job_builder(name)
+            return self.job_builder(name)  # type: ignore
 
     async def unlink_child(self, name: str):
         await self.repo.delete(name)
 
 
 class LinkDir(RepoDir):
-    def __init__(self, link: Link):
+    def __init__(self, link: taskmodule.Link):
         self.link = link
         super().__init__(link.repo)
 
