@@ -223,7 +223,7 @@ def _build_docker_connection(
 
 def _build_mongo_connection(url: str, database: str):
     async def mongo():
-        client: AgnosticClient[Any] = motor.motor_asyncio.AsyncIOMotorClient(url)
+        client: "AgnosticClient[Any]" = motor.motor_asyncio.AsyncIOMotorClient(url)
         collection = client.get_database(database)
         yield collection
 
