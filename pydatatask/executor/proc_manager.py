@@ -393,7 +393,7 @@ class SSHLinuxManager(AbstractProcessManager):
         if "/" in args[0]:
             async with self.ssh.start_sftp_client() as sftp:
                 await sftp.chmod(args[0], 0o755)
-        p = await self.ssh.create_process(
+        p: asyncssh.SSHClientProcess[bytes] = await self.ssh.create_process(
             f"""
             cd {shlex.quote(str(cwd))}
             {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &

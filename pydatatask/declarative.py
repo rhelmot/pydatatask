@@ -12,6 +12,7 @@ import sys
 import traceback
 
 from importlib_metadata import entry_points
+from motor.core import AgnosticClient
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async
@@ -222,9 +223,8 @@ def _build_docker_connection(
 
 def _build_mongo_connection(url: str, database: str):
     async def mongo():
-        client = motor.motor_asyncio.AsyncIOMotorClient(url)
-        # is this a bug in the motor stubs?
-        collection = client.get_database(database)  # type: ignore[var-annotated]
+        client: AgnosticClient[Any] = motor.motor_asyncio.AsyncIOMotorClient(url)
+        collection = client.get_database(database)
         yield collection
 
     return mongo
