@@ -4,12 +4,12 @@ from typing import Any, Dict
 from multiprocessing import Process, Queue
 import asyncio
 
-from dash import dcc, html  # type: ignore[import-untyped]
-from dash.dependencies import Input, Output  # type: ignore[import-untyped]
-import dash  # type: ignore[import-untyped]
+from dash import dcc, html
+from dash.dependencies import Input, Output
+import dash
 import networkx as nx
-import plotly.figure_factory as ff  # type: ignore[import-untyped]
-import plotly.graph_objects as go  # type: ignore[import-untyped]
+import plotly.figure_factory as ff
+import plotly.graph_objects as go
 
 app = dash.Dash("pydatatask")
 

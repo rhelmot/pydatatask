@@ -117,6 +117,16 @@ ignore_missing_imports = true
 module = "kubernetes.*"
 ignore_missing_imports = true
 
+# https://github.com/plotly/plotly.py/pull/4424
+[[tool.mypy.overrides]]
+module = "plotly.*"
+ignore_missing_imports = true
+
+# https://github.com/plotly/dash/issues/2233
+[[tool.mypy.overrides]]
+module = "dash.*"
+ignore_missing_imports = true
+
 # lol
 [[tool.mypy.overrides]]
 module = "pydatafs.*"
