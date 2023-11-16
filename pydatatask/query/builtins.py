@@ -259,3 +259,27 @@ def str_le(a: str, b: str) -> bool:
 @builtin("__le__")
 def bool_le(a: bool, b: bool) -> bool:
     return a <= b
+
+@builtin("__inv__")
+def int_inv(a: int) -> int:
+    return ~a
+
+@builtin("__not__")
+def bool_not(a: bool) -> bool:
+    return not a
+
+@builtin("__not__")
+def int_not(a: int) -> bool:
+    return not bool(a)
+
+@builtin("__not__")
+def str_not(a: str) -> bool:
+    return not a
+
+@builtin("__neg__")
+def int_neg(a: int) -> int:
+    return -a
+
+@builtin("__plus__")
+def int_plus(a: int) -> int:
+    return +a
