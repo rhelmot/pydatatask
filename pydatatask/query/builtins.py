@@ -268,6 +268,14 @@ def bool_le(a: int) -> int:
 def bool_le(a: bool) -> bool:
     return not a
 
+@builtin("__not__")
+def bool_le(a: int) -> bool:
+    return not bool(a)
+
+@builtin("__not__")
+def bool_le(a: str) -> bool:
+    return not a
+
 @builtin("__neg__")
 def bool_le(a: int) -> int:
     return -a
