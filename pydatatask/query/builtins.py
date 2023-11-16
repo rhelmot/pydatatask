@@ -259,3 +259,19 @@ def str_le(a: str, b: str) -> bool:
 @builtin("__le__")
 def bool_le(a: bool, b: bool) -> bool:
     return a <= b
+
+@builtin("__inv__")
+def bool_le(a: int) -> int:
+    return ~a
+
+@builtin("__not__")
+def bool_le(a: bool) -> bool:
+    return not a
+
+@builtin("__neg__")
+def bool_le(a: int) -> int:
+    return -a
+
+@builtin("__plus__")
+def bool_le(a: int) -> int:
+    return +a
