@@ -11,8 +11,6 @@ import networkx as nx
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
 
-app = dash.Dash("pydatatask")
-
 
 class TaskVisualizer:
     """The class that does the rendering of the task graph.
@@ -30,6 +28,9 @@ class TaskVisualizer:
         }
         self.nodes = {}
         self.exit_codes = {}
+
+        self.app = dash.Dash("pydatatask")
+        self.app.layout = self.generate_layout()
         self.register_callbacks()
 
     def left_to_right_layout(self, G, ranksep=0.1):
@@ -137,7 +138,7 @@ class TaskVisualizer:
     def register_callbacks(self):
         """Registers the update callback for the graph."""
 
-        @app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
+        @self.app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
         def update_graph(_):
             """Updates the graph plot based on the current state of the pipeline.
 
@@ -230,11 +231,4 @@ def run_viz(pipeline):
 
     Starts the visualizer and runs the dash server.
     """
-    TaskVisualizer(pipeline)
-    app.run_server(debug=True)
-
-
-app.layout = TaskVisualizer.generate_layout()
-
-if __name__ == "__main__":
-    app.run_server(debug=True)
+    TaskVisualizer(pipeline).app.run_server(debug=True)
