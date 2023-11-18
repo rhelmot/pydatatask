@@ -1,8 +1,20 @@
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum, auto
-from itertools import product
+from itertools import product as iproduct
 
 from typing_extensions import Mapping, TypeAlias
 
@@ -53,7 +65,7 @@ class FunctionDefinition:
     template_names: List[str]
     arg_names: List[str]
     type: FunctionType
-    impl: Callable[["Scope"], QueryValue]
+    impl: Callable[["Scope"], Awaitable[QueryValue]]
 
 
 @dataclass
@@ -62,17 +74,24 @@ class TemplatedFunction:
     defns: Dict[ArgTypes, FunctionDefinition]
     name: str
 
-    def make_scope(self, base_scope: "Scope", args: Iterable[QueryValue]) -> Tuple["Scope", FunctionDefinition]:
-        args = list(args)
+    def resolve(self, args: Iterable[QueryValue]) -> "ResolvedFunction":
         argtypes = tuple(arg.type for arg in args)
 
         if argtypes not in self.defns:
             raise NameError(f"No overload available for {self.name} that matches {argtypes}")
         defn = self.defns[argtypes]
+        return ResolvedFunction(defn, self.template_params)
 
+
+@dataclass
+class ResolvedFunction:
+    defn: FunctionDefinition
+    template_params: List[TemplateValue]
+
+    def make_scope(self, base_scope: "Scope", args: Iterable[QueryValue]) -> Tuple["Scope", FunctionDefinition]:
         local_functions: Dict[str, TemplatedFunction] = {}
-        local_values = dict(zip(defn.arg_names, args))
-        for name, value, ty in zip(defn.template_names, self.template_params, defn.type.template_types):
+        local_values = dict(zip(self.defn.arg_names, args))
+        for name, value, ty in zip(self.defn.template_names, self.template_params, self.defn.type.template_types):
             if isinstance(ty, QueryValueType):
                 assert isinstance(value, QueryValue)
                 local_values[name] = value
@@ -89,14 +108,8 @@ class TemplatedFunction:
                 local_functions,
                 base_scope.global_templates,
             ),
-            defn,
+            self.defn,
         )
-
-
-@dataclass
-class ResolvedFunction:
-    defn: FunctionDefinition
-    template_params: List[TemplateValue]
 
 
 @dataclass
@@ -109,6 +122,10 @@ class Scope:
 
     @classmethod
     def base_scope(cls, values: Mapping[str, QueryValue], functions: Mapping[str, List[FunctionDefinition]]) -> "Scope":
+        values_2 = {}
+        values_2["true"] = QueryValue(QueryValueType.Bool, bool_value=True)
+        values_2["false"] = QueryValue(QueryValueType.Bool, bool_value=False)
+        values_2.update(values)
         global_functions: Mapping[str, Dict[ArgTypes, FunctionDefinition]] = defaultdict(dict)
         global_templates: Mapping[Tuple[str, TemplateTypes], Dict[ArgTypes, FunctionDefinition]] = defaultdict(dict)
         for name, funclist in functions.items():
@@ -118,7 +135,7 @@ class Scope:
                 else:
                     global_functions[name][func.type.arg_types] = func
 
-        return Scope({}, dict(values), global_functions, {}, global_templates)
+        return Scope({}, values_2, global_functions, {}, global_templates)
 
     def lookup_value(self, name: str) -> QueryValue:
         r = self.local_values.get(name, None)
@@ -151,16 +168,22 @@ class Scope:
                 return self.local_functions[name].defns
             return self.global_functions[name]
 
+        # this is insanely ill-defined. what's going on?
+        # we are trying to identify all possible valid concrete template signatures that could be matched by this query
+        # this is because you can provide either types or values to this method.
+        # if you provide a type it's pretty well-defined what you want
+        # but if you provide a value it could be a function and functions have nasty overloading properties
+        #
         result: Dict[ArgTypes, FunctionDefinition] = {}
         targtype_options = [
             [arg]
             if isinstance(arg, (QueryValueType, FunctionType))
-            else arg.defns
+            else [x.type for x in arg.defns.values()]
             if isinstance(arg, TemplatedFunction)
             else [arg.type]
             for arg in args
         ]
-        for targtypes in product(*targtype_options):
+        for targtypes in product(targtype_options):
             if (name, targtypes) in self.global_templates:
                 result.update(self.global_templates[(name, targtypes)])
         if result:
@@ -170,35 +193,44 @@ class Scope:
         raise NameError(f"No function with name {name}")
 
 
+T = TypeVar("T")
+
+
+def product(args: Iterable[Union[Iterable[FunctionType], Iterable[TemplateType]]]) -> Iterator[TemplateTypes]:
+    # args: a list of arguments, some of which are lists of possible signatures and some of which are lists containing a single type (for simplicity)
+    # result: an iterator of lists of arguments, each of which has only one possible signature per argument
+    yield from iproduct(*args)
+
+
 class Executor(Visitor):
     def __init__(self, scope: Scope):
         self.scope = scope
 
-    def visit_IdentExpression(self, obj) -> QueryValue:
+    async def visit_IdentExpression(self, obj) -> QueryValue:
         return self.scope.lookup_value(obj.name)
 
-    def visit_IntLiteral(self, obj) -> QueryValue:
+    async def visit_IntLiteral(self, obj) -> QueryValue:
         return QueryValue(QueryValueType.Int, int_value=obj.value)
 
-    def visit_StringLiteral(self, obj) -> QueryValue:
+    async def visit_StringLiteral(self, obj) -> QueryValue:
         return QueryValue(QueryValueType.String, string_value=obj.value)
 
-    def visit_BoolLiteral(self, obj) -> QueryValue:
+    async def visit_BoolLiteral(self, obj) -> QueryValue:
         return QueryValue(QueryValueType.Bool, bool_value=obj.value)
 
-    def visit_KeyLiteral(self, obj) -> QueryValue:
+    async def visit_KeyLiteral(self, obj) -> QueryValue:
         return QueryValue(QueryValueType.Key, key_value=obj.value)
 
-    def visit_ListLiteral(self, obj) -> QueryValue:
-        return QueryValue(QueryValueType.List, list_value=[self.visit(expr) for expr in obj.values])
+    async def visit_ListLiteral(self, obj) -> QueryValue:
+        return QueryValue(QueryValueType.List, list_value=[await self.visit(expr) for expr in obj.values])
 
-    def visit_FuncExpr(self, obj) -> TemplatedFunction:
-        targs = [self.visit(expr) for expr in obj.template_args]
+    async def visit_FuncExpr(self, obj) -> TemplatedFunction:
+        targs = [await self.visit(expr) for expr in obj.template_args]
         defns = self.scope.lookup_template(obj.name, targs)
         return TemplatedFunction(targs, defns, obj.name)
 
-    def visit_FunctionCall(self, obj) -> QueryValue:
-        funcexpr = self.visit_FuncExpr(obj.function)
-        args = [self.visit(expr) for expr in obj.args]
-        scope, defn = funcexpr.make_scope(self.scope, args)
-        return defn.impl(scope)
+    async def visit_FunctionCall(self, obj) -> QueryValue:
+        funcexpr = await self.visit_FuncExpr(obj.function)
+        args = [await self.visit(expr) for expr in obj.args]
+        scope, defn = funcexpr.resolve(args).make_scope(self.scope, args)
+        return await defn.impl(scope)
