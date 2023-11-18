@@ -13,23 +13,20 @@ from typing import (
 )
 from collections import defaultdict
 from dataclasses import dataclass
-from enum import Enum, auto
 from itertools import product as iproduct
 
 from typing_extensions import Mapping, TypeAlias
 
+from pydatatask.query.parser import ArgTypes
+from pydatatask.query.parser import FunctionDefinition as ParsedFunctionDefinition
+from pydatatask.query.parser import (
+    FunctionType,
+    QueryValueType,
+    TemplateType,
+    TemplateTypes,
+)
 from pydatatask.query.visitor import Visitor
 from pydatatask.repository import Repository
-
-
-class QueryValueType(Enum):
-    Bool = auto()
-    Int = auto()
-    String = auto()
-    Key = auto()
-    List = auto()
-    Repository = auto()
-    RepositoryData = auto()
 
 
 @dataclass
@@ -47,17 +44,7 @@ class QueryValue:
         return isinstance(ty, QueryValueType) and self.type == ty
 
 
-TemplateType: TypeAlias = Union["FunctionType", QueryValueType]
-ArgTypes: TypeAlias = Tuple[QueryValueType, ...]
-TemplateTypes: TypeAlias = Tuple[TemplateType, ...]
 TemplateValue: TypeAlias = Union[QueryValue, "TemplatedFunction"]
-
-
-@dataclass(frozen=True)
-class FunctionType:
-    template_types: TemplateTypes
-    arg_types: ArgTypes
-    return_type: QueryValueType
 
 
 @dataclass
@@ -119,6 +106,24 @@ class Scope:
     global_functions: Dict[str, Dict[ArgTypes, FunctionDefinition]]
     local_functions: Dict[str, TemplatedFunction]
     global_templates: Dict[Tuple[str, TemplateTypes], Dict[ArgTypes, FunctionDefinition]]
+
+    def copy(self) -> "Scope":
+        return Scope(
+            local_values=dict(self.local_values),
+            global_values=dict(self.global_values),
+            global_functions=dict(self.global_functions),
+            local_functions=dict(self.local_functions),
+            global_templates=dict(self.global_templates),
+        )
+
+    def overlay(self, other: "Scope") -> "Scope":
+        result = self.copy()
+        result.local_values.update(other.local_values)
+        result.global_values.update(other.global_values)
+        result.global_functions.update(other.global_functions)
+        result.local_functions.update(other.local_functions)
+        result.global_templates.update(other.global_templates)
+        return result
 
     @classmethod
     def base_scope(cls, values: Mapping[str, QueryValue], functions: Mapping[str, List[FunctionDefinition]]) -> "Scope":
@@ -234,3 +239,24 @@ class Executor(Visitor):
         args = [await self.visit(expr) for expr in obj.args]
         scope, defn = funcexpr.resolve(args).make_scope(self.scope, args)
         return await defn.impl(scope)
+
+    async def visit_ScopedExpression(self, obj) -> QueryValue:
+        newscope = self.scope.copy()
+        newvis = Executor(newscope)
+        for name, func in obj.func_defns.items():
+            closed = close_function(newscope, func)
+            if closed.template_names:
+                raise TypeError("You're not allowed to do that, I think?")
+            newscope.local_functions[name] = TemplatedFunction([], {closed.type.arg_types: closed}, name)
+        for name, expr in obj.value_defns.items():
+            newscope.local_values[name] = await newvis.visit(expr)
+        return await newvis.visit(obj.value)
+
+
+def close_function(outer_scope: Scope, defn: ParsedFunctionDefinition) -> FunctionDefinition:
+    async def inner(inner_scope: Scope):
+        new_scope = outer_scope.overlay(inner_scope)
+        new_vis = Executor(new_scope)
+        return await new_vis.visit(defn.body)
+
+    return FunctionDefinition(template_names=defn.template_names, arg_names=defn.arg_names, type=defn.type, impl=inner)

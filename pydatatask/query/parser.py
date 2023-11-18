@@ -1,11 +1,14 @@
-from typing import List, Union
+from typing import Dict, List, Tuple, TypeAlias, Union
 from dataclasses import dataclass
+from enum import Enum, auto
 
 import ply.lex as lex
 import ply.yacc as yacc
 
 # Token definitions
 tokens = (
+    "KW_FN",
+    "KW_LET",
     "STRING_LITERAL",
     "INT_LITERAL",
     "BOOL_LITERAL",
@@ -37,6 +40,10 @@ tokens = (
     "DOT",
     "NOT",
     "TILDE",
+    "SEMI",
+    "ARROW",
+    "COLON",
+    "ASSIGN",
 )
 
 # Regular expressions for tokens
@@ -70,12 +77,23 @@ t_COMMA = r","
 t_DOT = r"\."
 t_NOT = r"!"
 t_TILDE = r"~"
+t_SEMI = r";"
+t_ARROW = r"->"
+t_COLON = r":"
+t_ASSIGN = r"="
 t_ignore = " \t"
+
+reserved = {
+    "fn": "KW_FN",
+    "let": "KW_LET",
+    "true": "BOOL_LITERAL",
+    "false": "BOOL_LITERAL",
+}
 
 
 def t_IDENTIFIER(t):
     r"[a-zA-Z_][a-zA-Z0-9_]*"
-    t.type = "IDENTIFIER"
+    t.type = reserved.get(t.value, "IDENTIFIER")
     return t
 
 
@@ -93,6 +111,8 @@ lexer = lex.lex()
 
 # Define precedence and associativity
 precedence = (
+    ("left", "SEMI"),
+    ("left", "DOT"),
     ("left", "OR"),
     ("left", "AND"),
     ("left", "PIPE"),
@@ -106,7 +126,106 @@ precedence = (
     ("left", "LBRACKET", "RBRACKET"),
 )
 
-# Grammar rules
+
+def p_expr_def(p):
+    "expr : defn SEMI expr"
+    if isinstance(p[3], ScopedExpression):
+        p[0] = p[3]
+    else:
+        p[0] = ScopedExpression({}, {}, p[3])
+    p[0].value_defns.update(p[1][0])
+    p[0].func_defns.update(p[1][1])
+
+
+def p_defn_fn_notemplate(p):
+    "defn : KW_FN IDENTIFIER LPAREN typarams RPAREN ARROW tyexpr COLON expr"
+    p[0] = {}, {
+        p[2]: FunctionDefinition([], [x[0] for x in p[4]], FunctionType((), tuple(x[1] for x in p[4]), p[7]), p[9])
+    }
+
+
+def p_defn_fn_yestemplate(p):
+    "defn : KW_FN IDENTIFIER LBRACKET typarams RBRACKET LPAREN typarams RPAREN ARROW tyexpr COLON expr"
+    p[0] = {}, {
+        p[2]: FunctionDefinition(
+            [x[0] for x in p[4]],
+            [x[0] for x in p[7]],
+            FunctionType(tuple(x[1] for x in p[4]), tuple(x[1] for x in p[7]), p[10]),
+            p[12],
+        )
+    }
+
+
+def p_defn_let(p):
+    "defn : KW_LET IDENTIFIER ASSIGN expr"
+    p[0] = {p[2]: p[4]}, {}
+
+
+def p_typarams_empty(p):
+    "typarams :"
+    p[0] = []
+
+
+def p_typarams_one(p):
+    "typarams : typaram"
+    p[0] = [p[1]]
+
+
+def p_typarams_multiple(p):
+    "typarams : typaram COMMA typarams"
+    p[0] = [p[1]] + p[3]
+
+
+def p_tyexprs_empty(p):
+    "tyexprs :"
+    p[0] = []
+
+
+def p_tyexprs_one(p):
+    "tyexprs : tyexpr"
+    p[0] = [p[1]]
+
+
+def p_tyexprs_multiple(p):
+    "tyexprs : tyexpr COMMA tyexprs"
+    p[0] = [p[1]] + p[3]
+
+
+def p_typaram(p):
+    "typaram : IDENTIFIER COLON tyexpr"
+    p[0] = (p[1], p[3])
+
+
+def p_tyexpr_basic(p):
+    "tyexpr : IDENTIFIER"
+    if p[1] == "Bool":
+        p[0] = QueryValueType.Bool
+    elif p[1] == "Int":
+        p[0] = QueryValueType.Int
+    elif p[1] == "Str":
+        p[0] = QueryValueType.String
+    elif p[1] == "Key":
+        p[0] = QueryValueType.Key
+    elif p[1] == "List":
+        p[0] = QueryValueType.List
+    elif p[1] == "Repo":
+        p[0] = QueryValueType.Repository
+    elif p[1] == "Data":
+        p[0] = QueryValueType.RepositoryData
+    else:
+        raise ValueError(f"Bad type: {p[1]}")
+
+
+def p_tyexpr_fn_notemplate(p):
+    "tyexpr : KW_FN LPAREN tyexprs RPAREN ARROW tyexpr"
+    p[0] = FunctionType((), p[3], p[6])
+
+
+def p_tyexpr_fn_yestemplate(p):
+    "tyexpr : KW_FN LBRACKET tyexprs RBRACKET LPAREN tyexprs RPAREN ARROW tyexpr"
+    p[0] = FunctionType(p[3], p[6], p[9])
+
+
 def p_expr_name(p):
     "expr : IDENTIFIER"
     p[0] = IdentExpression(p[1])
@@ -312,7 +431,46 @@ class ListLiteral(Expression):
     values: List[Expression]
 
 
-parser = yacc.yacc()
+class QueryValueType(Enum):
+    Bool = auto()
+    Int = auto()
+    String = auto()
+    Key = auto()
+    List = auto()
+    Repository = auto()
+    RepositoryData = auto()
+
+
+ArgTypes: TypeAlias = Tuple[QueryValueType, ...]
+TemplateType: TypeAlias = Union["FunctionType", QueryValueType]
+TemplateTypes: TypeAlias = Tuple[TemplateType, ...]
+
+
+@dataclass(frozen=True)
+class FunctionType:
+    template_types: TemplateTypes
+    arg_types: ArgTypes
+    return_type: QueryValueType
+
+
+@dataclass
+class FunctionDefinition:
+    template_names: List[str]
+    arg_names: List[str]
+    type: FunctionType
+    body: Expression
+
+
+@dataclass
+class ScopedExpression(Expression):
+    value_defns: Dict[str, Expression]
+    func_defns: Dict[
+        str, FunctionDefinition
+    ]  # this representation is inadequate! if we want to support overloads, we need it to be a list of definitions of some sort
+    value: Expression
+
+
+expr_parser = yacc.yacc(start="expr")
 
 if __name__ == "__main__":
     # Test the parser
@@ -320,5 +478,5 @@ if __name__ == "__main__":
         input_expr = input()
         if not input_expr:
             break
-        result = parser.parse(input_expr)
+        result = expr_parser.parse(input_expr)
         print(result)

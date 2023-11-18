@@ -5,6 +5,7 @@ from typing import (
     DefaultDict,
     List,
     Optional,
+    TypeAlias,
     Union,
     get_args,
     get_origin,
@@ -22,7 +23,6 @@ from pydatatask.query.executor import (
     QueryValueType,
     ResolvedFunction,
     Scope,
-    TemplatedFunction,
 )
 from pydatatask.repository.base import (
     FilterMetadataRepository,
@@ -39,6 +39,9 @@ builtins: DefaultDict[str, List[FunctionDefinition]] = defaultdict(list)
 
 class Key(str):
     pass
+
+
+IntoQueryValue: TypeAlias = Any
 
 
 def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryValue, ResolvedFunction], scope: Scope):
@@ -81,23 +84,24 @@ def checked_incast_template(ty: Union[QueryValueType, FunctionType], value) -> U
     return checked_incast(ty, value)
 
 
-def checked_incast(ty: QueryValueType, value) -> QueryValue:
-    if ty == QueryValueType.String:
-        assert isinstance(value, str)
-        return QueryValue(ty, string_value=value)
-    if ty == QueryValueType.Key:
-        assert isinstance(value, Key)
-        return QueryValue(ty, key_value=str(value))
-    if ty == QueryValueType.Int:
-        assert isinstance(value, int)
-        return QueryValue(ty, int_value=value)
-    if ty == QueryValueType.Bool:
-        assert isinstance(value, bool)
-        return QueryValue(ty, bool_value=value)
-    if ty == QueryValueType.Repository:
-        assert isinstance(value, Repository)
-        return QueryValue(ty, repo_value=value)
-    return QueryValue(ty, data_value=value)
+def incast(value: IntoQueryValue) -> QueryValue:
+    if isinstance(value, Key):
+        return QueryValue(QueryValueType.Key, key_value=str(value))
+    if isinstance(value, str):
+        return QueryValue(QueryValueType.String, string_value=value)
+    if isinstance(value, bool):
+        return QueryValue(QueryValueType.Bool, bool_value=value)
+    if isinstance(value, int):
+        return QueryValue(QueryValueType.Int, int_value=value)
+    if isinstance(value, Repository):
+        return QueryValue(QueryValueType.Repository, repo_value=value)
+    return QueryValue(QueryValueType.RepositoryData, data_value=value)
+
+
+def checked_incast(ty: QueryValueType, value: IntoQueryValue) -> QueryValue:
+    result = incast(value)
+    assert result.type == ty
+    return result
 
 
 def translate_pytype_template(ty) -> Union[QueryValueType, FunctionType]:

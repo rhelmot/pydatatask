@@ -9,6 +9,7 @@ from .parser import (
     IntLiteral,
     KeyLiteral,
     ListLiteral,
+    ScopedExpression,
     StringLiteral,
 )
 
@@ -52,4 +53,8 @@ class Visitor(ABC):
 
     @abstractmethod
     async def visit_FunctionCall(self, obj: FunctionCall):
+        raise NotImplementedError
+
+    @abstractmethod
+    async def visit_ScopedExpression(self, obj: ScopedExpression):
         raise NotImplementedError
