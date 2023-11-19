@@ -95,10 +95,14 @@ def incast(value: IntoQueryValue) -> QueryValue:
         return QueryValue(QueryValueType.Int, int_value=value)
     if isinstance(value, Repository):
         return QueryValue(QueryValueType.Repository, repo_value=value)
+    if isinstance(value, list):
+        return QueryValue(QueryValueType.List, list_value=value)
     return QueryValue(QueryValueType.RepositoryData, data_value=value)
 
 
 def checked_incast(ty: QueryValueType, value: IntoQueryValue) -> QueryValue:
+    if ty == QueryValueType.RepositoryData:
+        return QueryValue(ty, data_value=value)
     result = incast(value)
     assert result.type == ty
     return result
@@ -121,7 +125,7 @@ def translate_pytype(ty) -> QueryValueType:
         return QueryValueType.String
     if ty is bool:
         return QueryValueType.Bool
-    if issubclass(ty, Repository):
+    if isinstance(ty, type) and issubclass(ty, Repository):
         return QueryValueType.Repository
     if get_origin(ty) is list:
         return QueryValueType.List
@@ -395,7 +399,10 @@ async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitabl
         v = await a.info(k)
         return await b(Key(k), v)
 
-    return a.map(lambda x: x, inner)
+    async def ident(x):
+        return x
+
+    return a.map(ident, inner)
 
 
 @builtin("any")
@@ -404,3 +411,49 @@ async def repo_any(a: Repository) -> bool:
         return True
     else:
         return False
+
+
+@builtin("__index__")
+async def list_index(a: List, b: int) -> object:
+    return a[b]
+
+
+@builtin("__index__")
+async def repo_index(a: Repository, b: Key) -> object:
+    if not isinstance(a, MetadataRepository):
+        raise TypeError("Can only index MetadataRepositories")
+    return a.info(str(b))
+
+
+@builtin("sort")
+async def sort_list(a: List) -> List:
+    return sorted(a)
+
+
+@builtin("sort")
+async def sort_list_keyed(a: List, key: Callable[[object], Awaitable[int]]) -> List:
+    keys = [(await key(x), x) for x in a]
+    keys.sort()
+    for i, (x, _) in enumerate(keys):
+        keys[i] = x  # type: ignore
+    return keys
+
+
+@builtin("values")
+async def repo_values(a: Repository) -> List:
+    if not isinstance(a, MetadataRepository):
+        raise TypeError("Can only values MetadataRepositories")
+    return sorted((await a.info_all()).values())
+
+
+@builtin("len")
+async def repo_len(a: Repository) -> int:
+    result = 0
+    async for _ in a:
+        result += 1
+    return result
+
+
+@builtin("len")
+async def list_len(a: List) -> int:
+    return len(a)

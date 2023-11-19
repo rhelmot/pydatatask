@@ -94,6 +94,7 @@ class ResolvedFunction:
                 base_scope.global_functions,
                 local_functions,
                 base_scope.global_templates,
+                {},
             ),
             self.defn,
         )
@@ -106,6 +107,7 @@ class Scope:
     global_functions: Dict[str, Dict[ArgTypes, FunctionDefinition]]
     local_functions: Dict[str, TemplatedFunction]
     global_templates: Dict[Tuple[str, TemplateTypes], Dict[ArgTypes, FunctionDefinition]]
+    local_templates: Dict[Tuple[str, TemplateTypes], Dict[ArgTypes, FunctionDefinition]]
 
     def copy(self) -> "Scope":
         return Scope(
@@ -114,6 +116,7 @@ class Scope:
             global_functions=dict(self.global_functions),
             local_functions=dict(self.local_functions),
             global_templates=dict(self.global_templates),
+            local_templates=dict(self.local_templates),
         )
 
     def overlay(self, other: "Scope") -> "Scope":
@@ -123,6 +126,7 @@ class Scope:
         result.global_functions.update(other.global_functions)
         result.local_functions.update(other.local_functions)
         result.global_templates.update(other.global_templates)
+        result.local_templates.update(other.local_templates)
         return result
 
     @classmethod
@@ -140,7 +144,7 @@ class Scope:
                 else:
                     global_functions[name][func.type.arg_types] = func
 
-        return Scope({}, values_2, global_functions, {}, global_templates)
+        return Scope({}, values_2, global_functions, {}, global_templates, {})
 
     def lookup_value(self, name: str) -> QueryValue:
         r = self.local_values.get(name, None)
@@ -166,12 +170,6 @@ class Scope:
         self, name: str, args: Iterable[Union[TemplateValue, TemplateType]]
     ) -> Dict[ArgTypes, FunctionDefinition]:
         args = list(args)
-        if name in self.local_functions or name in self.global_functions:
-            if args:
-                raise NameError(f"Function {name} exists, but has already been templated")
-            if name in self.local_functions:
-                return self.local_functions[name].defns
-            return self.global_functions[name]
 
         # this is insanely ill-defined. what's going on?
         # we are trying to identify all possible valid concrete template signatures that could be matched by this query
@@ -183,7 +181,7 @@ class Scope:
         targtype_options = [
             [arg]
             if isinstance(arg, (QueryValueType, FunctionType))
-            else [x.type for x in arg.defns.values()]
+            else [x.type.strip_template() for x in arg.defns.values()]
             if isinstance(arg, TemplatedFunction)
             else [arg.type]
             for arg in args
@@ -191,9 +189,19 @@ class Scope:
         for targtypes in product(targtype_options):
             if (name, targtypes) in self.global_templates:
                 result.update(self.global_templates[(name, targtypes)])
+            if (name, targtypes) in self.local_templates:
+                result.update(self.local_templates[(name, targtypes)])
         if result:
             return result
+        if name in self.local_functions or name in self.global_functions:
+            if args:
+                raise NameError(f"Function {name} exists, but has already been templated")
+            if name in self.local_functions:
+                return self.local_functions[name].defns
+            return self.global_functions[name]
         if any(availname == name for availname, _ in self.global_templates):
+            raise NameError(f"No overload available for {name} that matches the given template arguments")
+        if any(availname == name for availname, _ in self.local_templates):
             raise NameError(f"No overload available for {name} that matches the given template arguments")
         raise NameError(f"No function with name {name}")
 
@@ -246,8 +254,10 @@ class Executor(Visitor):
         for name, func in obj.func_defns.items():
             closed = close_function(newscope, func)
             if closed.template_names:
-                raise TypeError("You're not allowed to do that, I think?")
-            newscope.local_functions[name] = TemplatedFunction([], {closed.type.arg_types: closed}, name)
+                # uhhhhhhhh
+                newscope.local_templates[(name, closed.type.template_types)] = {closed.type.arg_types: closed}
+            else:
+                newscope.local_functions[name] = TemplatedFunction([], {closed.type.arg_types: closed}, name)
         for name, expr in obj.value_defns.items():
             newscope.local_values[name] = await newvis.visit(expr)
         return await newvis.visit(obj.value)

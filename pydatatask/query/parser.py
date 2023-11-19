@@ -112,7 +112,6 @@ lexer = lex.lex()
 # Define precedence and associativity
 precedence = (
     ("left", "SEMI"),
-    ("left", "DOT"),
     ("left", "OR"),
     ("left", "AND"),
     ("left", "PIPE"),
@@ -124,6 +123,7 @@ precedence = (
     ("left", "TIMES", "DIVIDE", "MODULUS"),
     ("right", "UMINUS", "NOT", "TILDE"),
     ("left", "LBRACKET", "RBRACKET"),
+    ("left", "DOT"),
 )
 
 
@@ -451,6 +451,9 @@ class FunctionType:
     template_types: TemplateTypes
     arg_types: ArgTypes
     return_type: QueryValueType
+
+    def strip_template(self) -> "FunctionType":
+        return FunctionType((), self.arg_types, self.return_type)
 
 
 @dataclass
