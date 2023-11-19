@@ -376,9 +376,10 @@ EOF
                 scoped_listing[scope].append((link_name, repo))
         for scope, scope_listing in scoped_listing.items():
             if len(scope_listing) > 1:
-                base_listing.append(scope_listing[0])
-            else:
                 base_listing.append((str(scope), repomodule.AggregateOrRepository(**dict(scope_listing))))
+            else:
+                base_listing.append(scope_listing[0])
+
         return repomodule.BlockingRepository(
             repomodule.AggregateAndRepository(**dict(base_listing)),
             repomodule.AggregateOrRepository(**self.inhibits_start),
