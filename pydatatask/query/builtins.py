@@ -446,6 +446,11 @@ async def repo_values(a: Repository) -> List:
     return sorted((await a.info_all()).values())
 
 
+@builtin("keys")
+async def repo_keys(a: Repository) -> List:
+    return [Key(x) async for x in a]
+
+
 @builtin("len")
 async def repo_len(a: Repository) -> int:
     result = 0
