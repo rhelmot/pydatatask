@@ -3,6 +3,7 @@
 from typing import Any, Dict
 from multiprocessing import Process, Queue
 import asyncio
+from collections import defaultdict
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -27,7 +28,9 @@ class TaskVisualizer:
             "pending": "gray",
         }
         self.nodes = {}
-        self.exit_codes = {}
+
+        # maps node -> job -> exit code
+        self.exit_codes = defaultdict(dict)
 
         self.app = dash.Dash("pydatatask")
         self.app.layout = self.generate_layout()
@@ -100,21 +103,20 @@ class TaskVisualizer:
     async def get_task_info(self, node):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
         repo_entry_counts: Dict[Any, int] = {}
-        exit_codes = self.exit_codes.get(node, {})
         for link in node.links:
             count = 0
             async for job in node.links[link].repo:
                 if link == "done":
-                    if job not in exit_codes[node]:
+                    if job not in self.exit_codes[node]:
                         exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
                         if exit_code is not None:
-                            exit_codes[node][job] = exit_code
+                            self.exit_codes[node][job] = exit_code
                     else:
-                        exit_code = exit_codes[node][job]
+                        exit_code = self.exit_codes[node][job]
                 count += 1
             repo_entry_counts[link] = count
 
-        return exit_codes, repo_entry_counts
+        return self.exit_codes[node], repo_entry_counts
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
