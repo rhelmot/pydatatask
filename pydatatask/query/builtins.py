@@ -405,6 +405,21 @@ async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitabl
     return a.map(ident, inner)
 
 
+@builtin("filter")
+async def filter_repo_vals(a: Repository, b: Callable[[object], Awaitable[bool]]) -> Repository:
+    if not isinstance(a, MetadataRepository):
+        raise TypeError("Only MetadataRepository can be used with filter() with key-data callback")
+
+    async def inner(k: str) -> bool:
+        v = await a.info(k)
+        return await b(v)
+
+    async def ident(x):
+        return x
+
+    return a.map(ident, inner)
+
+
 @builtin("any")
 async def repo_any(a: Repository) -> bool:
     async for _ in a:
@@ -443,7 +458,7 @@ async def sort_list_keyed(a: List, key: Callable[[object], Awaitable[int]]) -> L
 async def repo_values(a: Repository) -> List:
     if not isinstance(a, MetadataRepository):
         raise TypeError("Can only values MetadataRepositories")
-    return sorted((await a.info_all()).values())
+    return list((await a.info_all()).values())
 
 
 @builtin("keys")
