@@ -1,7 +1,7 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
 from typing import Any, Dict
-from multiprocessing import Process, Queue
+from multiprocessing import Pool, Queue
 import asyncio
 from collections import defaultdict
 
@@ -116,29 +116,31 @@ class TaskVisualizer:
                 count += 1
             repo_entry_counts[link] = count
 
-        return self.exit_codes[node], repo_entry_counts
+        return node, self.exit_codes[node], repo_entry_counts
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
         result = asyncio.run(coroutine(*args))
         queue.put(result)
 
-    def sync_function(self, node):
+    def sync_nodes(self, nodes):
         """Collects a bunch of stuff in a separate subprocess.
 
         This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
         """
         queue: Queue = Queue()
 
-        process = Process(target=self.run_async, args=(queue, self.get_task_info, node))
-        process.start()
-        process.join()
+        with Pool() as pool:
+            for node in nodes:
+                pool.apply_async(self.run_async, args=(queue, self.get_task_info, node))
 
-        exit_codes, result = queue.get()
+            pool.close()
+            pool.join()
 
-        self.nodes[node] = result
-        self.exit_codes[node] = exit_codes
-        return exit_codes, result
+        for node, exit_codes, result in queue.get():
+            self.nodes[node] = result
+            self.exit_codes[node] = exit_codes
+        return self.exit_codes, self.nodes
 
     def register_callbacks(self):
         """Registers the update callback for the graph."""
@@ -155,8 +157,10 @@ class TaskVisualizer:
             pos = self.left_to_right_layout(new_graph)
 
             annotations = []
+            node_exit_codes, node_results = self.sync_nodes(list(pos.keys()))
+
             for node, (x, y) in pos.items():
-                exit_codes, results = self.sync_function(node)
+                exit_codes, results = node_exit_codes[node], node_results[node]
                 any_failed = any(x != 0 for x in exit_codes.values())
                 if results is not None:
                     if results["live"] > 0:
