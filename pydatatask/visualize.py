@@ -100,14 +100,17 @@ class TaskVisualizer:
     async def get_task_info(self, node):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
         repo_entry_counts: Dict[Any, int] = {}
-        exit_codes = set()
+        exit_codes = self.exit_codes.get(node, {})
         for link in node.links:
             count = 0
             async for job in node.links[link].repo:
                 if link == "done":
-                    exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
-                    if exit_code is not None:
-                        exit_codes.add(exit_code)
+                    if job not in exit_codes[node]:
+                        exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
+                        if exit_code is not None:
+                            exit_codes[node][job] = exit_code
+                    else:
+                        exit_code = exit_codes[node][job]
                 count += 1
             repo_entry_counts[link] = count
 
@@ -152,6 +155,7 @@ class TaskVisualizer:
             annotations = []
             for node, (x, y) in pos.items():
                 exit_codes, results = self.sync_function(node)
+                any_failed = any(x != 0 for x in exit_codes.values())
                 if results is not None:
                     if results["live"] > 0:
                         node_color = self.status_colors["running"]
@@ -162,7 +166,7 @@ class TaskVisualizer:
                 else:
                     node_color = self.status_colors["pending"]
 
-                border_color = "red" if any(x != 0 for x in exit_codes) else "black"
+                border_color = "red" if any_failed else "black"
                 annotations.append(
                     {
                         "x": x,

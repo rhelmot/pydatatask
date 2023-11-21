@@ -38,7 +38,6 @@ import re
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
-import IPython
 
 from pydatatask.agent import build_agent_app
 from pydatatask.agent import cat_data as cat_data_inner
@@ -240,7 +239,9 @@ def shell(pipeline: Pipeline):
     pydatatask = __import__("pydatatask")
     assert pipeline
     assert pydatatask
-    IPython.embed(using="asyncio")
+
+    ipython = __import__("IPython")
+    ipython.embed(using="asyncio")
 
 
 async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
