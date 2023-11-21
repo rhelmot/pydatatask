@@ -53,7 +53,7 @@ class TaskVisualizer:
         graph_layout = dcc.Graph(
             id="network-graph", style={"width": "100%", "height": "90vh"}, config={"doubleClick": "reset+autosize"}
         )
-        interval_layout = dcc.Interval(id="interval-component", interval=5 * 1000, n_intervals=0)  # in milliseconds
+        interval_layout = dcc.Interval(id="interval-component", interval=10 * 1000, n_intervals=0)  # in milliseconds
         style = {"width": "100%", "height": "90vh", "margin": "0", "padding": "0"}
 
         return html.Div([graph_layout, interval_layout], style=style)
