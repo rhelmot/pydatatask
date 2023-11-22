@@ -10,7 +10,6 @@ import os
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import dash
-import matplotlib.pyplot as plt
 import networkx as nx
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
