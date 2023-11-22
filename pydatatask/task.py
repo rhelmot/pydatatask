@@ -1613,7 +1613,6 @@ class ContainerTask(Task):
         done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
-        network: str = 'host',
         privileged: Optional[bool] = False,
         tty: Optional[bool] = False,
     ):
@@ -1656,7 +1655,6 @@ class ContainerTask(Task):
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
         self.window = window
-        self.network = network
         self.privileged = privileged
         self.tty = tty
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
@@ -1741,7 +1739,6 @@ class ContainerTask(Task):
 
         mounts = self.mount_directives.pop(job, [])
 
-        network = self.network
         privileged = bool(self.privileged)
         tty = bool(self.tty)
         await self.manager.launch(
@@ -1753,7 +1750,6 @@ class ContainerTask(Task):
             self.environ,
             self.job_quota,
             mounts,
-            network,
             privileged,
             tty,
         )

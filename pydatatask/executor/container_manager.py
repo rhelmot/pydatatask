@@ -34,7 +34,6 @@ class AbstractContainerManager(ABC, Executor):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
-        network: str,
         privileged: bool,
         tty: bool,
     ):
@@ -123,7 +122,6 @@ class DockerContainerManager(AbstractContainerManager):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
-        network: str,
         privileged: bool,
         tty: bool,
     ):
@@ -140,7 +138,6 @@ class DockerContainerManager(AbstractContainerManager):
                 "Env": [f"{key}={val}" for key, val in environ.items()],
                 "HostConfig": {
                     "Binds": [f"{a}:{b}" for a, b in mounts],
-                    "NetworkMode": network,
                     "Privileged": privileged,
                 },
             },
@@ -225,7 +222,6 @@ class KubeContainerManager(AbstractContainerManager):
         environ: Dict[str, str],
         quota: Quota,
         mounts: List[Tuple[str, str]],
-        network: str,
         privileged: bool,
         tty: bool,
     ):

@@ -591,7 +591,6 @@ def build_task_picker(
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
-                "network": str,
                 "privileged": parse_bool,
                 "tty": parse_bool,
                 "long_running": parse_bool,
