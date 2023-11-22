@@ -1,16 +1,67 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
 from typing import Any, Dict
+from collections import defaultdict
 from multiprocessing import Process, Queue
 import asyncio
-from collections import defaultdict
+import json
+import os
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
 import dash
+import matplotlib.pyplot as plt
 import networkx as nx
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
+
+from .repository import FileRepositoryBase, FilesystemRepository
+
+_default_index = """<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+          details > summary {
+            cursor: pointer;
+          }
+          
+          details > summary::-webkit-details-marker {
+            display: none;
+          }
+          
+          details > summary:before {
+            content: "📁 ";
+          }
+          
+          details[open] > summary:before {
+            content: "📂 ";
+          }
+          
+          .file:before {
+            content: "📄 ";
+          }
+
+          .file {
+            margin: 0;
+          }
+        </style>
+    </head>
+    <body>
+        <!--[if IE]><script>
+        alert("Dash v2.7+ does not support Internet Explorer. Please use a newer browser.");
+        </script><![endif]-->
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>"""
 
 
 class TaskVisualizer:
@@ -32,19 +83,12 @@ class TaskVisualizer:
         # maps node -> job -> exit code
         self.exit_codes = defaultdict(dict)
 
-        self.app = dash.Dash("pydatatask")
+        self.app = dash.Dash("pydatatask", index_string=_default_index)
         self.app.layout = self.generate_layout()
         self.register_callbacks()
 
     def left_to_right_layout(self, G, ranksep=0.1):
-        """Returns node positions for the graph laid out from laid to right.
-
-        This layout is what ends up getting shown in the visualizer. This layout is fixed and the pixel positions
-        returned are what is used to draw the lines in the diagram.
-        """
-        A = nx.nx_agraph.to_agraph(G)
-        A.layout(prog="dot", args=f"-Grankdir=LR -Granksep={ranksep}")  # Left to Right layout
-        pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args=f"-Grankdir=LR -Granksep={ranksep}")
+        pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args=f"-Grankdir=LR -Gsplines=ortho")
         return pos
 
     @staticmethod
@@ -53,10 +97,21 @@ class TaskVisualizer:
         graph_layout = dcc.Graph(
             id="network-graph", style={"width": "100%", "height": "90vh"}, config={"doubleClick": "reset+autosize"}
         )
-        interval_layout = dcc.Interval(id="interval-component", interval=10 * 1000, n_intervals=0)  # in milliseconds
-        style = {"width": "100%", "height": "90vh", "margin": "0", "padding": "0"}
+        interval_layout = dcc.Interval(id="interval-component", interval=5 * 1000, n_intervals=0)  # in milliseconds
+        style = {"width": "100%", "height": "80vh", "margin": "0", "padding": "0"}
 
-        return html.Div([graph_layout, interval_layout], style=style)
+        file_divs = html.Div(
+            [
+                html.Div(id="node-info", style={"width": "auto", "display": "inline-block"}),
+                html.Div(
+                    id="file-contents",
+                    style={"width": "auto", "display": "inline-block", "marginLeft": "20px", "marginRight": "auto"},
+                ),
+            ],
+            style={"display": "flex", "justifyContent": "space-between"},
+        )
+
+        return html.Div([graph_layout, file_divs, interval_layout], style=style)
 
     def create_rectangle_shapes(self, pos, width=60, height=30):
         """Renders the pipeline node rectangles."""
@@ -140,20 +195,141 @@ class TaskVisualizer:
         self.exit_codes[node] = exit_codes
         return exit_codes, result
 
+    @staticmethod
+    def generate_file_tree_html(path):
+        file_tree = []
+        for root, dirs, files in os.walk(path):
+            short_path = os.path.basename(root) or "Root"
+            dir_layout = html.Details(
+                [
+                    html.Summary(short_path, style={"cursor": "pointer"}),
+                    html.Div(
+                        [
+                            html.P(html.A(file, href=f"file://{os.path.join(root, file)}"), className="file")
+                            for file in files
+                        ]
+                        + [TaskVisualizer.generate_file_tree_html(os.path.join(root, d)) for d in dirs],
+                        style={"padding-left": "20px"},
+                    ),
+                ],
+                open=False,
+            )
+            file_tree.append(dir_layout)
+            # Prevent further os.walk from entering this directory since we've already handled it
+            dirs.clear()
+            break  # Break after the first iteration to only include the top level
+        return html.Div(file_tree)
+
+    @staticmethod
+    def generate_file_tree_html(path):
+        items = []
+        for root, dirs, files in os.walk(path):
+            short_root = os.path.basename(root)
+            items.append(
+                html.Details(
+                    [
+                        html.Summary(short_root, style={"cursor": "pointer"}),
+                        html.Div(
+                            [
+                                html.P(
+                                    file,
+                                    id={"type": "file", "index": os.path.join(root, file)},
+                                    style={"padding-left": "20px", "cursor": "pointer"},
+                                    className="file",
+                                )
+                                for file in files
+                            ]
+                            + [TaskVisualizer.generate_file_tree_html(os.path.join(root, d)) for d in dirs],
+                            style={"padding-left": "20px"},
+                        ),
+                    ],
+                    open=False,
+                )
+            )
+            break  # Only include the top level to avoid recursion in this example
+        return html.Div(items)
+
     def register_callbacks(self):
-        """Registers the update callback for the graph."""
+        @self.app.callback(
+            Output("file-contents", "children"),
+            [Input({"type": "file", "index": dash.dependencies.ALL}, "n_clicks")],
+            [dash.dependencies.State({"type": "file", "index": dash.dependencies.ALL}, "id")],
+        )
+        def display_contents(n_clicks, id):
+            # Check which file was clicked
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return "Select a node to view its repos."
+            if not any(n_clicks):
+                return "Select a file to view its contents."
+
+            # Get the button that was clicked
+            button_id = ctx.triggered[0]["prop_id"].replace(".n_clicks", "")
+            # Safely parse the JSON string without using eval()
+            button_id_dict = json.loads(button_id.replace("'", '"'))
+            file_path = button_id_dict["index"]
+
+            # Read the file contents
+            try:
+                with open(file_path, "r") as file:
+                    contents = file.read()
+                return html.Div(
+                    [
+                        html.H1(file_path),
+                        html.Pre(
+                            contents,
+                            style={
+                                "white-space": "pre-wrap",
+                                "word-break": "break-word",
+                                "max-height": "500px",
+                                "overflow-y": "auto",
+                            },
+                        ),
+                    ]
+                )
+            except Exception as e:
+                return html.Div(
+                    [
+                        html.H1(file_path),
+                        html.Pre(
+                            f"Could not read file: {e}", style={"white-space": "pre-wrap", "word-break": "break-word"}
+                        ),
+                    ]
+                )
+
+        @self.app.callback(
+            Output("node-info", "children"),  # Assuming 'url' is the ID of a dcc.Location component
+            [Input("network-graph", "clickAnnotationData")],
+        )
+        def annotation_click(clickData):
+            if not clickData:
+                raise dash.exceptions.PreventUpdate
+            name = clickData["annotation"]["text"]
+            for node in self.pipeline.task_graph.nodes():
+                if node.name == name:
+                    break
+            else:
+                return ""
+            children = [
+                html.H1(node.name),
+            ]
+            for link in node.links:
+                if not isinstance(node.links[link].repo, (FileRepositoryBase, FilesystemRepository)):
+                    continue
+                children.append(html.P(f"{link}<{node.links[link].repo.__class__.__name__}>:"))
+                children.append(self.generate_file_tree_html(node.links[link].repo.basedir))
+
+            output = html.Div(children)
+
+            return output
 
         @self.app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
-        def update_graph(_):
-            """Updates the graph plot based on the current state of the pipeline.
-
-            Gray nodes -> not scheduled Green nodes -> running blue nodes -> done nodes with red outline -> at least one
-            task of this component failed
-            """
+        def update_graph(n):
             pl = self.pipeline
             new_graph = pl.task_graph
             pos = self.left_to_right_layout(new_graph)
 
+            fig = go.Figure()
             annotations = []
             for node, (x, y) in pos.items():
                 exit_codes, results = self.sync_function(node)
@@ -186,7 +362,6 @@ class TaskVisualizer:
                     }
                 )
 
-            fig = go.Figure()
             for edge in new_graph.edges():
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
@@ -210,13 +385,7 @@ class TaskVisualizer:
             node_x = [pos[node][0] for node in new_graph.nodes()]
             node_y = [pos[node][1] for node in new_graph.nodes()]
 
-            fig.add_trace(
-                go.Scatter(
-                    x=node_x,
-                    y=node_y,
-                    mode="markers",
-                )
-            )
+            fig.add_trace(go.Scatter(x=node_x, y=node_y, mode="text", visible=False))
 
             fig.update_layout(
                 title="pydatatask visualizer",
