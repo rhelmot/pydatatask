@@ -197,7 +197,10 @@ class MetadataRepository(Repository, ABC):
         raise NotImplementedError
 
     def map(
-        self, func: Callable, filt: Optional[Callable[[str], Awaitable[bool]]] = None, allow_deletes=False
+        self,
+        func: Callable[[str, Any], Awaitable[Any]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        allow_deletes=False,
     ) -> "MapRepository":
         """Generate a :class:`MapRepository` based on this repository and the given parameters."""
         return MapRepository(self, func, filt, allow_deletes=allow_deletes)
@@ -210,7 +213,7 @@ class MapRepository(MetadataRepository):
     def __init__(
         self,
         base: MetadataRepository,
-        func: Callable[[taskmodule.TemplateInfo], Awaitable[taskmodule.TemplateInfo]],
+        func: Callable[[str, Any], Awaitable[Any]],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
     ):
@@ -250,14 +253,14 @@ class MapRepository(MetadataRepository):
         raise TypeError("Not supported yet")
 
     async def info(self, job):
-        return await self.func(await self.base.info(job))
+        return await self.func(job, await self.base.info(job))
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.base.info_all()
         to_remove = []
         for k, v in result.items():
             if self.filter is None or await self.filter(k):
-                result[k] = await self.func(v)
+                result[k] = await self.func(k, v)
             else:
                 to_remove.append(k)
         for k in to_remove:

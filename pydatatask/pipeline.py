@@ -313,7 +313,7 @@ class Pipeline:
         if not isinstance(related, repomodule.MetadataRepository):
             raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
-        async def mapper(info):
+        async def mapper(job, info):
             return str(supergetattr_path(info, splitkey[1:]))
 
         mapped = related.map(mapper)

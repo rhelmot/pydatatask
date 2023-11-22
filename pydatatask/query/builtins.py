@@ -332,32 +332,32 @@ async def bool_le(a: bool, b: bool) -> bool:
 
 
 @builtin("__inv__")
-def int_inv(a: int) -> int:
+async def int_inv(a: int) -> int:
     return ~a
 
 
 @builtin("__not__")
-def bool_not(a: bool) -> bool:
+async def bool_not(a: bool) -> bool:
     return not a
 
 
 @builtin("__not__")
-def int_not(a: int) -> bool:
+async def int_not(a: int) -> bool:
     return not bool(a)
 
 
 @builtin("__not__")
-def str_not(a: str) -> bool:
+async def str_not(a: str) -> bool:
     return not a
 
 
 @builtin("__neg__")
-def int_neg(a: int) -> int:
+async def int_neg(a: int) -> int:
     return -a
 
 
 @builtin("__plus__")
-def int_plus(a: int) -> int:
+async def int_plus(a: int) -> int:
     return +a
 
 
@@ -365,7 +365,22 @@ def int_plus(a: int) -> int:
 async def map_values(a: Repository, b: Callable[[object], Awaitable[object]]) -> Repository:
     if not isinstance(a, MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
-    return a.map(b)
+
+    async def inner(key, obj):
+        return await b(obj)
+
+    return a.map(inner)
+
+
+@builtin("map")
+async def map_key_values(a: Repository, b: Callable[[Key, object], Awaitable[object]]) -> Repository:
+    if not isinstance(a, MetadataRepository):
+        raise TypeError("Only MetadataRepository can be used with map()")
+
+    async def inner(key, obj):
+        return await b(Key(key), obj)
+
+    return a.map(inner)
 
 
 @builtin("rekey")
@@ -399,7 +414,7 @@ async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitabl
         v = await a.info(k)
         return await b(Key(k), v)
 
-    async def ident(x):
+    async def ident(y, x):
         return x
 
     return a.map(ident, inner)
@@ -414,7 +429,7 @@ async def filter_repo_vals(a: Repository, b: Callable[[object], Awaitable[bool]]
         v = await a.info(k)
         return await b(v)
 
-    async def ident(x):
+    async def ident(y, x):
         return x
 
     return a.map(ident, inner)
