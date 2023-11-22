@@ -116,7 +116,7 @@ class Scope:
             global_functions=dict(self.global_functions),
             local_functions=dict(self.local_functions),
             global_templates=dict(self.global_templates),
-            local_templates=dict(self.local_templates),
+            local_templates=defaultdict(dict, self.local_templates),
         )
 
     def overlay(self, other: "Scope") -> "Scope":
@@ -144,7 +144,7 @@ class Scope:
                 else:
                     global_functions[name][func.type.arg_types] = func
 
-        return Scope({}, values_2, global_functions, {}, global_templates, {})
+        return Scope({}, values_2, global_functions, {}, global_templates, defaultdict(dict))
 
     def lookup_value(self, name: str) -> QueryValue:
         r = self.local_values.get(name, None)
@@ -251,14 +251,16 @@ class Executor(Visitor):
     async def visit_ScopedExpression(self, obj) -> QueryValue:
         newscope = self.scope.copy()
         newvis = Executor(newscope)
-        for name, func in obj.func_defns.items():
+        for name, func in obj.func_defns:
             closed = close_function(newscope, func)
             if closed.template_names:
-                # uhhhhhhhh
-                newscope.local_templates[(name, closed.type.template_types)] = {closed.type.arg_types: closed}
+                newscope.local_templates[(name, closed.type.template_types)][closed.type.arg_types] = closed
             else:
-                newscope.local_functions[name] = TemplatedFunction([], {closed.type.arg_types: closed}, name)
-        for name, expr in obj.value_defns.items():
+                if name in newscope.local_functions:
+                    newscope.local_functions[name].defns[closed.type.arg_types] = closed
+                else:
+                    newscope.local_functions[name] = TemplatedFunction([], {closed.type.arg_types: closed}, name)
+        for name, expr in obj.value_defns:
             newscope.local_values[name] = await newvis.visit(expr)
         return await newvis.visit(obj.value)
 

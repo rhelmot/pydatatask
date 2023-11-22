@@ -477,3 +477,14 @@ async def repo_len(a: Repository) -> int:
 @builtin("len")
 async def list_len(a: List) -> int:
     return len(a)
+
+
+@builtin("sum")
+async def list_sum(a: List) -> int:
+    result = 0
+    try:
+        for x in a:
+            result += x
+    except TypeError as e:
+        raise TypeError("Can only sum lists of ints") from e
+    return result

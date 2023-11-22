@@ -132,33 +132,36 @@ def p_expr_def(p):
     if isinstance(p[3], ScopedExpression):
         p[0] = p[3]
     else:
-        p[0] = ScopedExpression({}, {}, p[3])
-    p[0].value_defns.update(p[1][0])
-    p[0].func_defns.update(p[1][1])
+        p[0] = ScopedExpression([], [], p[3])
+    p[0].value_defns = p[1][0] + p[0].value_defns
+    p[0].func_defns = p[1][1] + p[0].func_defns
 
 
 def p_defn_fn_notemplate(p):
     "defn : KW_FN IDENTIFIER LPAREN typarams RPAREN ARROW tyexpr COLON expr"
-    p[0] = {}, {
-        p[2]: FunctionDefinition([], [x[0] for x in p[4]], FunctionType((), tuple(x[1] for x in p[4]), p[7]), p[9])
-    }
+    p[0] = [], [
+        (p[2], FunctionDefinition([], [x[0] for x in p[4]], FunctionType((), tuple(x[1] for x in p[4]), p[7]), p[9]))
+    ]
 
 
 def p_defn_fn_yestemplate(p):
     "defn : KW_FN IDENTIFIER LBRACKET typarams RBRACKET LPAREN typarams RPAREN ARROW tyexpr COLON expr"
-    p[0] = {}, {
-        p[2]: FunctionDefinition(
-            [x[0] for x in p[4]],
-            [x[0] for x in p[7]],
-            FunctionType(tuple(x[1] for x in p[4]), tuple(x[1] for x in p[7]), p[10]),
-            p[12],
+    p[0] = [], [
+        (
+            p[2],
+            FunctionDefinition(
+                [x[0] for x in p[4]],
+                [x[0] for x in p[7]],
+                FunctionType(tuple(x[1] for x in p[4]), tuple(x[1] for x in p[7]), p[10]),
+                p[12],
+            ),
         )
-    }
+    ]
 
 
 def p_defn_let(p):
     "defn : KW_LET IDENTIFIER ASSIGN expr"
-    p[0] = {p[2]: p[4]}, {}
+    p[0] = [(p[2], p[4])], []
 
 
 def p_typarams_empty(p):
@@ -466,10 +469,8 @@ class FunctionDefinition:
 
 @dataclass
 class ScopedExpression(Expression):
-    value_defns: Dict[str, Expression]
-    func_defns: Dict[
-        str, FunctionDefinition
-    ]  # this representation is inadequate! if we want to support overloads, we need it to be a list of definitions of some sort
+    value_defns: List[Tuple[str, Expression]]
+    func_defns: List[Tuple[str, FunctionDefinition]]
     value: Expression
 
 
