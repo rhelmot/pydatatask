@@ -38,6 +38,7 @@ dependencies = [
     "dash",
     "plotly",
     "numpy",
+    "matplotlib"
 ]
 
 [project.scripts]
