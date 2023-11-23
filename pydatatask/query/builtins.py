@@ -19,6 +19,7 @@ import inspect
 from pydatatask.query.executor import (
     FunctionDefinition,
     FunctionType,
+    Key,
     QueryValue,
     QueryValueType,
     ResolvedFunction,
@@ -36,10 +37,7 @@ from pydatatask.repository.base import (
 
 builtins: DefaultDict[str, List[FunctionDefinition]] = defaultdict(list)
 
-
-class Key(str):
-    pass
-
+incast = QueryValue.wrap
 
 IntoQueryValue: TypeAlias = Any
 
@@ -62,19 +60,7 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
 
         return inner
     assert ty == value.type or ty == QueryValueType.RepositoryData
-    if value.type == QueryValueType.String:
-        return value.string_value
-    if value.type == QueryValueType.Key:
-        return Key(value.key_value)
-    if value.type == QueryValueType.Int:
-        return value.int_value
-    if value.type == QueryValueType.Bool:
-        return value.bool_value
-    if value.type == QueryValueType.Repository:
-        return value.repo_value
-    if value.type == QueryValueType.List:
-        return value.list_value
-    return value.data_value
+    return value.unwrap()
 
 
 def checked_incast_template(ty: Union[QueryValueType, FunctionType], value) -> Union[FunctionDefinition, QueryValue]:
@@ -84,26 +70,10 @@ def checked_incast_template(ty: Union[QueryValueType, FunctionType], value) -> U
     return checked_incast(ty, value)
 
 
-def incast(value: IntoQueryValue) -> QueryValue:
-    if isinstance(value, Key):
-        return QueryValue(QueryValueType.Key, key_value=str(value))
-    if isinstance(value, str):
-        return QueryValue(QueryValueType.String, string_value=value)
-    if isinstance(value, bool):
-        return QueryValue(QueryValueType.Bool, bool_value=value)
-    if isinstance(value, int):
-        return QueryValue(QueryValueType.Int, int_value=value)
-    if isinstance(value, Repository):
-        return QueryValue(QueryValueType.Repository, repo_value=value)
-    if isinstance(value, list):
-        return QueryValue(QueryValueType.List, list_value=value)
-    return QueryValue(QueryValueType.RepositoryData, data_value=value)
-
-
 def checked_incast(ty: QueryValueType, value: IntoQueryValue) -> QueryValue:
     if ty == QueryValueType.RepositoryData:
         return QueryValue(ty, data_value=value)
-    result = incast(value)
+    result = QueryValue.wrap(value)
     assert result.type == ty
     return result
 
@@ -370,6 +340,14 @@ async def map_values(a: Repository, b: Callable[[object], Awaitable[object]]) ->
         return await b(obj)
 
     return a.map(inner)
+
+
+@builtin("map")
+async def map_list(a: List, b: Callable[[object], Awaitable[object]]) -> List:
+    if not isinstance(a, MetadataRepository):
+        raise TypeError("Only MetadataRepository can be used with map()")
+
+    return [await b(x) for x in a]
 
 
 @builtin("map")

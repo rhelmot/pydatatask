@@ -29,6 +29,10 @@ from pydatatask.query.visitor import Visitor
 from pydatatask.repository import Repository
 
 
+class Key(str):
+    pass
+
+
 @dataclass
 class QueryValue:
     type: QueryValueType
@@ -42,6 +46,37 @@ class QueryValue:
 
     def typecheck(self, ty: "TemplateType"):
         return isinstance(ty, QueryValueType) and self.type == ty
+
+    def unwrap(self):
+        if self.type == QueryValueType.String:
+            return self.string_value
+        if self.type == QueryValueType.Key:
+            return Key(self.key_value)
+        if self.type == QueryValueType.Int:
+            return self.int_value
+        if self.type == QueryValueType.Bool:
+            return self.bool_value
+        if self.type == QueryValueType.Repository:
+            return self.repo_value
+        if self.type == QueryValueType.List:
+            return self.list_value
+        return self.data_value
+
+    @staticmethod
+    def wrap(value) -> "QueryValue":
+        if isinstance(value, Key):
+            return QueryValue(QueryValueType.Key, key_value=str(value))
+        if isinstance(value, str):
+            return QueryValue(QueryValueType.String, string_value=value)
+        if isinstance(value, bool):
+            return QueryValue(QueryValueType.Bool, bool_value=value)
+        if isinstance(value, int):
+            return QueryValue(QueryValueType.Int, int_value=value)
+        if isinstance(value, Repository):
+            return QueryValue(QueryValueType.Repository, repo_value=value)
+        if isinstance(value, list):
+            return QueryValue(QueryValueType.List, list_value=value)
+        return QueryValue(QueryValueType.RepositoryData, data_value=value)
 
 
 TemplateValue: TypeAlias = Union[QueryValue, "TemplatedFunction"]
@@ -235,7 +270,7 @@ class Executor(Visitor):
         return QueryValue(QueryValueType.Key, key_value=obj.value)
 
     async def visit_ListLiteral(self, obj) -> QueryValue:
-        return QueryValue(QueryValueType.List, list_value=[await self.visit(expr) for expr in obj.values])
+        return QueryValue(QueryValueType.List, list_value=[(await self.visit(expr)).unwrap() for expr in obj.values])
 
     async def visit_FuncExpr(self, obj) -> TemplatedFunction:
         targs = [await self.visit(expr) for expr in obj.template_args]
