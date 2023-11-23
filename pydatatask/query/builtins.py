@@ -61,18 +61,18 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
             return checked_outcast(ty.return_type, await defn.impl(newscope), scope)
 
         return inner
-    assert ty == value.type
-    if ty == QueryValueType.String:
+    assert ty == value.type or ty == QueryValueType.RepositoryData
+    if value.type == QueryValueType.String:
         return value.string_value
-    if ty == QueryValueType.Key:
+    if value.type == QueryValueType.Key:
         return Key(value.key_value)
-    if ty == QueryValueType.Int:
+    if value.type == QueryValueType.Int:
         return value.int_value
-    if ty == QueryValueType.Bool:
+    if value.type == QueryValueType.Bool:
         return value.bool_value
-    if ty == QueryValueType.Repository:
+    if value.type == QueryValueType.Repository:
         return value.repo_value
-    if ty == QueryValueType.List:
+    if value.type == QueryValueType.List:
         return value.list_value
     return value.data_value
 
@@ -452,7 +452,7 @@ async def list_index(a: List, b: int) -> object:
 async def repo_index(a: Repository, b: Key) -> object:
     if not isinstance(a, MetadataRepository):
         raise TypeError("Can only index MetadataRepositories")
-    return a.info(str(b))
+    return await a.info(str(b))
 
 
 @builtin("sort")
@@ -502,4 +502,15 @@ async def list_sum(a: List) -> int:
             result += x
     except TypeError as e:
         raise TypeError("Can only sum lists of ints") from e
+    return result
+
+
+@builtin("concat")
+async def list_concat(a: List) -> List:
+    result = []
+    try:
+        for x in a:
+            result += x
+    except TypeError as e:
+        raise TypeError("Can only concat lists of lists") from e
     return result
