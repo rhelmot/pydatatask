@@ -908,3 +908,76 @@ class InProcessBlobRepository(BlobRepository):
 
     async def delete(self, job):
         del self.data[job]
+
+
+class _Unknown:
+    pass
+
+
+class CacheInProcessMetadataRepository(MetadataRepository):
+    """Caches all query results performed against a base repository.
+
+    Be careful to flush occasionally!
+    """
+
+    def __init__(self, base: MetadataRepository):
+        super().__init__()
+        self.base = base
+        self._unknown = _Unknown()
+        self._cache = {}
+        self._negative_cache = set()
+        self._complete_keys = False
+        self._complete_values = False
+
+    async def info(self, key: str):
+        # EXPERIMENT
+        # if not self._complete_values:
+        #    await self.info_all()
+        # END EXPERIMENT
+        result = self._cache.get(key, self._unknown)
+        if result is self._unknown:
+            result = await self.base.info(key)
+            self._cache[key] = result
+        return result
+
+    async def info_all(self):
+        if not self._complete_values:
+            self._cache = await self.base.info_all()
+            self._complete_values = True
+            self._complete_keys = True
+        # should we make it so that info raises an error on unknown keys?
+        return dict(self._cache)
+
+    async def contains(self, k: str) -> bool:
+        if k in self._cache:
+            return True
+        if k in self._negative_cache:
+            return False
+        result = await self.base.contains(k)
+        if result:
+            self._cache[k] = self._unknown
+        else:
+            self._negative_cache.add(k)
+        return result
+
+    async def unfiltered_iter(self):
+        if self._complete_keys:
+            for k in self._cache:
+                yield k
+        else:
+            async for k in self.base:
+                if k not in self._cache:
+                    self._cache[k] = self._unknown
+                yield k
+            self._complete_keys = True
+
+    async def delete(self, k):
+        self._cache.pop(k, None)
+        await self.base.delete(k)
+
+    async def dump(self, k, v):
+        await self.base.dump(k, v)
+        self._cache[k] = v
+
+    def __getstate__(self):
+        return (self.base,)

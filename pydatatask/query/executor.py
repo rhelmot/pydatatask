@@ -27,6 +27,10 @@ from pydatatask.query.parser import (
 )
 from pydatatask.query.visitor import Visitor
 from pydatatask.repository import Repository
+from pydatatask.repository.base import (
+    CacheInProcessMetadataRepository,
+    MetadataRepository,
+)
 
 
 class Key(str):
@@ -63,7 +67,7 @@ class QueryValue:
         return self.data_value
 
     @staticmethod
-    def wrap(value) -> "QueryValue":
+    def wrap(value, cache: bool = True) -> "QueryValue":
         if isinstance(value, Key):
             return QueryValue(QueryValueType.Key, key_value=str(value))
         if isinstance(value, str):
@@ -72,6 +76,8 @@ class QueryValue:
             return QueryValue(QueryValueType.Bool, bool_value=value)
         if isinstance(value, int):
             return QueryValue(QueryValueType.Int, int_value=value)
+        if cache and isinstance(value, MetadataRepository):
+            return QueryValue(QueryValueType.Repository, repo_value=CacheInProcessMetadataRepository(value))
         if isinstance(value, Repository):
             return QueryValue(QueryValueType.Repository, repo_value=value)
         if isinstance(value, list):
