@@ -10,7 +10,7 @@ from typing import (
     Callable,
 )
 from typing import Counter as TypedCounter
-from typing import Dict, Literal, Optional, Union, overload
+from typing import Dict, Iterator, Literal, Optional, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
@@ -215,6 +215,7 @@ class MapRepository(MetadataRepository):
         base: MetadataRepository,
         func: Callable[[str, Any], Awaitable[Any]],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterable[str]]] = None,
         allow_deletes=False,
     ):
         """
@@ -228,6 +229,7 @@ class MapRepository(MetadataRepository):
         self.base = base
         self.func = func
         self.filter = filt
+        self.filter_all = filter_all
         self.allow_deletes = allow_deletes
 
     def __getstate__(self):
@@ -257,14 +259,17 @@ class MapRepository(MetadataRepository):
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.base.info_all()
-        to_remove = []
-        for k, v in result.items():
-            if self.filter is None or await self.filter(k):
-                result[k] = await self.func(k, v)
-            else:
-                to_remove.append(k)
-        for k in to_remove:
-            result.pop(k)
+        if self.filter_all is not None:
+            result = {k: await self.func(k, result[k]) async for k in self.filter_all(result)}
+        else:
+            to_remove = []
+            for k, v in result.items():
+                if self.filter is None or await self.filter(k):
+                    result[k] = await self.func(k, v)
+                else:
+                    to_remove.append(k)
+            for k in to_remove:
+                result.pop(k)
         return result
 
     async def dump(self, job: str, data: Any):
@@ -278,7 +283,7 @@ class FilterRepository(Repository):
     def __init__(
         self,
         base: Repository,
-        filt: Optional[Callable[[str], Awaitable[bool]]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
     ):
         """
@@ -322,10 +327,20 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
     def __init__(
         self,
         base: MetadataRepository,
-        filt: Optional[Callable[[str], Awaitable[bool]]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterator[str]]] = None,
         allow_deletes=False,
     ):
-        super().__init__(base, filt, allow_deletes=allow_deletes)
+        if filt is None:
+            assert filter_all is not None
+
+            async def f(k):
+                return (await anext(filter_all({k: await self.info(k)}), None)) is not None
+
+            super().__init__(base, f, allow_deletes=allow_deletes)
+        else:
+            super().__init__(base, filt, allow_deletes=allow_deletes)
+        self.filter_all = filter_all
 
     base: MetadataRepository
 
@@ -334,12 +349,15 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.base.info_all()
-        to_remove = []
-        for k in result:
-            if self.filter is not None and await self.filter(k):
-                to_remove.append(k)
-        for k in to_remove:
-            result.pop(k)
+        if self.filter_all is not None:
+            result = {k: result[k] async for k in self.filter_all(result)}
+        else:
+            to_remove = []
+            for k in result:
+                if self.filter is not None and await self.filter(k):
+                    to_remove.append(k)
+            for k in to_remove:
+                result.pop(k)
         return result
 
     async def dump(self, job: str, data: Any):

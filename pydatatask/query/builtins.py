@@ -1,8 +1,11 @@
 from typing import (
     Any,
+    AsyncIterator,
     Awaitable,
     Callable,
     DefaultDict,
+    Dict,
+    Iterator,
     List,
     Optional,
     TypeAlias,
@@ -374,12 +377,20 @@ async def rekey(a: Repository, b: Callable[[Key], Awaitable[Key]]) -> Repository
 
 @builtin("filter")
 async def filter_repo_keys(a: Repository, b: Callable[[Key], Awaitable[bool]]) -> Repository:
-    async def inner(k: str) -> bool:
-        return await b(Key(k))
 
     if isinstance(a, MetadataRepository):
-        return FilterMetadataRepository(a, inner)
+
+        async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
+            for k in d.keys():
+                if await b(Key(k)):
+                    yield k
+
+        return FilterMetadataRepository(a, filter_all=inner_all)
     else:
+
+        async def inner(k: str) -> bool:
+            return await b(Key(k))
+
         return FilterRepository(a, inner)
 
 
@@ -388,29 +399,25 @@ async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitabl
     if not isinstance(a, MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with filter() with key-data callback")
 
-    async def inner(k: str) -> bool:
-        v = await a.info(k)
-        return await b(Key(k), v)
+    async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
+        for k, v in d.items():
+            if await b(Key(k), v):
+                yield k
 
-    async def ident(y, x):
-        return x
-
-    return a.map(ident, inner)
+    return FilterMetadataRepository(a, filter_all=inner_all)
 
 
 @builtin("filter")
 async def filter_repo_vals(a: Repository, b: Callable[[object], Awaitable[bool]]) -> Repository:
     if not isinstance(a, MetadataRepository):
-        raise TypeError("Only MetadataRepository can be used with filter() with key-data callback")
+        raise TypeError("Only MetadataRepository can be used with filter() with data callback")
 
-    async def inner(k: str) -> bool:
-        v = await a.info(k)
-        return await b(v)
+    async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
+        for k, v in d.items():
+            if await b(v):
+                yield k
 
-    async def ident(y, x):
-        return x
-
-    return a.map(ident, inner)
+    return FilterMetadataRepository(a, filter_all=inner_all)
 
 
 @builtin("any")
