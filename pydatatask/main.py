@@ -26,6 +26,7 @@ The help screen should look something like this:
 """
 
 from __future__ import annotations
+from collections import defaultdict
 
 from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 from pathlib import Path
@@ -110,6 +111,20 @@ def main(
         dest="all_repos",
         action="store_true",
         help="Show internal repositories",
+    )
+    parser_status.add_argument(
+        '--json',
+        '-j',
+        dest='json',
+        action='store_true',
+        help='Show status as JSON',
+    )
+    parser_status.add_argument(
+        '--output',
+        '-o',
+        dest='output',
+        type=Path,
+        help='Output path for JSON',
     )
     parser_status.set_defaults(func=print_status)
 
@@ -320,7 +335,7 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
             yield link
 
 
-async def print_status(pipeline: Pipeline, all_repos: bool):
+async def print_status(pipeline: Pipeline, all_repos: bool, json: bool, output: Optional[Path]):
     async def inner(repo: repomodule.Repository):
         the_sum = 0
         async for _ in repo:
@@ -331,15 +346,33 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
     repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
+
+    result = defaultdict(dict)
     for task in pipeline.tasks.values():
-        print(task.name)
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
             if link in link_list:
-                print(f"{task.name}.{link_name} {repo_sizes[link.repo]}")
-        print()
+                result[task.name][link_name] = repo_sizes[link.repo]
+
+    msg = ''
+    if not json:
+        for task_name, links in result.items():
+            msg += f'{task_name}\n'
+            for link_name, sizes in links.items():
+                msg += f"  {task_name}.{link_name} {sizes}\n"
+            msg += '\n'
+    else:
+        import json
+        msg = json.dumps(result, indent=2)
+
+    if output is None:
+        print(msg)
+    else:
+        with open(output, 'w') as f:
+            f.write(msg)
+
 
 
 async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
