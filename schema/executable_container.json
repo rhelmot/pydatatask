@@ -6,21 +6,33 @@
     "args": {
       "type": "object",
       "properties": {
+        "template": {
+          "type": "string"
+        },
         "image": {
           "type": "string"
         },
-        "template": {
-          "type": "string"
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "job_quota": {
+          "$ref": "job_quota.json"
         },
         "logs": {
           "type": "string"
         },
-        "job_quota": {
-          "$ref": "job_quota.json"
+        "privileged": {
+          "type": "boolean"
+        },
+        "tty": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
-      "required": ["template"]
+      "required": ["image", "template"]
     }
   },
   "additionalProperties": false,

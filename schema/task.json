@@ -9,7 +9,6 @@
         "$ref": "task_annotations.json"
       },
 
-      "template": { "type": "string" },
       "ready": { "type": "string" },
       "done": { "type": "string" },
       "window": { "$ref": "time_interval.json" },
@@ -30,10 +29,11 @@
       "executable": {
         "oneOf": [
           {"$ref": "executable_process.json"},
-          {"$ref": "executable_container.json"}
+          {"$ref": "executable_container.json"},
+          {"$ref": "executable_kubernetes.json"}
         ]
       }
     },
-    "required": ["template", "executable", "links", "done"]
+    "required": ["executable", "links", "done"]
   }
 }

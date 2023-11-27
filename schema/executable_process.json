@@ -6,6 +6,8 @@
     "args": {
       "type": "object",
       "properties": {
+        "template": { "type": "string" },
+        "pids": { "type": "string" },
         "stdin": { "type": "string" },
         "stdout": { "type": "string" },
         "stderr": { "type": "string" },
