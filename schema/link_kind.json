@@ -6,11 +6,11 @@
     "InputFilepath",
     "InputMetadata",
     "StreamingInputFilepath",
-    "StreamingInputMetadata",
+
+    "OutputId",
     "OutputFilepath",
-    "OutputMetadata",
     "StreamingOutputFilepath",
-    "StreamingOutputMetadata",
+
     null
   ]
 }

@@ -2,17 +2,15 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
-    "repo": {
+    "cpu": {
       "type": "string"
     },
-    "kind": { "$ref": "link_kind.json" },
-    "key": {
+    "mem": {
       "type": "string"
     },
-    "multi_meta": {
+    "launches": {
       "type": "string"
     }
   },
-  "additionalProperties": false,
-  "required": ["repo", "kind"]
+  "additionalProperties": false
 }

@@ -4,25 +4,36 @@
   "additionalProperties": {
     "type": "object",
     "properties": {
+
       "annotations": {
         "$ref": "task_annotations.json"
       },
-      "long_running": {
-        "type": "boolean"
-      },
-      "done": {
-        "type": "string"
+
+      "template": { "type": "string" },
+      "ready": { "type": "string" },
+      "done": { "type": "string" },
+      "window": { "$ref": "time_interval.json" },
+      "timeout": { "$ref": "time_interval.json" },
+      "environ": {
+        "type": "object",
+        "patternProperties": {
+          "^[a-zA-Z_][a-zA-Z0-9_]*$": { "type": "string" }
+        }
       },
       "links": {
         "type": "object",
         "additionalProperties": { "$ref": "link.json" }
       },
+
+      "long_running": { "type": "boolean" },
+
       "executable": {
         "oneOf": [
           {"$ref": "executable_process.json"},
           {"$ref": "executable_container.json"}
         ]
       }
-    }
+    },
+    "required": ["template", "executable", "links", "done"]
   }
 }

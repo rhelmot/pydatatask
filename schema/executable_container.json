@@ -15,8 +15,8 @@
         "logs": {
           "type": "string"
         },
-        "timeout": {
-          "$ref": "timeout.json"
+        "job_quota": {
+          "$ref": "job_quota.json"
         }
       },
       "additionalProperties": false,

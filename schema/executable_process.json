@@ -6,9 +6,12 @@
     "args": {
       "type": "object",
       "properties": {
-        "template": { },
+        "stdin": { "type": "string" },
         "stdout": { "type": "string" },
-        "stderr": { "type": "string" }
+        "stderr": { "type": "string" },
+        "job_quota": {
+          "$ref": "job_quota.json"
+        }
       },
       "required": ["template"],
       "additionalProperties": false

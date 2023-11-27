@@ -127,7 +127,6 @@ class LinkKind(Enum):
     InputFilepath = auto()
     OutputRepo = auto()
     OutputId = auto()
-    OutputYamlMetadataFilepath = auto()
     OutputFilepath = auto()
     StreamingOutputFilepath = auto()
     StreamingInputFilepath = auto()
@@ -142,7 +141,6 @@ INPUT_KINDS: Set[LinkKind] = {
 }
 OUTPUT_KINDS: Set[LinkKind] = {
     LinkKind.OutputId,
-    LinkKind.OutputYamlMetadataFilepath,
     LinkKind.OutputFilepath,
     LinkKind.OutputRepo,
     LinkKind.StreamingOutputFilepath,
@@ -750,7 +748,7 @@ class KubeTask(Task):
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         long_running: bool = False,
-        env: Optional[Dict[str, Any]] = None,
+        environ: Optional[Dict[str, Any]] = None,
         ready: Optional["repomodule.Repository"] = None,
     ):
         """
@@ -781,7 +779,7 @@ class KubeTask(Task):
         self._podman: Optional["execmodule.PodManager"] = None
         self.logs = logs
         self.done = done
-        self.env = env if env is not None else {}
+        self.environ = environ if environ is not None else {}
         self.warned = False
         self.window = window
 
@@ -847,7 +845,7 @@ class KubeTask(Task):
     async def launch(self, job):
         env_input = dict(vars(self))
         env_input.update(self.links)
-        env_input.update(self.env)
+        env_input.update(self.environ)
         env, preamble, epilogue = await self.build_env(env_input, job)
         if preamble or epilogue:
             raise Exception("TODO: preamble and epilogue and error handling for KubeTask")
@@ -1505,7 +1503,7 @@ class KubeFunctionTask(KubeTask):
         logs: Optional["repomodule.BlobRepository"] = None,
         kube_done: Optional["repomodule.MetadataRepository"] = None,
         func_done: Optional["repomodule.MetadataRepository"] = None,
-        env: Optional[Dict[str, Any]] = None,
+        environ: Optional[Dict[str, Any]] = None,
         func: Optional[Callable] = None,
     ):
         """
@@ -1531,7 +1529,7 @@ class KubeFunctionTask(KubeTask):
         It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
         one link is present with ``inhibits_start``.
         """
-        super().__init__(name, executor, quota_manager, template, logs, kube_done, env=env)
+        super().__init__(name, executor, quota_manager, template, logs, kube_done, environ=environ)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
