@@ -7,6 +7,7 @@
       "type": "object",
       "properties": {
         "template": { "type": "string" },
+        "environ": { "$ref": "task_environment.json" },
         "pids": { "type": "string" },
         "stdin": { "type": "string" },
         "stdout": { "type": "string" },

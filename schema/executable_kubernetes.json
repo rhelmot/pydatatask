@@ -9,6 +9,7 @@
         "template": {
           "type": "string"
         },
+        "environ": { "$ref": "task_environment.json" },
         "logs": {
           "type": "string"
         }
