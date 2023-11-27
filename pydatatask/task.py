@@ -95,11 +95,11 @@ class TemplateInfo:
 idgen = sonyflake.SonyFlake()
 
 
-async def render_template(template, env: Dict[str, Any]):
+async def render_template(template, template_env: Dict[str, Any]):
     """Given a template and an environment, use jinja2 to parameterize the template with the environment.
 
     :param template: A template string, or a path to a local template file.
-    :param env: A mapping from environment key names to values.
+    :param template_env: A mapping from environment key names to values.
     :return: The rendered template, as a string.
     """
     j = jinja2.Environment(
@@ -115,7 +115,7 @@ async def render_template(template, env: Dict[str, Any]):
     else:
         template_str = template
     templating = j.from_string(template_str)
-    return await templating.render_async(**env)
+    return await templating.render_async(**template_env)
 
 
 class LinkKind(Enum):
@@ -621,7 +621,7 @@ EOF
         """
         raise NotImplementedError
 
-    async def build_env(self, env_src: Dict[str, Any], orig_job: str) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
+    async def build_template_env(self, env_src: Dict[str, Any], orig_job: str) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         """Transform an environment source into an environment according to Links.
 
         Returns the environment, a list of preambles, and a list of epilogues. These may be of any type depending on the
@@ -693,7 +693,7 @@ EOF
     def instrument_arg(self, job: str, arg: TemplateInfo, kind: LinkKind) -> TemplateInfo:
         """Do any task-specific processing on a template argument.
 
-        This is called during build_env on each link, after Repository.template() runs on it.
+        This is called during build_template_env on each link, after Repository.template() runs on it.
         """
         return arg
 
@@ -748,7 +748,7 @@ class KubeTask(Task):
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         long_running: bool = False,
-        environ: Optional[Dict[str, Any]] = None,
+        template_env: Optional[Dict[str, Any]] = None,
         ready: Optional["repomodule.Repository"] = None,
     ):
         """
@@ -765,7 +765,7 @@ class KubeTask(Task):
             launched too many pods too quickly.
         :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it
             will be timed out and stopped. The method `handle_timeout` will be called in-process.
-        :param env:     Optional: Additional keys to add to the template environment.
+        :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
 
         It is highly recommended to provide one or more of ``done`` or ``logs`` so that at least one link is present
@@ -779,7 +779,7 @@ class KubeTask(Task):
         self._podman: Optional["execmodule.PodManager"] = None
         self.logs = logs
         self.done = done
-        self.environ = environ if environ is not None else {}
+        self.template_env = template_env if template_env is not None else {}
         self.warned = False
         self.window = window
 
@@ -845,15 +845,15 @@ class KubeTask(Task):
     async def launch(self, job):
         env_input = dict(vars(self))
         env_input.update(self.links)
-        env_input.update(self.environ)
-        env, preamble, epilogue = await self.build_env(env_input, job)
+        env_input.update(self.template_env)
+        template_env, preamble, epilogue = await self.build_template_env(env_input, job)
         if preamble or epilogue:
             raise Exception("TODO: preamble and epilogue and error handling for KubeTask")
-        env["job"] = job
-        env["task"] = self.name
-        env["argv0"] = os.path.basename(sys.argv[0])
-        manifest = yaml.safe_load(await render_template(self.template, env))
-        for item in env.values():
+        template_env["job"] = job
+        template_env["task"] = self.name
+        template_env["argv0"] = os.path.basename(sys.argv[0])
+        manifest = yaml.safe_load(await render_template(self.template, template_env))
+        for item in template_env.values():
             if asyncio.iscoroutine(item):
                 item.close()
 
@@ -1142,10 +1142,10 @@ class ProcessTask(Task):
             env_src: Dict[str, Any] = dict(self.links)
             env_src["job"] = job
             env_src["task"] = self.name
-            env, preamble, epilogue = await self.build_env(env_src, job)
+            template_env, preamble, epilogue = await self.build_template_env(env_src, job)
             exe_path = self.basedir / job / "exe"
-            exe_txt = await render_template(self.template, env)
-            for item in env.values():
+            exe_txt = await render_template(self.template, template_env)
+            for item in template_env.values():
                 if asyncio.iscoroutine(item):
                     item.close()
             async with await self.manager.open(exe_path, "w") as fp:
@@ -1290,7 +1290,7 @@ class InProcessSyncTask(Task):
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching in-process %s:%s...", self.name, job)
         args: Dict[str, Any] = dict(self.links)
-        args, preamble, epilogue = await self.build_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(args, job)
         try:
             for p in preamble:
                 p(**args)
@@ -1420,7 +1420,7 @@ class ExecutorTask(Task):
     async def launch(self, job):
         l.info("Launching %s:%s with %s...", self.name, job, self.executor)
         args = dict(self.links)
-        args, preamble, epilogue = await self.build_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(args, job)
         start_time = datetime.now(tz=timezone.utc)
         running_job = self.executor.submit(self._timestamped_func, self.func, preamble, args, epilogue)
         if self.synchronous:
@@ -1503,7 +1503,7 @@ class KubeFunctionTask(KubeTask):
         logs: Optional["repomodule.BlobRepository"] = None,
         kube_done: Optional["repomodule.MetadataRepository"] = None,
         func_done: Optional["repomodule.MetadataRepository"] = None,
-        environ: Optional[Dict[str, Any]] = None,
+        template_env: Optional[Dict[str, Any]] = None,
         func: Optional[Callable] = None,
     ):
         """
@@ -1521,7 +1521,7 @@ class KubeFunctionTask(KubeTask):
         :param func_done: Optional: A MetadataRepository in which to dump some information about the function's lifetime
                           and termination on completion. Linked as "func_done" with
                           ``inhibits_start, required_for_output, is_status``.
-        :param env:     Optional: Additional keys to add to the template environment.
+        :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
@@ -1529,7 +1529,7 @@ class KubeFunctionTask(KubeTask):
         It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
         one link is present with ``inhibits_start``.
         """
-        super().__init__(name, executor, quota_manager, template, logs, kube_done, environ=environ)
+        super().__init__(name, executor, quota_manager, template, logs, kube_done, template_env=template_env)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -1569,7 +1569,7 @@ class KubeFunctionTask(KubeTask):
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching --sync %s:%s...", self.name, job)
         args = dict(self.links)
-        args, preamble, epilogue = await self.build_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(args, job)
         try:
             for p in preamble:
                 await p(**args)
@@ -1714,8 +1714,8 @@ class ContainerTask(Task):
         env_src: Dict[str, Any] = dict(self.links)
         env_src["job"] = job
         env_src["task"] = self.name
-        env, preamble, epilogue = await self.build_env(env_src, job)
-        exe_txt = await render_template(self.template, env)
+        template_env, preamble, epilogue = await self.build_template_env(env_src, job)
+        exe_txt = await render_template(self.template, template_env)
         exe_txt = "\n".join(
             [
                 "set -e",
@@ -1731,7 +1731,7 @@ class ContainerTask(Task):
                 "exit $RETCODE",
             ]
         )
-        for item in env.values():
+        for item in template_env.values():
             if asyncio.iscoroutine(item):
                 item.close()
 
