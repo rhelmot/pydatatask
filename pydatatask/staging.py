@@ -98,11 +98,14 @@ class LinkSpec:
 @_dataclass_serial
 class TaskSpec:
     executable: Dispatcher
+    annotations: Dict[str, Any] = field(default_factory=dict)
     executor: Optional[str] = None
     done: Optional[str] = None
-    links: Dict[str, LinkSpec] = field(default_factory=dict)
-    annotations: Dict[str, Any] = field(default_factory=dict)
+    ready: Optional[str] = None
+    window: Dict[str, str] = field(default_factory=dict)
+    timeout: Dict[str, str] = field(default_factory=dict)
     long_running: bool = False
+    links: Dict[str, LinkSpec] = field(default_factory=dict)
 
 
 @_dataclass_serial
