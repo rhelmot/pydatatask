@@ -103,6 +103,7 @@ async def render_template(template, template_env: Dict[str, Any]):
     :return: The rendered template, as a string.
     """
     j = jinja2.Environment(
+        undefined=jinja2.StrictUndefined,
         enable_async=True,
         keep_trailing_newline=True,
     )
