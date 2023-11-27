@@ -92,7 +92,15 @@ class LinkSpec:
     repo: str
     kind: str
     key: Optional[str] = None
-    multi_meta: Optional[str] = None
+    cokeyed: Dict[str, str] = field(default_factory=dict)
+
+
+@_dataclass_serial
+class QuerySpec:
+    result_type: str
+    query: str
+    parameters: Dict[str, str] = field(default_factory=dict)
+    getters: Dict[str, str] = field(default_factory=dict)
 
 
 @_dataclass_serial
@@ -101,6 +109,7 @@ class TaskSpec:
     executor: Optional[str] = None
     done: Optional[str] = None
     links: Dict[str, LinkSpec] = field(default_factory=dict)
+    queries: Dict[str, QuerySpec] = field(default_factory=dict)
     annotations: Dict[str, Any] = field(default_factory=dict)
     long_running: bool = False
 

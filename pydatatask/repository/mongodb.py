@@ -44,7 +44,7 @@ class MongoMetadataRepository(MetadataRepository):
         await self.collection.delete_one({"_id": job})
 
     async def unfiltered_iter(self):
-        async for x in self.collection.find({}, projection=[]):
+        async for x in self.collection.find({}, projection=["_id"]):
             yield x["_id"]
 
     @job_getter

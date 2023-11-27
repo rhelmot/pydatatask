@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import (
     Any,
     AsyncIterator,
@@ -5,7 +7,6 @@ from typing import (
     Callable,
     DefaultDict,
     Dict,
-    Iterator,
     List,
     Optional,
     TypeAlias,
@@ -19,6 +20,7 @@ from collections.abc import Awaitable as ABCAwaitable
 from collections.abc import Callable as ABCCallable
 import inspect
 
+from pydatatask import repository as repomodule
 from pydatatask.query.executor import (
     FunctionDefinition,
     FunctionType,
@@ -27,15 +29,6 @@ from pydatatask.query.executor import (
     QueryValueType,
     ResolvedFunction,
     Scope,
-)
-from pydatatask.repository.base import (
-    FilterMetadataRepository,
-    FilterRepository,
-    FunctionCallMetadataRepository,
-    MetadataRepository,
-    RelatedItemMetadataRepository,
-    RelatedItemRepository,
-    Repository,
 )
 
 builtins: DefaultDict[str, List[FunctionDefinition]] = defaultdict(list)
@@ -54,7 +47,9 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
             assert isinstance(ty, FunctionType)
             if len(args) != len(ty.arg_types):
                 raise TypeError(f"Bad number of args: Expected {len(ty.arg_types)}, got {len(args)}")
-            inargs = [checked_incast(argty, arg) for arg, argty in zip(args, ty.arg_types)]
+            inargs = [
+                checked_incast(argty, arg, f"Argument {arg} to {value}") for arg, argty in zip(args, ty.arg_types)
+            ]
             (
                 newscope,
                 defn,
@@ -62,22 +57,26 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
             return checked_outcast(ty.return_type, await defn.impl(newscope), scope)
 
         return inner
-    assert ty == value.type or ty == QueryValueType.RepositoryData
+    if not (ty == value.type or ty == QueryValueType.RepositoryData):
+        raise TypeError(f"Outcast failed: expected a {ty}, got {value}")
     return value.unwrap()
 
 
-def checked_incast_template(ty: Union[QueryValueType, FunctionType], value) -> Union[FunctionDefinition, QueryValue]:
+def checked_incast_template(
+    ty: Union[QueryValueType, FunctionType], value, reason: str
+) -> Union[FunctionDefinition, QueryValue]:
     if isinstance(ty, FunctionType):
         assert callable(ty)
         return wrap_function(value)
-    return checked_incast(ty, value)
+    return checked_incast(ty, value, reason)
 
 
-def checked_incast(ty: QueryValueType, value: IntoQueryValue) -> QueryValue:
+def checked_incast(ty: QueryValueType, value: IntoQueryValue, reason: str) -> QueryValue:
     if ty == QueryValueType.RepositoryData:
         return QueryValue(ty, data_value=value)
     result = QueryValue.wrap(value)
-    assert result.type == ty
+    if result.type != ty:
+        raise TypeError(f"Incast failed: expected a {ty}, got {result} ({reason})")
     return result
 
 
@@ -98,7 +97,7 @@ def translate_pytype(ty) -> QueryValueType:
         return QueryValueType.String
     if ty is bool:
         return QueryValueType.Bool
-    if isinstance(ty, type) and issubclass(ty, Repository):
+    if isinstance(ty, type) and issubclass(ty, repomodule.Repository):
         return QueryValueType.Repository
     if get_origin(ty) is list:
         return QueryValueType.List
@@ -134,7 +133,7 @@ def wrap_function(f: Callable[..., Awaitable[Any]], template_args: Optional[List
             )
             for ty, a in zip(all_args_types, all_args)
         ]
-        return checked_incast(ty.return_type, await f(*stuff))
+        return checked_incast(ty.return_type, await f(*stuff), f"Return value of {f.__name__}")
 
     obj = FunctionDefinition(template_nargs, args, ty, inner)
     return obj
@@ -186,6 +185,11 @@ async def str_to_int(a: str) -> int:
 
 @builtin("str")
 async def int_to_str(a: int) -> str:
+    return str(a)
+
+
+@builtin("str")
+async def key_to_str(a: Key) -> str:
     return str(a)
 
 
@@ -335,8 +339,8 @@ async def int_plus(a: int) -> int:
 
 
 @builtin("map")
-async def map_values(a: Repository, b: Callable[[object], Awaitable[object]]) -> Repository:
-    if not isinstance(a, MetadataRepository):
+async def map_values(a: repomodule.Repository, b: Callable[[object], Awaitable[object]]) -> repomodule.Repository:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
 
     async def inner(key, obj):
@@ -347,15 +351,17 @@ async def map_values(a: Repository, b: Callable[[object], Awaitable[object]]) ->
 
 @builtin("map")
 async def map_list(a: List, b: Callable[[object], Awaitable[object]]) -> List:
-    if not isinstance(a, MetadataRepository):
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
 
     return [await b(x) for x in a]
 
 
 @builtin("map")
-async def map_key_values(a: Repository, b: Callable[[Key, object], Awaitable[object]]) -> Repository:
-    if not isinstance(a, MetadataRepository):
+async def map_key_values(
+    a: repomodule.Repository, b: Callable[[Key, object], Awaitable[object]]
+) -> repomodule.Repository:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
 
     async def inner(key, obj):
@@ -365,38 +371,40 @@ async def map_key_values(a: Repository, b: Callable[[Key, object], Awaitable[obj
 
 
 @builtin("rekey")
-async def rekey(a: Repository, b: Callable[[Key], Awaitable[Key]]) -> Repository:
+async def rekey(a: repomodule.Repository, b: Callable[[Key], Awaitable[Key]]) -> repomodule.Repository:
     async def inner(k: str) -> str:
         return str(await b(Key(k)))
 
-    if isinstance(a, MetadataRepository):
-        return RelatedItemMetadataRepository(a, FunctionCallMetadataRepository(inner, a))
+    if isinstance(a, repomodule.MetadataRepository):
+        return repomodule.RelatedItemMetadataRepository(a, repomodule.FunctionCallMetadataRepository(inner, a))
     else:
-        return RelatedItemRepository(a, FunctionCallMetadataRepository(inner, a))
+        return repomodule.RelatedItemRepository(a, repomodule.FunctionCallMetadataRepository(inner, a))
 
 
 @builtin("filter")
-async def filter_repo_keys(a: Repository, b: Callable[[Key], Awaitable[bool]]) -> Repository:
+async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitable[bool]]) -> repomodule.Repository:
 
-    if isinstance(a, MetadataRepository):
+    if isinstance(a, repomodule.MetadataRepository):
 
         async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
             for k in d.keys():
                 if await b(Key(k)):
                     yield k
 
-        return FilterMetadataRepository(a, filter_all=inner_all)
+        return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
     else:
 
         async def inner(k: str) -> bool:
             return await b(Key(k))
 
-        return FilterRepository(a, inner)
+        return repomodule.FilterRepository(a, inner)
 
 
 @builtin("filter")
-async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitable[bool]]) -> Repository:
-    if not isinstance(a, MetadataRepository):
+async def filter_repo_keyvals(
+    a: repomodule.Repository, b: Callable[[Key, object], Awaitable[bool]]
+) -> repomodule.Repository:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with filter() with key-data callback")
 
     async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
@@ -404,12 +412,12 @@ async def filter_repo_keyvals(a: Repository, b: Callable[[Key, object], Awaitabl
             if await b(Key(k), v):
                 yield k
 
-    return FilterMetadataRepository(a, filter_all=inner_all)
+    return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
 
 
 @builtin("filter")
-async def filter_repo_vals(a: Repository, b: Callable[[object], Awaitable[bool]]) -> Repository:
-    if not isinstance(a, MetadataRepository):
+async def filter_repo_vals(a: repomodule.Repository, b: Callable[[object], Awaitable[bool]]) -> repomodule.Repository:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with filter() with data callback")
 
     async def inner_all(d: Dict[str, Any]) -> AsyncIterator[str]:
@@ -417,11 +425,11 @@ async def filter_repo_vals(a: Repository, b: Callable[[object], Awaitable[bool]]
             if await b(v):
                 yield k
 
-    return FilterMetadataRepository(a, filter_all=inner_all)
+    return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
 
 
 @builtin("any")
-async def repo_any(a: Repository) -> bool:
+async def repo_any(a: repomodule.Repository) -> bool:
     async for _ in a:
         return True
     else:
@@ -434,8 +442,8 @@ async def list_index(a: List, b: int) -> object:
 
 
 @builtin("__index__")
-async def repo_index(a: Repository, b: Key) -> object:
-    if not isinstance(a, MetadataRepository):
+async def repo_index(a: repomodule.Repository, b: Key) -> object:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Can only index MetadataRepositories")
     return await a.info(str(b))
 
@@ -449,25 +457,32 @@ async def sort_list(a: List) -> List:
 async def sort_list_keyed(a: List, key: Callable[[object], Awaitable[int]]) -> List:
     keys = [(await key(x), x) for x in a]
     keys.sort()
-    for i, (x, _) in enumerate(keys):
+    for i, (_, x) in enumerate(keys):
         keys[i] = x  # type: ignore
     return keys
 
 
 @builtin("values")
-async def repo_values(a: Repository) -> List:
-    if not isinstance(a, MetadataRepository):
+async def repo_values(a: repomodule.Repository) -> List:
+    if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Can only values MetadataRepositories")
     return list((await a.info_all()).values())
 
 
+@builtin("items")
+async def repo_items(a: repomodule.Repository) -> List:
+    if not isinstance(a, repomodule.MetadataRepository):
+        raise TypeError("Can only values MetadataRepositories")
+    return [[k, v] for k, v in (await a.info_all()).items()]
+
+
 @builtin("keys")
-async def repo_keys(a: Repository) -> List:
+async def repo_keys(a: repomodule.Repository) -> List:
     return [Key(x) async for x in a]
 
 
 @builtin("len")
-async def repo_len(a: Repository) -> int:
+async def repo_len(a: repomodule.Repository) -> int:
     result = 0
     async for _ in a:
         result += 1
@@ -499,3 +514,38 @@ async def list_concat(a: List) -> List:
     except TypeError as e:
         raise TypeError("Can only concat lists of lists") from e
     return result
+
+
+@builtin("index")
+async def list_index_str(a: List, b: str) -> int:
+    if b in a:
+        return a.index(b)
+    else:
+        return -1
+
+
+@builtin("index")
+async def list_index_int(a: List, b: int) -> int:
+    if b in a:
+        return a.index(b)
+    else:
+        return -1
+
+
+@builtin("get")
+async def list_get(a: List, b: int, c: object) -> object:
+    if 0 <= b < len(a):
+        return a[b]
+    else:
+        return c
+
+
+# HACKS BELOW THIS POINT
+@builtin("asData")
+async def list_as_data(a: List) -> object:
+    return a
+
+
+@builtin("asList")
+async def data_as_list(a: object) -> List:
+    return a

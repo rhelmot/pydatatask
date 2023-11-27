@@ -103,11 +103,11 @@ def t_newline(t):
 
 
 def t_error(t):
-    print(f"Illegal character '{t.value[0]}'")
-    t.lexer.skip(1)
+    raise SyntaxError(f"Illegal character '{t.value[0]}'")
 
 
 lexer = lex.lex()
+lexer.line_start = 0
 
 # Define precedence and associativity
 precedence = (
@@ -201,22 +201,26 @@ def p_typaram(p):
 
 def p_tyexpr_basic(p):
     "tyexpr : IDENTIFIER"
-    if p[1] == "Bool":
-        p[0] = QueryValueType.Bool
-    elif p[1] == "Int":
-        p[0] = QueryValueType.Int
-    elif p[1] == "Str":
-        p[0] = QueryValueType.String
-    elif p[1] == "Key":
-        p[0] = QueryValueType.Key
-    elif p[1] == "List":
-        p[0] = QueryValueType.List
-    elif p[1] == "Repo":
-        p[0] = QueryValueType.Repository
-    elif p[1] == "Data":
-        p[0] = QueryValueType.RepositoryData
+    p[0] = tyexpr_basic_to_type(p[1])
+
+
+def tyexpr_basic_to_type(s: str) -> "QueryValueType":
+    if s == "Bool":
+        return QueryValueType.Bool
+    elif s == "Int":
+        return QueryValueType.Int
+    elif s == "Str":
+        return QueryValueType.String
+    elif s == "Key":
+        return QueryValueType.Key
+    elif s == "List":
+        return QueryValueType.List
+    elif s == "Repo":
+        return QueryValueType.Repository
+    elif s == "Data":
+        return QueryValueType.RepositoryData
     else:
-        raise ValueError(f"Bad type: {p[1]}")
+        raise ValueError(f"Bad type: {s}")
 
 
 def p_tyexpr_fn_notemplate(p):
@@ -356,7 +360,8 @@ def p_tempexpr(p):
 
 
 def p_error(p):
-    print(f"Syntax error at line {p.lineno}, position {p.lexpos}: Unexpected token '{p.value}'")
+    # AUGH GIVE ME COLUMN NUMBER
+    raise SyntaxError(f"Syntax error at line {p.lineno}, position {p.lexpos}: Unexpected token '{p.value}'")
 
 
 BINOP_TOKEN_MAPPING = {

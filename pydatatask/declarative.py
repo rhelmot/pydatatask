@@ -27,6 +27,8 @@ from pydatatask.executor.proc_manager import (
     SSHLinuxManager,
 )
 from pydatatask.host import Host, HostOS
+from pydatatask.query.parser import QueryValueType, tyexpr_basic_to_type
+from pydatatask.query.query import Query
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import (
     DirectoryRepository,
@@ -519,7 +521,7 @@ def build_task_picker(
             "repo": make_picker("Repository", repos),
             "kind": link_kind_constructor,
             "key": lambda thing: None if thing is None else str(thing),
-            "multi_meta": lambda thing: None if thing is None else str(thing),
+            "cokeyed": lambda thing: {x: repos[y] for x, y in thing.items()},
             "is_input": parse_bool,
             "is_output": parse_bool,
             "is_status": parse_bool,
@@ -530,6 +532,26 @@ def build_task_picker(
         },
     )
     links_constructor = make_dict_parser("links", str, link_constructor)
+
+    def query_maker(
+        result_type: QueryValueType,
+        query: str,
+        parameters: Dict[str, QueryValueType],
+        getters: Dict[str, QueryValueType],
+    ) -> Any:
+        return Query(result_type, query, parameters, getters, repos)
+
+    query_constructor = make_constructor(
+        "Query",
+        query_maker,
+        {
+            "result_type": tyexpr_basic_to_type,
+            "query": str,
+            "parameters": make_dict_parser("parameters", str, tyexpr_basic_to_type),
+            "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+        },
+    )
+    queries_constructor = make_dict_parser("queries", str, query_constructor)
     kinds = {
         "Process": make_annotated_constructor(
             "ProcessTask",
@@ -553,6 +575,7 @@ def build_task_picker(
                 else make_picker("Repository", repos)(thing),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
+                "queries": queries_constructor,
             },
         ),
         "Kubernetes": make_annotated_constructor(
@@ -571,6 +594,7 @@ def build_task_picker(
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
                 "long_running": parse_bool,
+                "queries": queries_constructor,
             },
         ),
         "Container": make_annotated_constructor(
@@ -594,6 +618,7 @@ def build_task_picker(
                 "privileged": parse_bool,
                 "tty": parse_bool,
                 "long_running": parse_bool,
+                "queries": queries_constructor,
             },
         ),
     }

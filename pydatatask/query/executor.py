@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import (
     Any,
     Awaitable,
@@ -17,6 +19,7 @@ from itertools import product as iproduct
 
 from typing_extensions import Mapping, TypeAlias
 
+from pydatatask import repository as repomodule
 from pydatatask.query.parser import ArgTypes
 from pydatatask.query.parser import FunctionDefinition as ParsedFunctionDefinition
 from pydatatask.query.parser import (
@@ -26,11 +29,6 @@ from pydatatask.query.parser import (
     TemplateTypes,
 )
 from pydatatask.query.visitor import Visitor
-from pydatatask.repository import Repository
-from pydatatask.repository.base import (
-    CacheInProcessMetadataRepository,
-    MetadataRepository,
-)
 
 
 class Key(str):
@@ -45,7 +43,7 @@ class QueryValue:
     string_value: Optional[str] = None
     key_value: Optional[str] = None
     list_value: Optional[List["QueryValue"]] = None
-    repo_value: Optional[Repository] = None
+    repo_value: Optional[repomodule.Repository] = None
     data_value: Optional[Any] = None
 
     def typecheck(self, ty: "TemplateType"):
@@ -76,9 +74,9 @@ class QueryValue:
             return QueryValue(QueryValueType.Bool, bool_value=value)
         if isinstance(value, int):
             return QueryValue(QueryValueType.Int, int_value=value)
-        if cache and isinstance(value, MetadataRepository):
-            return QueryValue(QueryValueType.Repository, repo_value=CacheInProcessMetadataRepository(value))
-        if isinstance(value, Repository):
+        if cache and isinstance(value, repomodule.MetadataRepository):
+            return QueryValue(QueryValueType.Repository, repo_value=repomodule.CacheInProcessMetadataRepository(value))
+        if isinstance(value, repomodule.Repository):
             return QueryValue(QueryValueType.Repository, repo_value=value)
         if isinstance(value, list):
             return QueryValue(QueryValueType.List, list_value=value)
@@ -108,13 +106,14 @@ class TemplatedFunction:
         if argtypes not in self.defns:
             raise NameError(f"No overload available for {self.name} that matches {argtypes}")
         defn = self.defns[argtypes]
-        return ResolvedFunction(defn, self.template_params)
+        return ResolvedFunction(defn, self.template_params, self.name)
 
 
 @dataclass
 class ResolvedFunction:
     defn: FunctionDefinition
     template_params: List[TemplateValue]
+    name: str
 
     def make_scope(self, base_scope: "Scope", args: Iterable[QueryValue]) -> Tuple["Scope", FunctionDefinition]:
         local_functions: Dict[str, TemplatedFunction] = {}
@@ -197,10 +196,10 @@ class Scope:
         argtypes = tuple(arg if isinstance(arg, QueryValueType) else arg.type for arg in args)
         if name in self.local_functions and argtypes in self.local_functions[name].defns:
             return ResolvedFunction(
-                self.local_functions[name].defns[argtypes], self.local_functions[name].template_params
+                self.local_functions[name].defns[argtypes], self.local_functions[name].template_params, name
             )
         if name in self.global_functions and argtypes in self.global_functions[name]:
-            return ResolvedFunction(self.global_functions[name][argtypes], [])
+            return ResolvedFunction(self.global_functions[name][argtypes], [], name)
         if name in self.local_functions or name in self.global_functions:
             raise NameError(f"No overload available for {name} that matches {argtypes}")
         if any(availname == name for availname, _ in self.global_templates):

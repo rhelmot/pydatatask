@@ -48,6 +48,15 @@ def job_getter(f):
     return f
 
 
+class StrDict(dict):
+    def __init__(self, string, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.string = string
+
+    def __str__(self):
+        return self.string
+
+
 # Base Classes
 class Repository(ABC):
     """A repository is a key-value store where the keys are names of jobs. Since the values have unspecified
@@ -135,20 +144,18 @@ class Repository(ABC):
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
             filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
-            preamble, epilogue = task.mk_watchdir_upload(
+            preamble, epilogue, extra_dirs = task.mk_watchdir_upload(
                 filepath,
                 link_name,
-                {
-                    "parent": job,
-                    "task": task.name,
-                    "link_name": link_name,
-                },
             )
-            return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
+            return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
             filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
             preamble = task.mk_watchdir_download(filepath, link_name, job)
             return taskmodule.TemplateInfo(filepath, preamble=preamble)
+        if kind == taskmodule.LinkKind.RequestedInput:
+            preamble, func = task.mk_download_function(link_name)
+            return taskmodule.TemplateInfo(func, preamble=preamble)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
@@ -965,7 +972,13 @@ class CacheInProcessMetadataRepository(MetadataRepository):
             for k in self._cache:
                 yield k
         else:
+            # optimization for any()
+            single = next(iter(self._cache), None)
+            if single is not None:
+                yield single
             async for k in self.base:
+                if k == single:
+                    continue
                 if k not in self._cache:
                     self._cache[k] = self._unknown
                 yield k

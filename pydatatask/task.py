@@ -29,7 +29,7 @@ from concurrent.futures import FIRST_EXCEPTION
 from concurrent.futures import Executor as FuturesExecutor
 from concurrent.futures import Future as ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
@@ -52,6 +52,7 @@ import sonyflake
 import yaml
 
 from pydatatask.host import LOCAL_HOST, Host, HostOS
+import pydatatask
 
 from . import executor as execmodule
 from . import repository as repomodule
@@ -131,6 +132,7 @@ class LinkKind(Enum):
     OutputFilepath = auto()
     StreamingOutputFilepath = auto()
     StreamingInputFilepath = auto()
+    RequestedInput = auto()
 
 
 INPUT_KINDS: Set[LinkKind] = {
@@ -139,6 +141,7 @@ INPUT_KINDS: Set[LinkKind] = {
     LinkKind.InputFilepath,
     LinkKind.InputRepo,
     LinkKind.StreamingInputFilepath,
+    LinkKind.RequestedInput,
 }
 OUTPUT_KINDS: Set[LinkKind] = {
     LinkKind.OutputId,
@@ -159,7 +162,7 @@ class Link:
     repo: "repomodule.Repository"
     kind: Optional[LinkKind] = None
     key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None
-    multi_meta: Optional[str] = None
+    cokeyed: Dict[str, "repomodule.Repository"] = field(default_factory=dict)
     is_input: bool = False
     is_output: bool = False
     is_status: bool = False
@@ -179,6 +182,7 @@ class Task(ABC):
         disabled: bool = False,
         long_running: bool = False,
         timeout: Optional[timedelta] = None,
+        queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
     ):
         self.name = name
         self._ready = ready
@@ -193,6 +197,7 @@ class Task(ABC):
         self.annotations: Dict[str, str] = {}
         self.fail_fast = False
         self.timeout = timeout
+        self.queries = queries or {}
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -217,12 +222,14 @@ class Task(ABC):
         """
         return self.host.mk_http_get(filename, url, headers)
 
-    def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> Any:
+    def mk_http_post(
+        self, filename: str, url: str, headers: Dict[str, str], output_filename: Optional[str] = None
+    ) -> Any:
         """Generate logic to perform an http upload for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_post(filename, url, headers)
+        return self.host.mk_http_post(filename, url, headers, output_filename)
 
     def mk_repo_get(self, filename: str, link_name: str, job: str) -> Any:
         """Generate logic to perform an repository download for the task host system.
@@ -256,6 +263,48 @@ class Task(ABC):
             result = self.host.mk_zip(payload_filename, filename) + result
         return result
 
+    def mk_query_function(self, query_name: str) -> Tuple[Any, Any]:
+        parameters = self.queries[query_name].parameters
+        return (
+            f"""
+        query_{query_name}() {{
+            INPUT_FILE=$(mktemp)
+            while [ -n "$1" ]; do
+                case "$1" in
+                    {" ".join(f'--{p}) echo "{p}: $2">>$INPUT_FILE ;;' for p in parameters)}
+                    *) echo "Bad query parameter $1" >&2; exit 1 ;;
+                esac
+                shift 2
+            done
+            {self.host.mk_http_post("$INPUT_FILE", f"{self.agent_url}/query/{self.name}/{query_name}", {"Cookie": "secret=" + self.agent_secret}, "/dev/stdout")}
+            rm $INPUT_FILE
+        }}
+        """,
+            f"query_{query_name}",
+        )
+
+    def mk_download_function(self, link_name: str) -> Tuple[Any, Any]:
+        return (
+            f"""
+        download_{link_name}() {{
+            {self.mk_repo_get("/dev/stdout", link_name, "$1")}
+        }}
+        """,
+            f"download_{link_name}",
+        )
+
+    def mk_repo_put_cokey(self, filename: str, link_name: str, cokey_name: str, job: str) -> Any:
+        is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
+        payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        result = self.host.mk_http_post(
+            payload_filename,
+            f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}",
+            {"Cookie": "secret=" + self.agent_secret},
+        )
+        if is_filesystem:
+            result = self.host.mk_zip(payload_filename, filename) + result
+        return result
+
     def mk_mkdir(self, filepath: str) -> Any:
         """Generate logic to perform a directory creation for the task host system.
 
@@ -263,7 +312,7 @@ class Task(ABC):
         """
         return self.host.mk_mkdir(filepath)
 
-    def mk_watchdir_upload(self, filepath: str, link_name: str, extra_info: Dict[str, Any]) -> Tuple[Any, Any]:
+    def mk_watchdir_upload(self, filepath: str, link_name: str) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
         If you're trying to debug something and you run across this, just ask rhelmot for help.
@@ -271,18 +320,20 @@ class Task(ABC):
         # leaky abstraction!
         if self.host.os != HostOS.Linux:
             raise ValueError("Not sure how to do this off of linux")
-        meta_link_name = self.links[link_name].multi_meta
-        if meta_link_name is None:
-            raise ValueError("Cannot do watchdir upload without multi_meta (yet)")
         upload = self.host.mktemp("upload")
         scratch = self.host.mktemp("scratch")
         finished = self.host.mktemp("finished")
-        extra_lines = "\n".join(f"{name}: {json.dumps(value)}" for name, value in extra_info.items())
+        lock = self.host.mktemp("lock")
+        cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
+        dict_result = dict(cokeyed)
+        dict_result["lock"] = lock
 
         return (
             f"""
         {self.host.mk_mkdir(filepath)}
         {self.host.mk_mkdir(scratch)}
+        {self.host.mk_mkdir(lock)}
+        {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
         idgen() {{
             echo $(($(shuf -i0-255 -n1) +
                     $(shuf -i0-255 -n1)*0x100 +
@@ -302,16 +353,12 @@ class Task(ABC):
                     WATCHER_LAST=1
                 fi
                 for f in *; do
-                    if [ -e "$f" ] && ! [ -e "{scratch}/$f" ]; then
+                    if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ]; then
                         ID=$(idgen)
                         ln -sf "$PWD/$f" {upload}
                         {self.mk_repo_put(upload, link_name, "$ID")}
                         rm {upload}
-                        cat >{upload} <<EOF
-filename: "$f"
-{extra_lines}
-EOF
-                        {self.mk_repo_put(upload, meta_link_name, "$ID")}
+                        {'; '.join(f'ln -s "{cokeydir}/$f" {upload} && ({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID")}); rm {upload}' for cokey, cokeydir in cokeyed.items())}
                         echo $ID >"{scratch}/$f"
                     fi
                 done
@@ -325,6 +372,7 @@ EOF
         echo 1 >{finished}
         wait $WATCHER_PID
         """,
+            dict_result,
         )
 
     def mk_watchdir_download(self, filepath: str, link_name: str, job: str) -> Any:
@@ -407,7 +455,7 @@ EOF
         repo: "repomodule.Repository",
         kind: Optional[LinkKind],
         key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None,
-        multi_meta: Optional[str] = None,
+        cokeyed: Optional[Dict[str, "repomodule.Repository"]] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
         is_status: bool = False,
@@ -425,7 +473,7 @@ EOF
         :param kind: The way to transform this repository during templating.
         :param key: A related item from a different link to use instead of the current job when doing repository lookup.
             Or, a function taking the task's job and producing the desired job to do a lookup for.
-        :param multi_meta: A link to use for identifying which keys are related to a given other key.
+        :param cokeyed: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.
         :param is_input: Whether this repository contains data which is consumed by the task. Default based on kind.
         :param is_output: Whether this repository is populated by the task. Default based on kind.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
@@ -440,7 +488,7 @@ EOF
         """
         if is_input is None:
             is_input = kind in INPUT_KINDS
-            if required_for_start is None and kind == LinkKind.StreamingInputFilepath:
+            if required_for_start is None and kind in (LinkKind.StreamingInputFilepath, LinkKind.RequestedInput):
                 required_for_start = False
         if is_output is None:
             is_output = kind in OUTPUT_KINDS
@@ -459,7 +507,7 @@ EOF
             repo=repo,
             key=key,
             kind=kind,
-            multi_meta=multi_meta,
+            cokeyed=cokeyed or {},
             is_input=is_input,
             is_output=is_output,
             is_status=is_status,
@@ -688,6 +736,12 @@ EOF
         if pending:
             raise Exception(f"Cannot access {' and '.join(pending)} during link subkeying")
 
+        for query_name in self.queries:
+            a_preamble, a_func = self.mk_query_function(query_name)
+            if a_preamble is not None:
+                preamble.append(a_preamble)
+            result[query_name] = a_func
+
         return result, preamble, epilogue
 
     # pylint: disable=unused-argument
@@ -751,6 +805,7 @@ class KubeTask(Task):
         long_running: bool = False,
         env: Optional[Dict[str, Any]] = None,
         ready: Optional["repomodule.Repository"] = None,
+        queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
     ):
         """
         :param name: The name of the task.
@@ -772,7 +827,7 @@ class KubeTask(Task):
         It is highly recommended to provide one or more of ``done`` or ``logs`` so that at least one link is present
         with ``inhibits_start``.
         """
-        super().__init__(name, ready, long_running=long_running, timeout=timeout)
+        super().__init__(name, ready, long_running=long_running, timeout=timeout, queries=queries)
 
         self.template = template
         self.quota_manager = quota_manager
@@ -974,6 +1029,7 @@ class ProcessTask(Task):
         stdout: Optional["repomodule.BlobRepository"] = None,
         stderr: Optional[Union["repomodule.BlobRepository", _StderrIsStdout]] = None,
         ready: Optional["repomodule.Repository"] = None,
+        queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
     ):
         """
         :param name: The name of this task.
@@ -1009,7 +1065,7 @@ class ProcessTask(Task):
         It is highly recommended to provide at least one of ``done``, ``stdout``, or ``stderr``, so that at least one
         link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout)
+        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
 
         if pids is None:
             pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
@@ -1614,6 +1670,7 @@ class ContainerTask(Task):
         ready: Optional["repomodule.Repository"] = None,
         privileged: Optional[bool] = False,
         tty: Optional[bool] = False,
+        queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
     ):
         """
         :param name: The name of this task.
@@ -1639,7 +1696,7 @@ class ContainerTask(Task):
         It is highly recommended to provide at least one of ``done`` or ``logs`` so that at least one
         link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout)
+        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
 
         self.template = template
         self.entrypoint = entrypoint

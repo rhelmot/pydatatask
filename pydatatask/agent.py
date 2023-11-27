@@ -64,8 +64,42 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await response.write_eof()
         return response
 
+    @authorize
+    async def query(request: web.Request) -> web.StreamResponse:
+        try:
+            task = pipeline.tasks[request.match_info["task"]]
+            query = task.queries[request.match_info["query"]]
+        except KeyError as e:
+            raise web.HTTPNotFound() from e
+        try:
+            params = yaml.safe_load(await request.read())
+        except yaml.error.YAMLError as e:
+            raise web.HTTPBadRequest() from e
+
+        result = await query.execute(params)
+
+        response = web.StreamResponse()
+        await response.prepare(request)
+        await query.format_response(result, response)
+        await response.write_eof()
+        return response
+
+    @authorize
+    async def cokey_post(request: web.Request) -> web.StreamResponse:
+        try:
+            task = pipeline.tasks[request.match_info["task"]]
+            link = task.links[request.match_info["link"]]
+            repo = link.cokeyed[request.match_info["cokey"]]
+            job = request.match_info["job"]
+        except KeyError as e:
+            raise web.HTTPNotFound() from e
+        await inject_data(repo, job, request.content)
+        return web.Response(text=job)
+
     app.add_routes([web.get("/data/{task}/{link}/{job}", get), web.post("/data/{task}/{link}/{job}", post)])
     app.add_routes([web.get("/stream/{task}/{link}/{job}", stream)])
+    app.add_routes([web.post("/query/{task}/{query}", query)])
+    app.add_routes([web.post("/cokeydata/{task}/{link}/{cokey}/{job}", cokey_post)])
 
     async def on_startup(_app):
         await pipeline.open()

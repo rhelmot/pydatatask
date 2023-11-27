@@ -4,7 +4,7 @@ Pydatatask needs to be able to know how to make resources accessible regardless 
 can be e.g. dicts of urls keyed on Hosts, indicating that a given target resource needs to be accessed through a
 different url depending on which host is accessing it.
 """
-from typing import Dict
+from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum, auto
 import os
@@ -38,23 +38,32 @@ class Host:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
             URL="{url}"
-            FILENAME="{filename}"
+            FILENAME="$(mktemp)"
+            ERR_FILENAME=$(mktemp)
             if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
-            wget -q -O- $URL {headers_str} >$FILENAME || curl -s $URL {headers_str} >$FILENAME || (echo "download of $URL failed" && false)
+            wget -q -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || curl --fail-with-body -s $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME && false)
+            rm $ERR_FILENAME
+            cat $FILENAME >"{filename}"
+            rm $FILENAME
             """
         else:
             raise TypeError(self.os)
 
-    def mk_http_post(self, filename: str, url: str, headers: Dict[str, str]) -> str:
+    def mk_http_post(
+        self, filename: str, url: str, headers: Dict[str, str], output_filename: Optional[str] = None
+    ) -> str:
         """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
-            set -x
             URL="{url}"
             FILENAME="{filename}"
+             {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
+            ERR_FILENAME=$(mktemp)
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
-            wget -q -O- $URL {headers_str} --post-file $FILENAME || curl -s $URL {headers_str} --data-binary @$FILENAME || (echo "upload of $URL failed" && false)
+            wget -q -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || curl --fail-with-body -s $URL {headers_str} --data-binary @$FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}&& false)
+            rm $ERR_FILENAME
+            {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
             """
         else:
             raise TypeError(self.os)
@@ -85,9 +94,7 @@ class Host:
     def mk_mkdir(self, filepath: str) -> str:
         """Generate a shell script to make a directory for the host system."""
         if self.os == HostOS.Linux:
-            return f"""
-            mkdir -p {filepath}
-            """
+            return f"mkdir -p {filepath}"
         else:
             raise TypeError(self.os)
 
