@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "properties": {
+      "annotations": {
+        "$ref": "task_annotations.json"
+      },
+      "long_running": {
+        "type": "boolean"
+      },
+      "done": {
+        "type": "string"
+      },
+      "links": {
+        "type": "object",
+        "additionalProperties": { "$ref": "link.json" }
+      },
+      "executable": {
+        "oneOf": [
+          {"$ref": "executable_process.json"},
+          {"$ref": "executable_container.json"}
+        ]
+      }
+    }
+  }
+}

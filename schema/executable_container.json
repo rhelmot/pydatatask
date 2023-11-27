@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "cls": { "const": "Container"},
+    "args": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "logs": {
+          "type": "string"
+        },
+        "timeout": {
+          "$ref": "timeout.json"
+        }
+      },
+      "additionalProperties": false,
+      "required": ["template"]
+    }
+  },
+  "additionalProperties": false,
+  "required": ["cls", "args"]
+}
