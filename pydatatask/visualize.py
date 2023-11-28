@@ -27,19 +27,19 @@ _default_index = """<!DOCTYPE html>
           details > summary {
             cursor: pointer;
           }
-          
+
           details > summary::-webkit-details-marker {
             display: none;
           }
-          
+
           details > summary:before {
             content: "📁 ";
           }
-          
+
           details[open] > summary:before {
             content: "📂 ";
           }
-          
+
           .file:before {
             content: "📄 ";
           }
