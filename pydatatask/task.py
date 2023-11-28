@@ -934,7 +934,7 @@ class KubeTask(Task):
             if pod.status.phase in ("Succeeded", "Failed"):
                 l.debug("...finished: %s", pod.status.phase)
                 await self._cleanup(pod, pod.status.phase)
-            elif self.timeout is not None and uptime > self.timeout:
+            elif self.timeout and uptime > self.timeout:
                 l.debug("...timed out")
                 await self.handle_timeout(pod)
                 await self._cleanup(pod, "Timeout")
@@ -1089,8 +1089,8 @@ class ProcessTask(Task):
         job_map = await self.pids.info_all()
         pid_map = {meta["pid"]: job for job, meta in job_map.items()}
         now = datetime.now(tz=timezone.utc)
-        timeout_set = {
-            job for job, meta in job_map.items() if self.timeout is not None and now - meta["start_time"] > self.timeout
+        timedout_pid_set = {
+            meta['pid'] for job, meta in job_map.items() if self.timeout and now - meta["start_time"] > self.timeout
         }
         expected_live = set(pid_map)
         try:
@@ -1106,7 +1106,7 @@ class ProcessTask(Task):
                 job = pid_map[pid]
                 start_time = job_map[job]["start_time"]
                 coros.append(self._reap(job, start_time))
-            for pid in timeout_set - died:
+            for pid in timedout_pid_set - died:
                 job = pid_map[pid]
                 start_time = job_map[job]["start_time"]
                 l.info("%s:%s timed out", self.name, job)

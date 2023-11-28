@@ -117,7 +117,7 @@ class Pipeline:
             if (
                 self.long_running_timeout is not None
                 and task.long_running
-                and (task.timeout is None or task.timeout < self.long_running_timeout)
+                and (not task.timeout or task.timeout < self.long_running_timeout)
             ):
                 task.timeout = self.long_running_timeout
 

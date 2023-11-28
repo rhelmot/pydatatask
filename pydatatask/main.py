@@ -319,7 +319,7 @@ async def run(
         if launch_once:
             func = update_only_update_flush
         await asyncio.sleep(1)
-        if timeout is not None and asyncio.get_running_loop().time() - start > timeout:
+        if timeout and asyncio.get_running_loop().time() - start > timeout:
             raise TimeoutError("Pipeline run timeout")
 
 
