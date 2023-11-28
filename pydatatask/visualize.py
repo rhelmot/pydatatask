@@ -162,7 +162,7 @@ class TaskVisualizer:
             async for job in node.links[link].repo:
                 if link == "done":
                     if job not in self.exit_codes[node]:
-                        exit_code = (await node.done.info(job)).get("State", {}).get("ExitCode", None)
+                        exit_code = (await node.done.info(job) or {}).get("State", {}).get("ExitCode", None)
                         if exit_code is not None:
                             self.exit_codes[node][job] = exit_code
                     else:
