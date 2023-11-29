@@ -154,70 +154,50 @@ class TaskVisualizer:
         )
         return quiver.data[0]
 
-    async def get_task_info(self, node):
+    async def get_task_info(self, nodes):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
-        repo_entry_counts: Dict[Any, int] = {}
-        for link in node.links:
-            count = 0
-            async for job in node.links[link].repo:
-                if link == "done":
-                    if job not in self.exit_codes[node]:
-                        exit_code = (await node.done.info(job) or {}).get("State", {}).get("ExitCode", None)
-                        if exit_code is not None:
-                            self.exit_codes[node][job] = exit_code
-                    else:
-                        exit_code = self.exit_codes[node][job]
-                count += 1
-            repo_entry_counts[link] = count
+        async def get_node_info(node):
+            repo_entry_counts: Dict[Any, int] = {}
+            for link in node.links:
+                count = 0
+                async for job in node.links[link].repo:
+                    if link == "done":
+                        if job not in self.exit_codes[node]:
+                            exit_code = (await node.done.info(job) or {}).get("State", {}).get("ExitCode", None)
+                            if exit_code is not None:
+                                self.exit_codes[node][job] = exit_code
+                        else:
+                            exit_code = self.exit_codes[node][job]
+                    count += 1
+                repo_entry_counts[link] = count
+            return self.exit_codes[node], repo_entry_counts, node.name
 
-        return self.exit_codes[node], repo_entry_counts
+        all_node_info = await asyncio.gather(*[get_node_info(node) for node in nodes])
+        return all_node_info
+
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
         result = asyncio.run(coroutine(*args))
         queue.put(result)
 
-    def sync_function(self, node):
+    def populate_all_node_info(self, nodes):
         """Collects a bunch of stuff in a separate subprocess.
 
         This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
         """
         queue: Queue = Queue()
 
-        process = Process(target=self.run_async, args=(queue, self.get_task_info, node))
+        process = Process(target=self.run_async, args=(queue, self.get_task_info, nodes))
         process.start()
         process.join()
 
-        exit_codes, result = queue.get()
-
-        self.nodes[node] = result
-        self.exit_codes[node] = exit_codes
-        return exit_codes, result
-
-    @staticmethod
-    def generate_file_tree_html(path):
-        file_tree = []
-        for root, dirs, files in os.walk(path):
-            short_path = os.path.basename(root) or "Root"
-            dir_layout = html.Details(
-                [
-                    html.Summary(short_path, style={"cursor": "pointer"}),
-                    html.Div(
-                        [
-                            html.P(html.A(file, href=f"file://{os.path.join(root, file)}"), className="file")
-                            for file in files
-                        ]
-                        + [TaskVisualizer.generate_file_tree_html(os.path.join(root, d)) for d in dirs],
-                        style={"padding-left": "20px"},
-                    ),
-                ],
-                open=False,
-            )
-            file_tree.append(dir_layout)
-            # Prevent further os.walk from entering this directory since we've already handled it
-            dirs.clear()
-            break  # Break after the first iteration to only include the top level
-        return html.Div(file_tree)
+        results = queue.get(block=True)
+        for exit_codes, result, node_name in results:
+            node = next((x for x in nodes if x.name == node_name), None)
+            if node:
+                self.nodes[node] = result
+                self.exit_codes[node] = exit_codes
 
     @staticmethod
     def generate_file_tree_html(path):
@@ -330,8 +310,11 @@ class TaskVisualizer:
 
             fig = go.Figure()
             annotations = []
+            self.populate_all_node_info(list(pos.keys()))
+
             for node, (x, y) in pos.items():
-                exit_codes, results = self.sync_function(node)
+                exit_codes = self.exit_codes[node]
+                results = self.nodes[node]
                 any_failed = any(x != 0 for x in exit_codes.values())
                 if results is not None:
                     if results["live"] > 0:
