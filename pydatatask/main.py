@@ -39,6 +39,7 @@ import re
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
+import yaml
 
 from pydatatask.agent import build_agent_app
 from pydatatask.agent import cat_data as cat_data_inner
@@ -502,10 +503,20 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
     repos = new_repos
 
     jobs = []
+
+    repo_to_path_mapping = {}
+    name_to_path_mapping = defaultdict(dict)
     for repo_name in repos:
         repo_base = backup_base / repo_name
         task_name, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task_name].links[repo_basename].repo
+        if repo in repo_to_path_mapping:
+            name_to_path_mapping[task_name][repo_basename] = repo_to_path_mapping[repo]
+            continue
+
+        repo_to_path_mapping[repo] = f'./{repo_name}/'
+        name_to_path_mapping[task_name][repo_basename] = f'./{repo_name}/'
+
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repomodule.FileRepository(
                 repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
@@ -525,39 +536,54 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         else:
             print("Warning: cannot backup", repo)
 
+    # write out the name to path mapping to backup_base / "repo_mapping.yaml"
+    async def write_file(path, data):
+        async with aiofiles.open(path, "w") as f:
+            await f.write(data)
+    jobs.append(write_file(backup_base / "repo_mapping.yaml", yaml.safe_dump(dict(name_to_path_mapping))))
     await asyncio.gather(*jobs)
-
 
 async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
+
+    async with aiofiles.open(backup_base / "repo_mapping.yaml") as f:
+        mapping = yaml.safe_load(await f.read())
+
     if all_repos:
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
-        repos = [x.name for x in backup_base.iterdir()]
+        repos = list(mapping.keys()) # just use the keys to include ALL tasks
+
+
+    import ipdb; ipdb.set_trace()
 
     jobs = []
-    for repo_name in repos:
-        repo_base = backup_base / repo_name
-        task_name, repo_basename = repo_name.split(".")
-        repo = pipeline.tasks[task_name].links[repo_basename].repo
-        if isinstance(repo, repomodule.BlobRepository):
-            new_repo_file = repomodule.FileRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
-            await new_repo_file.validate()
-            jobs.append(_repo_copy_blob(new_repo_file, repo))
-        elif isinstance(repo, repomodule.MetadataRepository):
-            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
-            await new_repo_meta.validate()
-            jobs.append(_repo_copy_meta(new_repo_meta, repo))
-        elif isinstance(repo, repomodule.FilesystemRepository):
-            new_repo_fs = repomodule.DirectoryRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
-            await new_repo_fs.validate()
-            jobs.append(_repo_copy_fs(new_repo_fs, repo))
-        else:
-            print("Warning: cannot backup", repo)
+    for task_name in mapping:
+        for repo_basename, repo_path in mapping[task_name].items():
+            # simply overwrite the real name being loaded with the actual one
+            if task_name not in repos and f'{task_name}.{repo_basename}' not in repos:
+                continue
+
+            repo_base = backup_base / repo_path
+            repo = pipeline.tasks[task_name].links[repo_basename].repo
+            if isinstance(repo, repomodule.BlobRepository):
+                new_repo_file = repomodule.FileRepository(
+                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+                )
+                await new_repo_file.validate()
+                jobs.append(_repo_copy_blob(new_repo_file, repo))
+            elif isinstance(repo, repomodule.MetadataRepository):
+                new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
+                await new_repo_meta.validate()
+                jobs.append(_repo_copy_meta(new_repo_meta, repo))
+            elif isinstance(repo, repomodule.FilesystemRepository):
+                new_repo_fs = repomodule.DirectoryRepository(
+                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+                )
+                await new_repo_fs.validate()
+                jobs.append(_repo_copy_fs(new_repo_fs, repo))
+            else:
+                print("Warning: cannot backup", repo)
 
     await asyncio.gather(*jobs)
 
