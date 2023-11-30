@@ -490,7 +490,7 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
         repos = list(pipeline.tasks)
     new_repos = []
-    for repo_name in repos:
+    for repo_name in sorted(repos):
         if "." in repo_name:
             new_repos.append(repo_name)
         else:
