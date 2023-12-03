@@ -1,3 +1,4 @@
+"""Home of the Query class."""
 from typing import Any, Dict
 
 import yaml
@@ -11,6 +12,8 @@ from .parser import Expression, FunctionType, QueryValueType, expr_parser
 
 
 class Query:
+    """A pythonic interface to a single expression with a scope and some parameters."""
+
     def __init__(
         self,
         result_type: QueryValueType,
@@ -25,12 +28,12 @@ class Query:
         self.getters = getters
         self.repos = repos
 
-    def checked_incast(self, ty: QueryValueType, val: Any, reason: str) -> QueryValue:
+    def _checked_incast(self, ty: QueryValueType, val: Any, reason: str) -> QueryValue:
         if ty == QueryValueType.String and isinstance(val, int):
             val = str(val)
         return checked_incast(ty, val, reason)
 
-    def make_getter(self, getter: str, ty: QueryValueType) -> FunctionDefinition:
+    def _make_getter(self, getter: str, ty: QueryValueType) -> FunctionDefinition:
         async def inner(scope: Scope):
             gotten = scope.lookup_value("arg").unwrap()
             if not isinstance(gotten, dict):
@@ -39,25 +42,31 @@ class Query:
 
         return FunctionDefinition([], ["arg"], FunctionType((), (QueryValueType.RepositoryData,), ty), inner)
 
-    def make_scope(self, parameters: Dict[str, Any]) -> Scope:
+    def _make_scope(self, parameters: Dict[str, Any]) -> Scope:
         values = {}
         functions = dict(builtins)
         if set(parameters) != set(self.parameters):
             raise ValueError(f"Passed incorrect parameters: got {set(parameters)}, expected {set(self.parameters)}")
         for getter, ty in self.getters.items():
-            functions[f"get{getter}"] = [self.make_getter(getter, ty)]
+            functions[f"get{getter}"] = [self._make_getter(getter, ty)]
         for name, repo in self.repos.items():
             values[name] = QueryValue.wrap(repo)
         for name, ty in self.parameters.items():
-            values[name] = self.checked_incast(ty, parameters[name], f"Parameter {name} to Query")
+            values[name] = self._checked_incast(ty, parameters[name], f"Parameter {name} to Query")
         return Scope.base_scope(values, functions)
 
     async def execute(self, parameters: Dict[str, Any]) -> QueryValue:
-        scope = self.make_scope(parameters)
+        """Execute the query against a set of parameters.
+
+        Returns a QueryValue, which may be formatted with
+        `format_response`.
+        """
+        scope = self._make_scope(parameters)
         executor = Executor(scope)
         return await executor.visit(self.expr)
 
     async def format_response(self, result: QueryValue, response: AWriteStreamBase):
+        """Format a QueryValue into an asynchronous bytestream."""
         if self.result_type in (QueryValueType.String, QueryValueType.Key) and result.type == QueryValueType.String:
             str_result = result.string_value
             assert str_result is not None
@@ -69,4 +78,5 @@ class Query:
             str_result = result.data_value
         else:
             str_result = yaml.safe_dump(result.unwrap())
+            assert isinstance(str_result, str)
         await response.write(str_result.encode())

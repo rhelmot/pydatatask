@@ -1,3 +1,4 @@
+"""Tools for communicating between python and the pydatatask query langauge."""
 from __future__ import annotations
 
 from typing import (
@@ -9,8 +10,8 @@ from typing import (
     Dict,
     List,
     Optional,
-    TypeAlias,
     Union,
+    cast,
     get_args,
     get_origin,
     get_type_hints,
@@ -19,6 +20,8 @@ from collections import defaultdict
 from collections.abc import Awaitable as ABCAwaitable
 from collections.abc import Callable as ABCCallable
 import inspect
+
+from typing_extensions import TypeAlias
 
 from pydatatask import repository as repomodule
 from pydatatask.query.executor import (
@@ -39,6 +42,11 @@ IntoQueryValue: TypeAlias = Any
 
 
 def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryValue, ResolvedFunction], scope: Scope):
+    """Given a query language internal value and its type, convert it to a python object.
+
+    Requires the scope so that functions can be handled. If you don't have a scope and don't need to manage functions,
+    use `QueryValue.unwrap`.
+    """
     if isinstance(value, ResolvedFunction):
         assert isinstance(ty, FunctionType)
         assert not ty.template_types
@@ -57,7 +65,7 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
             return checked_outcast(ty.return_type, await defn.impl(newscope), scope)
 
         return inner
-    if not (ty == value.type or ty == QueryValueType.RepositoryData):
+    if ty not in (value.type, QueryValueType.RepositoryData):
         raise TypeError(f"Outcast failed: expected a {ty}, got {value}")
     return value.unwrap()
 
@@ -65,6 +73,10 @@ def checked_outcast(ty: Union[QueryValueType, FunctionType], value: Union[QueryV
 def checked_incast_template(
     ty: Union[QueryValueType, FunctionType], value, reason: str
 ) -> Union[FunctionDefinition, QueryValue]:
+    """Given a python object and the type to cast it to, convert it to a query language internal object.
+
+    This function can handle functions.
+    """
     if isinstance(ty, FunctionType):
         assert callable(ty)
         return wrap_function(value)
@@ -72,6 +84,10 @@ def checked_incast_template(
 
 
 def checked_incast(ty: QueryValueType, value: IntoQueryValue, reason: str) -> QueryValue:
+    """Given a python object and the type to cast it to, convert it to a query language internal object.
+
+    This function cannot handle functions.
+    """
     if ty == QueryValueType.RepositoryData:
         return QueryValue(ty, data_value=value)
     result = QueryValue.wrap(value)
@@ -81,6 +97,10 @@ def checked_incast(ty: QueryValueType, value: IntoQueryValue, reason: str) -> Qu
 
 
 def translate_pytype_template(ty) -> Union[QueryValueType, FunctionType]:
+    """Given a python type annotation, convert it to a query language internal type.
+
+    This function can handle function types.
+    """
     if get_origin(ty) is ABCCallable:
         args, retval = get_args(ty)
         if get_origin(retval) is not ABCAwaitable:
@@ -91,6 +111,10 @@ def translate_pytype_template(ty) -> Union[QueryValueType, FunctionType]:
 
 
 def translate_pytype(ty) -> QueryValueType:
+    """Given a python type annotation, convert it to a query language internal type.
+
+    This function cannot handle function types.
+    """
     if ty is int:
         return QueryValueType.Int
     if ty is str:
@@ -107,6 +131,7 @@ def translate_pytype(ty) -> QueryValueType:
 
 
 def wrap_function(f: Callable[..., Awaitable[Any]], template_args: Optional[List[str]] = None) -> FunctionDefinition:
+    """Given a python function, convert it to a query language internal function."""
     pytypes = get_type_hints(f)
     spec = inspect.getfullargspec(f)
     all_args = spec.args
@@ -139,7 +164,10 @@ def wrap_function(f: Callable[..., Awaitable[Any]], template_args: Optional[List
     return obj
 
 
-def builtin(name: Optional[str] = None, template_args: Optional[List[str]] = None):
+# pylint: disable=missing-function-docstring
+
+
+def _builtin(name: Optional[str] = None, template_args: Optional[List[str]] = None):
     def wrapper(f: Callable[..., Awaitable[Any]]):
         obj = wrap_function(f, template_args)
         builtins[name or f.__name__].append(obj)
@@ -148,208 +176,208 @@ def builtin(name: Optional[str] = None, template_args: Optional[List[str]] = Non
     return wrapper
 
 
-@builtin("__eq__")
+@_builtin("__eq__")
 async def int_eq(a: int, b: int) -> bool:
     return a == b
 
 
-@builtin("__eq__")
+@_builtin("__eq__")
 async def bool_eq(a: bool, b: bool) -> bool:
     return a == b
 
 
-@builtin("__eq__")
+@_builtin("__eq__")
 async def str_eq(a: str, b: str) -> bool:
     return a == b
 
 
-@builtin("__eq__")
+@_builtin("__eq__")
 async def key_eq(a: Key, b: Key) -> bool:
     return a == b
 
 
-@builtin("__add__")
+@_builtin("__add__")
 async def int_add(a: int, b: int) -> int:
     return a + b
 
 
-@builtin("__add__")
+@_builtin("__add__")
 async def str_add(a: str, b: str) -> str:
     return a + b
 
 
-@builtin("int")
+@_builtin("int")
 async def str_to_int(a: str) -> int:
     return int(a)
 
 
-@builtin("str")
+@_builtin("str")
 async def int_to_str(a: int) -> str:
     return str(a)
 
 
-@builtin("str")
+@_builtin("str")
 async def key_to_str(a: Key) -> str:
     return str(a)
 
 
-@builtin("__sub__")
+@_builtin("__sub__")
 async def int_sub(a: int, b: int) -> int:
     return a - b
 
 
-@builtin("__mul__")
+@_builtin("__mul__")
 async def int_mul(a: int, b: int) -> int:
     return a * b
 
 
-@builtin("__mul__")
+@_builtin("__mul__")
 async def str_mul(a: str, b: int) -> str:
     return a * b
 
 
-@builtin("__div__")
+@_builtin("__div__")
 async def int_div(a: int, b: int) -> int:
     return int(a / b)
 
 
-@builtin("__mod__")
+@_builtin("__mod__")
 async def int_mod(a: int, b: int) -> int:
     return a % b
 
 
-@builtin("__bitand__")
+@_builtin("__bitand__")
 async def int_bitand(a: int, b: int) -> int:
     return a & b
 
 
-@builtin("__bitand__")
+@_builtin("__bitand__")
 async def bool_bitand(a: bool, b: bool) -> bool:
     return a & b
 
 
-@builtin("__bitor__")
+@_builtin("__bitor__")
 async def int_bitor(a: int, b: int) -> int:
     return a | b
 
 
-@builtin("__bitor__")
+@_builtin("__bitor__")
 async def bool_bitor(a: bool, b: bool) -> bool:
     return a | b
 
 
-@builtin("__bitxor__")
+@_builtin("__bitxor__")
 async def int_bitxor(a: int, b: int) -> int:
     return a ^ b
 
 
-@builtin("__bitxor__")
+@_builtin("__bitxor__")
 async def bool_bitxor(a: bool, b: bool) -> bool:
     return a ^ b
 
 
-@builtin("__gt__")
+@_builtin("__gt__")
 async def int_gt(a: int, b: int) -> bool:
     return a > b
 
 
-@builtin("__gt__")
+@_builtin("__gt__")
 async def str_gt(a: str, b: str) -> bool:
     return a > b
 
 
-@builtin("__gt__")
+@_builtin("__gt__")
 async def bool_gt(a: bool, b: bool) -> bool:
     return a > b
 
 
-@builtin("__lt__")
+@_builtin("__lt__")
 async def int_lt(a: int, b: int) -> bool:
     return a < b
 
 
-@builtin("__lt__")
+@_builtin("__lt__")
 async def str_lt(a: str, b: str) -> bool:
     return a < b
 
 
-@builtin("__lt__")
+@_builtin("__lt__")
 async def bool_lt(a: bool, b: bool) -> bool:
     return a < b
 
 
-@builtin("__ge__")
+@_builtin("__ge__")
 async def int_ge(a: int, b: int) -> bool:
     return a >= b
 
 
-@builtin("__ge__")
+@_builtin("__ge__")
 async def str_ge(a: str, b: str) -> bool:
     return a >= b
 
 
-@builtin("__ge__")
+@_builtin("__ge__")
 async def bool_ge(a: bool, b: bool) -> bool:
     return a >= b
 
 
-@builtin("__le__")
+@_builtin("__le__")
 async def int_le(a: int, b: int) -> bool:
     return a <= b
 
 
-@builtin("__le__")
+@_builtin("__le__")
 async def str_le(a: str, b: str) -> bool:
     return a <= b
 
 
-@builtin("__le__")
+@_builtin("__le__")
 async def bool_le(a: bool, b: bool) -> bool:
     return a <= b
 
 
-@builtin("__inv__")
+@_builtin("__inv__")
 async def int_inv(a: int) -> int:
     return ~a
 
 
-@builtin("__not__")
+@_builtin("__not__")
 async def bool_not(a: bool) -> bool:
     return not a
 
 
-@builtin("__not__")
+@_builtin("__not__")
 async def int_not(a: int) -> bool:
     return not bool(a)
 
 
-@builtin("__not__")
+@_builtin("__not__")
 async def str_not(a: str) -> bool:
     return not a
 
 
-@builtin("__neg__")
+@_builtin("__neg__")
 async def int_neg(a: int) -> int:
     return -a
 
 
-@builtin("__plus__")
+@_builtin("__plus__")
 async def int_plus(a: int) -> int:
     return +a
 
 
-@builtin("map")
+@_builtin("map")
 async def map_values(a: repomodule.Repository, b: Callable[[object], Awaitable[object]]) -> repomodule.Repository:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
 
-    async def inner(key, obj):
+    async def inner(_key, obj):
         return await b(obj)
 
     return a.map(inner)
 
 
-@builtin("map")
+@_builtin("map")
 async def map_list(a: List, b: Callable[[object], Awaitable[object]]) -> List:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with map()")
@@ -357,7 +385,7 @@ async def map_list(a: List, b: Callable[[object], Awaitable[object]]) -> List:
     return [await b(x) for x in a]
 
 
-@builtin("map")
+@_builtin("map")
 async def map_key_values(
     a: repomodule.Repository, b: Callable[[Key, object], Awaitable[object]]
 ) -> repomodule.Repository:
@@ -370,7 +398,7 @@ async def map_key_values(
     return a.map(inner)
 
 
-@builtin("rekey")
+@_builtin("rekey")
 async def rekey(a: repomodule.Repository, b: Callable[[Key], Awaitable[Key]]) -> repomodule.Repository:
     async def inner(k: str) -> str:
         return str(await b(Key(k)))
@@ -381,7 +409,7 @@ async def rekey(a: repomodule.Repository, b: Callable[[Key], Awaitable[Key]]) ->
         return repomodule.RelatedItemRepository(a, repomodule.FunctionCallMetadataRepository(inner, a))
 
 
-@builtin("filter")
+@_builtin("filter")
 async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitable[bool]]) -> repomodule.Repository:
 
     if isinstance(a, repomodule.MetadataRepository):
@@ -400,7 +428,7 @@ async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitabl
         return repomodule.FilterRepository(a, inner)
 
 
-@builtin("filter")
+@_builtin("filter")
 async def filter_repo_keyvals(
     a: repomodule.Repository, b: Callable[[Key, object], Awaitable[bool]]
 ) -> repomodule.Repository:
@@ -415,7 +443,7 @@ async def filter_repo_keyvals(
     return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
 
 
-@builtin("filter")
+@_builtin("filter")
 async def filter_repo_vals(a: repomodule.Repository, b: Callable[[object], Awaitable[bool]]) -> repomodule.Repository:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Only MetadataRepository can be used with filter() with data callback")
@@ -428,7 +456,7 @@ async def filter_repo_vals(a: repomodule.Repository, b: Callable[[object], Await
     return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
 
 
-@builtin("any")
+@_builtin("any")
 async def repo_any(a: repomodule.Repository) -> bool:
     async for _ in a:
         return True
@@ -436,24 +464,24 @@ async def repo_any(a: repomodule.Repository) -> bool:
         return False
 
 
-@builtin("__index__")
+@_builtin("__index__")
 async def list_index(a: List, b: int) -> object:
     return a[b]
 
 
-@builtin("__index__")
+@_builtin("__index__")
 async def repo_index(a: repomodule.Repository, b: Key) -> object:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Can only index MetadataRepositories")
     return await a.info(str(b))
 
 
-@builtin("sort")
+@_builtin("sort")
 async def sort_list(a: List) -> List:
     return sorted(a)
 
 
-@builtin("sort")
+@_builtin("sort")
 async def sort_list_keyed(a: List, key: Callable[[object], Awaitable[int]]) -> List:
     keys = [(await key(x), x) for x in a]
     keys.sort()
@@ -462,26 +490,26 @@ async def sort_list_keyed(a: List, key: Callable[[object], Awaitable[int]]) -> L
     return keys
 
 
-@builtin("values")
+@_builtin("values")
 async def repo_values(a: repomodule.Repository) -> List:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Can only values MetadataRepositories")
     return list((await a.info_all()).values())
 
 
-@builtin("items")
+@_builtin("items")
 async def repo_items(a: repomodule.Repository) -> List:
     if not isinstance(a, repomodule.MetadataRepository):
         raise TypeError("Can only values MetadataRepositories")
     return [[k, v] for k, v in (await a.info_all()).items()]
 
 
-@builtin("keys")
+@_builtin("keys")
 async def repo_keys(a: repomodule.Repository) -> List:
     return [Key(x) async for x in a]
 
 
-@builtin("len")
+@_builtin("len")
 async def repo_len(a: repomodule.Repository) -> int:
     result = 0
     async for _ in a:
@@ -489,12 +517,12 @@ async def repo_len(a: repomodule.Repository) -> int:
     return result
 
 
-@builtin("len")
+@_builtin("len")
 async def list_len(a: List) -> int:
     return len(a)
 
 
-@builtin("sum")
+@_builtin("sum")
 async def list_sum(a: List) -> int:
     result = 0
     try:
@@ -505,7 +533,7 @@ async def list_sum(a: List) -> int:
     return result
 
 
-@builtin("concat")
+@_builtin("concat")
 async def list_concat(a: List) -> List:
     result = []
     try:
@@ -516,7 +544,7 @@ async def list_concat(a: List) -> List:
     return result
 
 
-@builtin("index")
+@_builtin("index")
 async def list_index_str(a: List, b: str) -> int:
     if b in a:
         return a.index(b)
@@ -524,7 +552,7 @@ async def list_index_str(a: List, b: str) -> int:
         return -1
 
 
-@builtin("index")
+@_builtin("index")
 async def list_index_int(a: List, b: int) -> int:
     if b in a:
         return a.index(b)
@@ -532,7 +560,7 @@ async def list_index_int(a: List, b: int) -> int:
         return -1
 
 
-@builtin("get")
+@_builtin("get")
 async def list_get(a: List, b: int, c: object) -> object:
     if 0 <= b < len(a):
         return a[b]
@@ -541,11 +569,11 @@ async def list_get(a: List, b: int, c: object) -> object:
 
 
 # HACKS BELOW THIS POINT
-@builtin("asData")
+@_builtin("asData")
 async def list_as_data(a: List) -> object:
     return a
 
 
-@builtin("asList")
+@_builtin("asList")
 async def data_as_list(a: object) -> List:
-    return a
+    return cast(List, a)

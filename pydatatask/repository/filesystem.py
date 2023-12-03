@@ -317,7 +317,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
         super().__init__(*args, **kwargs)
         self.discard_empty = discard_empty
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         if await self.contains(job):
             await aioshutil.rmtree(self.fullpath(job))
 
@@ -329,7 +329,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
         except FileExistsError:
             pass
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         result = await super().contains(item)
         if not self.discard_empty:
             return result
@@ -449,7 +449,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
     def __getstate__(self):
         return (self.blobs, self.meta, self.pathsep)
 
-    async def delete(self, job: str):
+    async def delete(self, job: str, /):
         # UHHHHHHHHHHHHHHHHHHHHHHHH WHERE REFCOUNTING
         await self.meta.delete(job)
 

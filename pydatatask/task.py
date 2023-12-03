@@ -36,7 +36,6 @@ from pathlib import Path
 import asyncio
 import copy
 import inspect
-import json
 import logging
 import os
 import shlex
@@ -107,7 +106,11 @@ async def render_template(template, env: Dict[str, Any]):
         enable_async=True,
         keep_trailing_newline=True,
     )
-    j.filters["shquote"] = shlex.quote
+
+    def shquote(s):
+        return shlex.quote(str(s))
+
+    j.filters["shquote"] = shquote
     j.filters["to_yaml"] = yaml.safe_dump
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
@@ -264,6 +267,10 @@ class Task(ABC):
         return result
 
     def mk_query_function(self, query_name: str) -> Tuple[Any, Any]:
+        """Generate a shell function (???
+
+        abstraction leak) for the given query.
+        """
         parameters = self.queries[query_name].parameters
         return (
             f"""
@@ -276,7 +283,12 @@ class Task(ABC):
                 esac
                 shift 2
             done
-            {self.host.mk_http_post("$INPUT_FILE", f"{self.agent_url}/query/{self.name}/{query_name}", {"Cookie": "secret=" + self.agent_secret}, "/dev/stdout")}
+            {self.host.mk_http_post(
+                "$INPUT_FILE",
+                f"{self.agent_url}/query/{self.name}/{query_name}",
+                {"Cookie": "secret=" + self.agent_secret},
+                "/dev/stdout"
+            )}
             rm $INPUT_FILE
         }}
         """,
@@ -284,6 +296,10 @@ class Task(ABC):
         )
 
     def mk_download_function(self, link_name: str) -> Tuple[Any, Any]:
+        """Generate a shell function (???
+
+        abstraction leak) to download a parameterized entry from the given repository.
+        """
         return (
             f"""
         download_{link_name}() {{
@@ -294,6 +310,7 @@ class Task(ABC):
         )
 
     def mk_repo_put_cokey(self, filename: str, link_name: str, cokey_name: str, job: str) -> Any:
+        """Generate logic to upload a cokeyed link."""
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         result = self.host.mk_http_post(
@@ -358,7 +375,12 @@ class Task(ABC):
                         ln -sf "$PWD/$f" {upload}
                         {self.mk_repo_put(upload, link_name, "$ID")}
                         rm {upload}
-                        {'; '.join(f'ln -s "{cokeydir}/$f" {upload} && ({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID")}); rm {upload}' for cokey, cokeydir in cokeyed.items())}
+                        {'; '.join(
+                            f'ln -s "{cokeydir}/$f" {upload} && '
+                            f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID")}); '
+                            f'rm {upload}'
+                            for cokey, cokeydir
+                            in cokeyed.items())}
                         echo $ID >"{scratch}/$f"
                     fi
                 done
@@ -546,7 +568,7 @@ class Task(ABC):
             if not isinstance(related, repomodule.MetadataRepository):
                 raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
-            async def mapper(job, info):
+            async def mapper(_job, info):
                 try:
                     return str(supergetattr_path(info, splitkey[1:]))
                 except:
@@ -577,7 +599,7 @@ class Task(ABC):
         if not isinstance(related, repomodule.MetadataRepository):
             raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
-        async def mapper(job, info):
+        async def mapper(_job, info):
             return str(supergetattr_path(info, splitkey[1:]))
 
         mapped = related.map(mapper)

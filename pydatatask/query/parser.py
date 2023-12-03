@@ -1,9 +1,15 @@
-from typing import Dict, List, Tuple, TypeAlias, Union
+"""The ply parser definitions for the query language.
+
+You only care about ``expr_parser.parse(str)``.
+"""
+# pylint: disable=missing-function-docstring,missing-class-docstring
+
+from typing import List, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum, auto
 
-import ply.lex as lex
-import ply.yacc as yacc
+from ply import lex, yacc
+from typing_extensions import TypeAlias
 
 # Token definitions
 tokens = (
@@ -440,6 +446,8 @@ class ListLiteral(Expression):
 
 
 class QueryValueType(Enum):
+    """The enum for the kinds of types which are representable in the query language."""
+
     Bool = auto()
     Int = auto()
     String = auto()

@@ -146,7 +146,7 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
     def __repr__(self):
         return f"<{type(self).__name__} {self.bucket}/{self.prefix}*{self.suffix}>"
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         try:
             await self.client.head_object(Bucket=self.bucket, Key=self.object_name(item))
         except botocore.exceptions.ClientError:
@@ -207,7 +207,7 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         else:
             raise ValueError(mode)
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
 
 
@@ -218,7 +218,7 @@ class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
         super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)
 
     @job_getter
-    async def info(self, job):
+    async def info(self, job, /):
         try:
             return await super().info(job)
         except botocore.exceptions.ClientError as e:

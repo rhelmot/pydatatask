@@ -1,3 +1,9 @@
+"""In order to actually execute query language internal ASTs, use the visitor subclass `Executor` in this module.
+
+The rest of this module is runtime support for this naive form of execution.
+"""
+# pylint: disable=missing-function-docstring,missing-class-docstring
+
 from __future__ import annotations
 
 from typing import (
@@ -32,11 +38,13 @@ from pydatatask.query.visitor import Visitor
 
 
 class Key(str):
-    pass
+    """The representation of query language keys, which are just strings."""
 
 
 @dataclass
 class QueryValue:
+    """A tagged union for query language values."""
+
     type: QueryValueType
     bool_value: Optional[bool] = None
     int_value: Optional[int] = None
@@ -47,9 +55,11 @@ class QueryValue:
     data_value: Optional[Any] = None
 
     def typecheck(self, ty: "TemplateType"):
+        """Check whether the given type matches this object."""
         return isinstance(ty, QueryValueType) and self.type == ty
 
     def unwrap(self):
+        """Extract the untagged value from the union."""
         if self.type == QueryValueType.String:
             return self.string_value
         if self.type == QueryValueType.Key:
@@ -66,6 +76,7 @@ class QueryValue:
 
     @staticmethod
     def wrap(value, cache: bool = True) -> "QueryValue":
+        """Create a QueryValue from an untagged value based on its type."""
         if isinstance(value, Key):
             return QueryValue(QueryValueType.Key, key_value=str(value))
         if isinstance(value, str):
@@ -142,6 +153,8 @@ class ResolvedFunction:
 
 @dataclass
 class Scope:
+    """The data storage for the query executor."""
+
     local_values: Dict[str, QueryValue]
     global_values: Dict[str, QueryValue]
     global_functions: Dict[str, Dict[ArgTypes, FunctionDefinition]]
@@ -171,6 +184,7 @@ class Scope:
 
     @classmethod
     def base_scope(cls, values: Mapping[str, QueryValue], functions: Mapping[str, List[FunctionDefinition]]) -> "Scope":
+        """Create a brand new data store with the given values and functions in scope."""
         values_2 = {}
         values_2["true"] = QueryValue(QueryValueType.Bool, bool_value=True)
         values_2["false"] = QueryValue(QueryValueType.Bool, bool_value=False)
@@ -184,7 +198,7 @@ class Scope:
                 else:
                     global_functions[name][func.type.arg_types] = func
 
-        return Scope({}, values_2, global_functions, {}, global_templates, defaultdict(dict))
+        return Scope({}, values_2, dict(global_functions), {}, dict(global_templates), defaultdict(dict))
 
     def lookup_value(self, name: str) -> QueryValue:
         r = self.local_values.get(name, None)
@@ -250,12 +264,18 @@ T = TypeVar("T")
 
 
 def product(args: Iterable[Union[Iterable[FunctionType], Iterable[TemplateType]]]) -> Iterator[TemplateTypes]:
-    # args: a list of arguments, some of which are lists of possible signatures and some of which are lists containing a single type (for simplicity)
+    # args: a list of arguments, some of which are lists of possible signatures and some of which are lists containing
+    # a single type (for simplicity)
     # result: an iterator of lists of arguments, each of which has only one possible signature per argument
     yield from iproduct(*args)
 
 
 class Executor(Visitor):
+    """The star of the show!
+
+    Visit an expression with this class to return its computed value.
+    """
+
     def __init__(self, scope: Scope):
         self.scope = scope
 

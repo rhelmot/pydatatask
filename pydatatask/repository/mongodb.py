@@ -37,10 +37,10 @@ class MongoMetadataRepository(MetadataRepository):
         """
         return self._database()[self._collection]
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return await self.collection.count_documents({"_id": item}) != 0
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         await self.collection.delete_one({"_id": job})
 
     async def unfiltered_iter(self):
@@ -48,7 +48,7 @@ class MongoMetadataRepository(MetadataRepository):
             yield x["_id"]
 
     @job_getter
-    async def info(self, job):
+    async def info(self, job, /):
         """The info of a mongo metadata repository is the literal value stored in the repository with identifier
         ``job``."""
         # WHY does mypy think this doesn't work
@@ -61,7 +61,7 @@ class MongoMetadataRepository(MetadataRepository):
         return {entry["_id"]: entry async for entry in self.collection.find({})}
 
     @job_getter
-    async def dump(self, job, data):
+    async def dump(self, job, data, /):
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         await self.collection.replace_one({"_id": job}, data, upsert=True)

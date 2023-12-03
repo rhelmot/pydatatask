@@ -1,3 +1,4 @@
+# pylint: disable=missing-module-docstring,missing-function-docstring
 from abc import ABC, abstractmethod
 
 from .parser import (
@@ -15,6 +16,8 @@ from .parser import (
 
 
 class Visitor(ABC):
+    """A visitor base class for parsed pydatatask query ASTs."""
+
     async def visit(self, obj):
         name = type(obj).__name__
         func = getattr(self, f"visit_{name}")

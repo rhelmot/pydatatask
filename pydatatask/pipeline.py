@@ -139,7 +139,7 @@ class Pipeline:
                         link.repo,
                         None,
                         self._make_single_func(attrs["rfollow"]),
-                        multi_meta=None,
+                        cokeyed=None,
                         **link_attrs,
                     )
 
@@ -313,7 +313,7 @@ class Pipeline:
         if not isinstance(related, repomodule.MetadataRepository):
             raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
-        async def mapper(job, info):
+        async def mapper(_job, info):
             return str(supergetattr_path(info, splitkey[1:]))
 
         mapped = related.map(mapper)

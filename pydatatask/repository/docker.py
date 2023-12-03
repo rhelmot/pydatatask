@@ -90,7 +90,7 @@ class DockerRepository(Repository):
         else:
             dxf_obj._headers = {"Authorization": "Basic " + result}
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         # if not await self.contains(job):
         #    return
 

@@ -23,10 +23,8 @@ tasks:
       output:
         repo: output
         kind: StreamingOutputFilepath
-        multi_meta: outputMeta
-      outputMeta:
-        repo: outputMeta
-        kind: null
+        cokeyed:
+          meta: outputMeta
     executable:
       cls: Process
       args:
@@ -38,7 +36,10 @@ tasks:
           while [ -z "$BROKEN" ]; do
             for f in $(ls {{ input | shquote }}); do
               full={{input | shquote}}/$f
+              touch {{ output.lock | shquote}}/$f
+              echo "parent: $f" > {{ output.meta | shquote }}/$f
               cat /tmp/hoo $full >{{ output | shquote }}/$f
+              rm {{ output.lock | shquote}}/$f
               if [ "$(cat $full)" = "done" ]; then
                 BROKEN=1
               fi

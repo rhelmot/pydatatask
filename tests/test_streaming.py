@@ -28,7 +28,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
         inputScope = cast(MetadataRepository, task.links["inputScope"].repo)
         inputBlob = cast(BlobRepository, task.links["input"].repo)
         outputBlob = cast(BlobRepository, task.links["output"].repo)
-        outputMeta = cast(MetadataRepository, task.links["outputMeta"].repo)
+        outputMeta = cast(MetadataRepository, task.links["output"].cokeyed["meta"])
         # logs = cast(BlobRepository, task.links["stdout"].repo)
         await task.manager.launch_agent(pipeline)
         try:
