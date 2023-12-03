@@ -48,7 +48,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
             await pydatatask.print_status(pipeline, False)
-        assert captured.getvalue() == "task\ntask.repo0 100\ntask.done 100\ntask.repo1 99\n\n"
+        assert captured.getvalue() == "task\n  task.repo0 100\n  task.done 100\n  task.repo1 99\n\n\n"
 
         captured = io.StringIO()
         with contextlib.redirect_stdout(captured):
