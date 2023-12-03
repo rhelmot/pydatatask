@@ -106,12 +106,17 @@ class QuerySpec:
 @_dataclass_serial
 class TaskSpec:
     executable: Dispatcher
+    annotations: Dict[str, Any] = field(default_factory=dict)
     executor: Optional[str] = None
     done: Optional[str] = None
     links: Dict[str, LinkSpec] = field(default_factory=dict)
     queries: Dict[str, QuerySpec] = field(default_factory=dict)
     annotations: Dict[str, Any] = field(default_factory=dict)
+    ready: Optional[str] = None
+    window: Dict[str, str] = field(default_factory=dict)
+    timeout: Dict[str, str] = field(default_factory=dict)
     long_running: bool = False
+    links: Dict[str, LinkSpec] = field(default_factory=dict)
 
 
 @_dataclass_serial
@@ -418,7 +423,13 @@ class PipelineStaging:
         spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
         for child in self._iter_children():
             if child.spec.lockstep:
-                if subprocess.run(child.spec.lockstep, shell=True, cwd=child.basedir, check=False).returncode != 0:
+                if subprocess.run(
+                        'set -e\n' + child.spec.lockstep,
+                        shell=True,
+                        cwd=child.basedir,
+                        check=False
+                    ).returncode != 0:
+
                     raise Exception(
                         f"Could not lock pipeline: lockstep of {child.basedir / child.filename} failed:\n"
                         f"{child.spec.lockstep.strip()}"

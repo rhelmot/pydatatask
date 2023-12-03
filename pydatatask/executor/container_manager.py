@@ -184,7 +184,7 @@ class DockerContainerManager(AbstractContainerManager):
             for (name, info), container in zip(infos_and_names, containers)
             if info["State"]["Status"] not in ("exited",)
             and name is not None
-            and timeout is not None
+            and timeout
             and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout
         ]
         await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out))
@@ -285,7 +285,7 @@ class KubeContainerManager(AbstractContainerManager):
             pod
             for pod in pods
             if pod.status.phase not in ("Succeeded", "Failed")
-            and timeout is not None
+            and timeout
             and now - pod.metadata.creation_timestamp > timeout
         ]
         results = await asyncio.gather(

@@ -309,7 +309,7 @@ async def _walk(top, onerror=None, followlinks=False) -> AsyncIterator[Tuple[str
 class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
     """A directory repository is a repository which stores its data as a basic on-local-disk filesystem."""
 
-    def __init__(self, *args, discard_empty=False, **kwargs):
+    def __init__(self, *args, discard_empty=True, **kwargs):
         """
         :param discard_empty: Whether only directories containing at least one member should be considered as "present"
                               in the repository.

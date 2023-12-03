@@ -26,6 +26,7 @@ The help screen should look something like this:
 """
 
 from __future__ import annotations
+from collections import defaultdict
 
 from typing import Callable, Dict, Iterable, List, Optional, Set, Union
 from pathlib import Path
@@ -38,7 +39,7 @@ import re
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
-import IPython
+import yaml
 
 from pydatatask.agent import build_agent_app
 from pydatatask.agent import cat_data as cat_data_inner
@@ -111,6 +112,20 @@ def main(
         dest="all_repos",
         action="store_true",
         help="Show internal repositories",
+    )
+    parser_status.add_argument(
+        '--json',
+        '-j',
+        dest='json',
+        action='store_true',
+        help='Show status as JSON',
+    )
+    parser_status.add_argument(
+        '--output',
+        '-o',
+        dest='output',
+        type=Path,
+        help='Output path for JSON',
     )
     parser_status.set_defaults(func=print_status)
 
@@ -240,7 +255,9 @@ def shell(pipeline: Pipeline):
     pydatatask = __import__("pydatatask")
     assert pipeline
     assert pydatatask
-    IPython.embed(using="asyncio")
+
+    ipython = __import__("IPython")
+    ipython.embed(using="asyncio")
 
 
 async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
@@ -303,7 +320,7 @@ async def run(
         if launch_once:
             func = update_only_update_flush
         await asyncio.sleep(1)
-        if timeout is not None and asyncio.get_running_loop().time() - start > timeout:
+        if timeout and asyncio.get_running_loop().time() - start > timeout:
             raise TimeoutError("Pipeline run timeout")
 
 
@@ -319,7 +336,7 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
             yield link
 
 
-async def print_status(pipeline: Pipeline, all_repos: bool):
+async def print_status(pipeline: Pipeline, all_repos: bool, json: bool, output: Optional[Path]):
     async def inner(repo: repomodule.Repository):
         the_sum = 0
         async for _ in repo:
@@ -330,15 +347,33 @@ async def print_status(pipeline: Pipeline, all_repos: bool):
     repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
+
+    result = defaultdict(dict)
     for task in pipeline.tasks.values():
-        print(task.name)
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
             if link in link_list:
-                print(f"{task.name}.{link_name} {repo_sizes[link.repo]}")
-        print()
+                result[task.name][link_name] = repo_sizes[link.repo]
+
+    msg = ''
+    if not json:
+        for task_name, links in result.items():
+            msg += f'{task_name}\n'
+            for link_name, sizes in links.items():
+                msg += f"  {task_name}.{link_name} {sizes}\n"
+            msg += '\n'
+    else:
+        import json
+        msg = json.dumps(result, indent=2)
+
+    if output is None:
+        print(msg)
+    else:
+        with open(output, 'w') as f:
+            f.write(msg)
+
 
 
 async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
@@ -455,7 +490,7 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
         repos = list(pipeline.tasks)
     new_repos = []
-    for repo_name in repos:
+    for repo_name in sorted(repos):
         if "." in repo_name:
             new_repos.append(repo_name)
         else:
@@ -468,10 +503,20 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
     repos = new_repos
 
     jobs = []
+
+    repo_to_path_mapping = {}
+    name_to_path_mapping = defaultdict(dict)
     for repo_name in repos:
         repo_base = backup_base / repo_name
         task_name, repo_basename = repo_name.split(".")
         repo = pipeline.tasks[task_name].links[repo_basename].repo
+        if repo in repo_to_path_mapping:
+            name_to_path_mapping[task_name][repo_basename] = repo_to_path_mapping[repo]
+            continue
+
+        repo_to_path_mapping[repo] = f'./{repo_name}/'
+        name_to_path_mapping[task_name][repo_basename] = f'./{repo_name}/'
+
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repomodule.FileRepository(
                 repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
@@ -491,39 +536,54 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         else:
             print("Warning: cannot backup", repo)
 
+    # write out the name to path mapping to backup_base / "repo_mapping.yaml"
+    async def write_file(path, data):
+        async with aiofiles.open(path, "w") as f:
+            await f.write(data)
+    jobs.append(write_file(backup_base / "repo_mapping.yaml", yaml.safe_dump(dict(name_to_path_mapping))))
     await asyncio.gather(*jobs)
-
 
 async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
+
+    async with aiofiles.open(backup_base / "repo_mapping.yaml") as f:
+        mapping = yaml.safe_load(await f.read())
+
     if all_repos:
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
-        repos = [x.name for x in backup_base.iterdir()]
+        repos = list(mapping.keys()) # just use the keys to include ALL tasks
+
+
+    import ipdb; ipdb.set_trace()
 
     jobs = []
-    for repo_name in repos:
-        repo_base = backup_base / repo_name
-        task_name, repo_basename = repo_name.split(".")
-        repo = pipeline.tasks[task_name].links[repo_basename].repo
-        if isinstance(repo, repomodule.BlobRepository):
-            new_repo_file = repomodule.FileRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
-            await new_repo_file.validate()
-            jobs.append(_repo_copy_blob(new_repo_file, repo))
-        elif isinstance(repo, repomodule.MetadataRepository):
-            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
-            await new_repo_meta.validate()
-            jobs.append(_repo_copy_meta(new_repo_meta, repo))
-        elif isinstance(repo, repomodule.FilesystemRepository):
-            new_repo_fs = repomodule.DirectoryRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
-            await new_repo_fs.validate()
-            jobs.append(_repo_copy_fs(new_repo_fs, repo))
-        else:
-            print("Warning: cannot backup", repo)
+    for task_name in mapping:
+        for repo_basename, repo_path in mapping[task_name].items():
+            # simply overwrite the real name being loaded with the actual one
+            if task_name not in repos and f'{task_name}.{repo_basename}' not in repos:
+                continue
+
+            repo_base = backup_base / repo_path
+            repo = pipeline.tasks[task_name].links[repo_basename].repo
+            if isinstance(repo, repomodule.BlobRepository):
+                new_repo_file = repomodule.FileRepository(
+                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+                )
+                await new_repo_file.validate()
+                jobs.append(_repo_copy_blob(new_repo_file, repo))
+            elif isinstance(repo, repomodule.MetadataRepository):
+                new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
+                await new_repo_meta.validate()
+                jobs.append(_repo_copy_meta(new_repo_meta, repo))
+            elif isinstance(repo, repomodule.FilesystemRepository):
+                new_repo_fs = repomodule.DirectoryRepository(
+                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+                )
+                await new_repo_fs.validate()
+                jobs.append(_repo_copy_fs(new_repo_fs, repo))
+            else:
+                print("Warning: cannot backup", repo)
 
     await asyncio.gather(*jobs)
 
