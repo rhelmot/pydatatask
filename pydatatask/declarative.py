@@ -557,6 +557,7 @@ def build_task_picker(
             "ProcessTask",
             ProcessTask,
             {
+                # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
                 "quota_manager": make_picker("QuotaManager", quotas),
@@ -567,7 +568,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
-
+                # Process-specific
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
                 "job_quota": quota_constructor,
@@ -583,6 +584,7 @@ def build_task_picker(
             "KubeTask",
             KubeTask,
             {
+                # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
                 "quota_manager": make_picker("QuotaManager", quotas),
@@ -593,10 +595,9 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
-
-                "template_env": make_dict_parser("environ", str, str),
-
+                # Kube-specific
                 "template": str,
+                "template_env": make_dict_parser("environ", str, str),
                 "logs": make_picker("Repository", repos),
             },
         ),
@@ -604,6 +605,7 @@ def build_task_picker(
             "ContainerTask",
             ContainerTask,
             {
+                # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
                 "quota_manager": make_picker("QuotaManager", quotas),
@@ -614,7 +616,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
-
+                # Container-specific
                 "template": str,
                 "image": str,
                 "environ": make_dict_parser("environ", str, str),
