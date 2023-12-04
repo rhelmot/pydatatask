@@ -370,7 +370,7 @@ async def print_status(pipeline: Pipeline, all_repos: bool, as_json: bool = Fals
     if output is None:
         print(msg)
     else:
-        with open(output, "w") as f:
+        with open(output, "w", encoding="utf-8") as f:
             f.write(msg)
 
 
