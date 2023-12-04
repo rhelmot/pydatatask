@@ -692,7 +692,9 @@ class Task(ABC):
         """
         raise NotImplementedError
 
-    async def build_template_env(self, env_src: Dict[str, Any], orig_job: str) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
+    async def build_template_env(
+        self, env_src: Dict[str, Any], orig_job: str
+    ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         """Transform an environment source into an environment according to Links.
 
         Returns the environment, a list of preambles, and a list of epilogues. These may be of any type depending on the
@@ -1168,7 +1170,7 @@ class ProcessTask(Task):
         pid_map = {meta["pid"]: job for job, meta in job_map.items()}
         now = datetime.now(tz=timezone.utc)
         timedout_pid_set = {
-            meta['pid'] for job, meta in job_map.items() if self.timeout and now - meta["start_time"] > self.timeout
+            meta["pid"] for job, meta in job_map.items() if self.timeout and now - meta["start_time"] > self.timeout
         }
         expected_live = set(pid_map)
         try:
