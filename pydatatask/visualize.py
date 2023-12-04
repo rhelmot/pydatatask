@@ -80,7 +80,7 @@ class TaskVisualizer:
         self.nodes = {}
 
         # maps node -> job -> exit code
-        self.exit_codes = defaultdict(dict)
+        self.exit_codes: defaultdict[Any, Dict[str, int]] = defaultdict(dict)
 
         self.app = dash.Dash("pydatatask", index_string=_default_index)
         self.app.layout = self.generate_layout()
