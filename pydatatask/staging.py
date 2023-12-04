@@ -423,12 +423,12 @@ class PipelineStaging:
         spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
         for child in self._iter_children():
             if child.spec.lockstep:
-                if subprocess.run(
-                        'set -e\n' + child.spec.lockstep,
-                        shell=True,
-                        cwd=child.basedir,
-                        check=False
-                    ).returncode != 0:
+                if (
+                    subprocess.run(
+                        "set -e\n" + child.spec.lockstep, shell=True, cwd=child.basedir, check=False
+                    ).returncode
+                    != 0
+                ):
 
                     raise Exception(
                         f"Could not lock pipeline: lockstep of {child.basedir / child.filename} failed:\n"

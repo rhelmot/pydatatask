@@ -156,6 +156,7 @@ class TaskVisualizer:
 
     async def get_task_info(self, nodes):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
+
         async def get_node_info(node):
             repo_entry_counts: Dict[Any, int] = {}
             for link in node.links:
@@ -174,7 +175,6 @@ class TaskVisualizer:
 
         all_node_info = await asyncio.gather(*[get_node_info(node) for node in nodes])
         return all_node_info
-
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
