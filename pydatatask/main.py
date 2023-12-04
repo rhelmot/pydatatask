@@ -348,7 +348,7 @@ async def print_status(pipeline: Pipeline, all_repos: bool, as_json: bool = Fals
     repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
-    result = defaultdict(dict)
+    result: defaultdict[str, Dict[str, int]] = defaultdict(dict)
     for task in pipeline.tasks.values():
         for link_name, link in sorted(
             task.links.items(),
@@ -502,8 +502,8 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
 
     jobs = []
 
-    repo_to_path_mapping = {}
-    name_to_path_mapping = defaultdict(dict)
+    repo_to_path_mapping: Dict[str, str] = {}
+    name_to_path_mapping: defaultdict[str, Dict[str, str]] = defaultdict(dict)
     for repo_name in repos:
         repo_base = backup_base / repo_name
         task_name, repo_basename = repo_name.split(".")
