@@ -557,6 +557,7 @@ def build_task_picker(
             "ProcessTask",
             ProcessTask,
             {
+                # fmt: off
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
@@ -568,6 +569,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+
                 # Process-specific
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
@@ -578,12 +580,14 @@ def build_task_picker(
                 "stderr": lambda thing: pydatatask.task.STDOUT
                 if thing == "STDOUT"
                 else make_picker("Repository", repos)(thing),
+                # fmt: on
             },
         ),
         "Kubernetes": make_annotated_constructor(
             "KubeTask",
             KubeTask,
             {
+                # fmt: off
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
@@ -595,16 +599,19 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+
                 # Kube-specific
                 "template": str,
                 "template_env": make_dict_parser("environ", str, str),
                 "logs": make_picker("Repository", repos),
+                # fmt: on
             },
         ),
         "Container": make_annotated_constructor(
             "ContainerTask",
             ContainerTask,
             {
+                # fmt: off
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
@@ -616,6 +623,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+
                 # Container-specific
                 "template": str,
                 "image": str,
@@ -625,6 +633,7 @@ def build_task_picker(
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,
+                # fmt: on
             },
         ),
     }
