@@ -40,6 +40,7 @@ from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
 import yaml
+import json
 
 from pydatatask.agent import build_agent_app
 from pydatatask.agent import cat_data as cat_data_inner
@@ -336,7 +337,7 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
             yield link
 
 
-async def print_status(pipeline: Pipeline, all_repos: bool, json: bool = False, output: Optional[Path] = None):
+async def print_status(pipeline: Pipeline, all_repos: bool, as_json: bool = False, output: Optional[Path] = None):
     async def inner(repo: repomodule.Repository):
         the_sum = 0
         async for _ in repo:
@@ -357,15 +358,13 @@ async def print_status(pipeline: Pipeline, all_repos: bool, json: bool = False, 
                 result[task.name][link_name] = repo_sizes[link.repo]
 
     msg = ""
-    if not json:
+    if not as_json:
         for task_name, links in result.items():
             msg += f"{task_name}\n"
             for link_name, sizes in links.items():
                 msg += f"  {task_name}.{link_name} {sizes}\n"
             msg += "\n"
     else:
-        import json
-
         msg = json.dumps(result, indent=2)
 
     if output is None:

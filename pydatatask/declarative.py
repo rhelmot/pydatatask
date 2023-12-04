@@ -562,10 +562,11 @@ def build_task_picker(
                 "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
+                "links": links_constructor,
+                "queries": queries_constructor,
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
-                "links": links_constructor,
 
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
@@ -576,9 +577,6 @@ def build_task_picker(
                 "stderr": lambda thing: pydatatask.task.STDOUT
                 if thing == "STDOUT"
                 else make_picker("Repository", repos)(thing),
-                "ready": make_picker("Repository", repos),
-                "links": links_constructor,
-                "queries": queries_constructor,
             },
         ),
         "Kubernetes": make_annotated_constructor(
@@ -589,13 +587,14 @@ def build_task_picker(
                 "executor": make_picker("Executor", executors),
                 "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
+                "ready": make_picker("Repository", repos),
+                "links": links_constructor,
+                "queries": queries_constructor,
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
-                "template_env": make_dict_parser("environ", str, str),
-                "links": links_constructor,
                 "long_running": parse_bool,
-                "queries": queries_constructor,
-                "ready": make_picker("Repository", repos),
+
+                "template_env": make_dict_parser("environ", str, str),
 
                 "template": str,
                 "logs": make_picker("Repository", repos),
@@ -609,11 +608,12 @@ def build_task_picker(
                 "executor": make_picker("Executor", executors),
                 "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
+                "ready": make_picker("Repository", repos),
+                "links": links_constructor,
+                "queries": queries_constructor,
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
-                "links": links_constructor,
                 "long_running": parse_bool,
-                "ready": make_picker("Repository", repos),
 
                 "template": str,
                 "image": str,
@@ -623,8 +623,6 @@ def build_task_picker(
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,
-                "long_running": parse_bool,
-                "queries": queries_constructor,
             },
         ),
     }
