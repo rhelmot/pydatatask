@@ -42,15 +42,15 @@ from networkx.drawing.nx_pydot import write_dot
 import aiofiles
 import yaml
 
-from pydatatask.agent import build_agent_app
-from pydatatask.agent import cat_data as cat_data_inner
-from pydatatask.agent import inject_data as inject_data_inner
-from pydatatask.utils import async_copyfile
-
 from . import repository as repomodule
 from . import task as taskmodule
+from .agent import build_agent_app
+from .agent import cat_data as cat_data_inner
+from .agent import inject_data as inject_data_inner
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
+from .repository import Repository
+from .utils import async_copyfile
 from .visualize import run_viz
 
 try:
@@ -502,7 +502,7 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
 
     jobs = []
 
-    repo_to_path_mapping: Dict[str, str] = {}
+    repo_to_path_mapping: Dict[Repository, str] = {}
     name_to_path_mapping: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
     for repo_name in repos:
         repo_base = backup_base / repo_name
