@@ -1,6 +1,6 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
-from typing import Any, Dict
+from typing import Any, DefaultDict, Dict
 from collections import defaultdict
 from multiprocessing import Process, Queue
 import asyncio
@@ -80,7 +80,7 @@ class TaskVisualizer:
         self.nodes = {}
 
         # maps node -> job -> exit code
-        self.exit_codes: defaultdict[Any, Dict[str, int]] = defaultdict(dict)
+        self.exit_codes: DefaultDict[Any, Dict[str, int]] = defaultdict(dict)
 
         self.app = dash.Dash("pydatatask", index_string=_default_index)
         self.app.layout = self.generate_layout()
