@@ -555,10 +555,6 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
         repos = list(mapping.keys())  # just use the keys to include ALL tasks
 
-    import ipdb
-
-    ipdb.set_trace()
-
     jobs = []
     for task_name in mapping:
         for repo_basename, repo_path in mapping[task_name].items():
