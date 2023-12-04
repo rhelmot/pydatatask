@@ -86,8 +86,9 @@ class TaskVisualizer:
         self.app.layout = self.generate_layout()
         self.register_callbacks()
 
-    def left_to_right_layout(self, G, ranksep=0.1):
-        pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args=f"-Grankdir=LR -Gsplines=ortho")
+    def left_to_right_layout(self, G):
+        """This doesn't really need docs, does it?"""
+        pos = nx.nx_agraph.graphviz_layout(G, prog="dot", args="-Grankdir=LR -Gsplines=ortho")
         return pos
 
     @staticmethod
@@ -201,6 +202,10 @@ class TaskVisualizer:
 
     @staticmethod
     def generate_file_tree_html(path):
+        """Generates a collapsible file tree for the given path.
+
+        This is used to display the contents of a repository.
+        """
         items = []
         for root, dirs, files in os.walk(path):
             short_root = os.path.basename(root)
@@ -229,12 +234,14 @@ class TaskVisualizer:
         return html.Div(items)
 
     def register_callbacks(self):
+        """Registers the callbacks for the dash app."""
+
         @self.app.callback(
             Output("file-contents", "children"),
             [Input({"type": "file", "index": dash.dependencies.ALL}, "n_clicks")],
             [dash.dependencies.State({"type": "file", "index": dash.dependencies.ALL}, "id")],
         )
-        def display_contents(n_clicks, id):
+        def display_contents(n_clicks, _id):
             # Check which file was clicked
             ctx = dash.callback_context
             if not ctx.triggered:
@@ -250,7 +257,7 @@ class TaskVisualizer:
 
             # Read the file contents
             try:
-                with open(file_path, "r") as file:
+                with open(file_path, "r", encoding="utf-8") as file:
                     contents = file.read()
                 return html.Div(
                     [
@@ -266,7 +273,7 @@ class TaskVisualizer:
                         ),
                     ]
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 return html.Div(
                     [
                         html.H1(file_path),
@@ -303,7 +310,7 @@ class TaskVisualizer:
             return output
 
         @self.app.callback(Output("network-graph", "figure"), [Input("interval-component", "n_intervals")])
-        def update_graph(n):
+        def update_graph(n):  # pylint: disable=unused-argument
             pl = self.pipeline
             new_graph = pl.task_graph
             pos = self.left_to_right_layout(new_graph)
