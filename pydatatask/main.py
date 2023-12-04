@@ -32,6 +32,7 @@ from collections import defaultdict
 from pathlib import Path
 import argparse
 import asyncio
+import json
 import logging
 import os
 import re
@@ -40,7 +41,6 @@ from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
 import yaml
-import json
 
 from pydatatask.agent import build_agent_app
 from pydatatask.agent import cat_data as cat_data_inner
