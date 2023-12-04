@@ -49,7 +49,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
 
         repo = DerivedRepository()
 
-        async def mapper(info):
+        async def mapper(job, info):
             return info.upper()
 
         async def filter(job):

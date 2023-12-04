@@ -64,4 +64,8 @@ copyright = f"{datetime.datetime.now().year}, Audrey Dutcher"
 
 import subprocess
 
-subprocess.run("sphinx-apidoc ../pydatatask --force --module-first --no-toc -o . --separate", shell=True, check=True)
+subprocess.run(
+    "sphinx-apidoc --force --module-first --no-toc -o . --separate ../pydatatask '../pydatatask/query/parse*'",
+    shell=True,
+    check=True,
+)

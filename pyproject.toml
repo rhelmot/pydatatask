@@ -38,6 +38,7 @@ dependencies = [
     "dash",
     "plotly",
     "numpy",
+    "ply",
 ]
 
 [project.scripts]
@@ -105,6 +106,7 @@ version = {attr = "pydatatask.__version__"}
 [tool.mypy]
 python_version = "3.8"
 check_untyped_defs = true
+exclude = "parsetab.py$"
 
 # https://github.com/tomplus/kubernetes_asyncio/issues/230
 [[tool.mypy.overrides]]
@@ -120,6 +122,10 @@ ignore_missing_imports = true
 # https://github.com/plotly/plotly.py/pull/4424
 [[tool.mypy.overrides]]
 module = "plotly.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ply.*"
 ignore_missing_imports = true
 
 # https://github.com/plotly/dash/issues/2233
@@ -174,6 +180,7 @@ disable = [
     "cyclic-import",
     "broad-exception-raised",  # TODO fix
     "invalid-overridden-method",  # complains about the sync/async problem with abstract methods
+    "duplicate-code",  # thinks a bunch of abstractmethod notimplementederrors are duplicate
 ]
 
 [tool.coverage.report]

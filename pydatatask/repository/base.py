@@ -10,7 +10,7 @@ from typing import (
     Callable,
 )
 from typing import Counter as TypedCounter
-from typing import Dict, Literal, Optional, Union, overload
+from typing import Dict, Literal, Optional, Set, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
@@ -48,6 +48,20 @@ def job_getter(f):
     return f
 
 
+class StrDict(dict):
+    """A dict with a custom str representation.
+
+    Useful for templating.
+    """
+
+    def __init__(self, __val, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.string = __val
+
+    def __str__(self):
+        return self.string
+
+
 # Base Classes
 class Repository(ABC):
     """A repository is a key-value store where the keys are names of jobs. Since the values have unspecified
@@ -62,7 +76,7 @@ class Repository(ABC):
     CHARSET = CHARSET_START_END = string.ascii_letters + string.digits
 
     @classmethod
-    def is_valid_job_id(cls, job: str):
+    def is_valid_job_id(cls, job: str, /):
         """Determine whether the given job identifier is valid, i.e. that it contains only valid characters (numbers
         and letters by default)."""
         return (
@@ -72,7 +86,7 @@ class Repository(ABC):
             and job[-1] in cls.CHARSET_START_END
         )
 
-    async def filter_jobs(self, iterator: AsyncIterable[str]) -> AsyncIterator[str]:
+    async def filter_jobs(self, iterator: AsyncIterable[str], /) -> AsyncIterator[str]:
         """Apply `is_valid_job_id` as a filter to an async iterator."""
         async for job in iterator:
             if self.is_valid_job_id(job):
@@ -80,7 +94,7 @@ class Repository(ABC):
             else:
                 l.warning("Skipping %s %s - not a valid job id", self, repr(job))
 
-    async def contains(self, item):
+    async def contains(self, item: str, /):
         """Determine whether the given job identifier is present in this repository.
 
         The default implementation is quite inefficient; please override this if possible.
@@ -135,24 +149,22 @@ class Repository(ABC):
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
             filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
-            preamble, epilogue = task.mk_watchdir_upload(
+            preamble, epilogue, extra_dirs = task.mk_watchdir_upload(
                 filepath,
                 link_name,
-                {
-                    "parent": job,
-                    "task": task.name,
-                    "link_name": link_name,
-                },
             )
-            return taskmodule.TemplateInfo(filepath, preamble=preamble, epilogue=epilogue)
+            return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
             filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
             preamble = task.mk_watchdir_download(filepath, link_name, job)
             return taskmodule.TemplateInfo(filepath, preamble=preamble)
+        if kind == taskmodule.LinkKind.RequestedInput:
+            preamble, func = task.mk_download_function(link_name)
+            return taskmodule.TemplateInfo(func, preamble=preamble)
         raise ValueError(f"{type(self)} cannot be templated as {kind} for {task}")
 
     @abstractmethod
-    async def delete(self, job):
+    async def delete(self, job: str, /):
         """Delete the given job from the repository.
 
         This should succeed even if the job is not present in this repository.
@@ -179,7 +191,7 @@ class MetadataRepository(Repository, ABC):
         return taskmodule.TemplateInfo(info)
 
     @abstractmethod
-    async def info(self, job: str) -> Any:
+    async def info(self, job: str, /) -> Any:
         """Retrieve the data with key ``job`` from the repository."""
         raise NotImplementedError
 
@@ -192,12 +204,15 @@ class MetadataRepository(Repository, ABC):
         return {job: await self.info(job) async for job in self}
 
     @abstractmethod
-    async def dump(self, job, data):
+    async def dump(self, job: str, data: Any, /):
         """Insert ``data`` into the repository with key ``job``."""
         raise NotImplementedError
 
     def map(
-        self, func: Callable, filt: Optional[Callable[[str], Awaitable[bool]]] = None, allow_deletes=False
+        self,
+        func: Callable[[str, Any], Awaitable[Any]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        allow_deletes=False,
     ) -> "MapRepository":
         """Generate a :class:`MapRepository` based on this repository and the given parameters."""
         return MapRepository(self, func, filt, allow_deletes=allow_deletes)
@@ -210,8 +225,9 @@ class MapRepository(MetadataRepository):
     def __init__(
         self,
         base: MetadataRepository,
-        func: Callable[[taskmodule.TemplateInfo], Awaitable[taskmodule.TemplateInfo]],
+        func: Callable[[str, Any], Awaitable[Any]],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterable[str]]] = None,
         allow_deletes=False,
     ):
         """
@@ -225,17 +241,18 @@ class MapRepository(MetadataRepository):
         self.base = base
         self.func = func
         self.filter = filt
+        self.filter_all = filter_all
         self.allow_deletes = allow_deletes
 
     def __getstate__(self):
         return (self.base, self.func, self.filter, self.allow_deletes)
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         if self.filter is None or await self.filter(item):
             return await self.base.contains(item)
         return False
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         if self.allow_deletes:
             await self.base.delete(job)
 
@@ -249,22 +266,25 @@ class MapRepository(MetadataRepository):
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 
-    async def info(self, job):
-        return await self.func(await self.base.info(job))
+    async def info(self, job, /):
+        return await self.func(job, await self.base.info(job))
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.base.info_all()
-        to_remove = []
-        for k, v in result.items():
-            if self.filter is None or await self.filter(k):
-                result[k] = await self.func(v)
-            else:
-                to_remove.append(k)
-        for k in to_remove:
-            result.pop(k)
+        if self.filter_all is not None:
+            result = {k: await self.func(k, result[k]) async for k in self.filter_all(result)}
+        else:
+            to_remove = []
+            for k, v in result.items():
+                if self.filter is None or await self.filter(k):
+                    result[k] = await self.func(k, v)
+                else:
+                    to_remove.append(k)
+            for k in to_remove:
+                result.pop(k)
         return result
 
-    async def dump(self, job: str, data: Any):
+    async def dump(self, job: str, data: Any, /):
         raise TypeError("Do not try to dump into a map repository lol")
 
 
@@ -275,7 +295,7 @@ class FilterRepository(Repository):
     def __init__(
         self,
         base: Repository,
-        filt: Optional[Callable[[str], Awaitable[bool]]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
     ):
         """
@@ -293,12 +313,12 @@ class FilterRepository(Repository):
     def __getstate__(self):
         return (self.base, self.filter, self.allow_deletes)
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         if self.filter is None or await self.filter(item):
             return await self.base.contains(item)
         return False
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         if self.allow_deletes:
             await self.base.delete(job)
 
@@ -319,27 +339,45 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
     def __init__(
         self,
         base: MetadataRepository,
-        filt: Optional[Callable[[str], Awaitable[bool]]],
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterator[str]]] = None,
         allow_deletes=False,
     ):
-        super().__init__(base, filt, allow_deletes=allow_deletes)
+        if filt is None:
+            assert filter_all is not None
+
+            async def f(k):
+                try:
+                    await filter_all({k: await self.info(k)}).__anext__()
+                except StopAsyncIteration:
+                    return False
+                else:
+                    return True
+
+            super().__init__(base, f, allow_deletes=allow_deletes)
+        else:
+            super().__init__(base, filt, allow_deletes=allow_deletes)
+        self.filter_all = filter_all
 
     base: MetadataRepository
 
-    async def info(self, job):
+    async def info(self, job, /):
         return await self.base.info(job)
 
     async def info_all(self) -> Dict[str, Any]:
         result = await self.base.info_all()
-        to_remove = []
-        for k in result:
-            if self.filter is not None and await self.filter(k):
-                to_remove.append(k)
-        for k in to_remove:
-            result.pop(k)
+        if self.filter_all is not None:
+            result = {k: result[k] async for k in self.filter_all(result)}
+        else:
+            to_remove = []
+            for k in result:
+                if self.filter is not None and await self.filter(k):
+                    to_remove.append(k)
+            for k in to_remove:
+                result.pop(k)
         return result
 
-    async def dump(self, job: str, data: Any):
+    async def dump(self, job: str, data: Any, /):
         raise TypeError("Do not try to dump into a filter repository lol")
 
 
@@ -407,7 +445,7 @@ class FileRepositoryBase(Repository, ABC):
     def __getstate__(self):
         return (self.basedir, self.extension, self.case_insensitive)
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return await aiofiles.os.path.exists(self.basedir / (item + self.extension))
 
     def __repr__(self):
@@ -441,7 +479,7 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
             raise KeyError(job)
         return aiofiles.open(self.fullpath(job), mode)  # type: ignore
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         try:
             await aiofiles.os.unlink(self.fullpath(job))
         except FileNotFoundError:
@@ -459,10 +497,10 @@ class FunctionCallMetadataRepository(MetadataRepository):
     def __getstate__(self):
         return (self._info, self._domain)
 
-    async def contains(self, item: str):
+    async def contains(self, item: str, /):
         return await self._domain.contains(item)
 
-    async def delete(self, job: str):
+    async def delete(self, job: str, /):
         return
 
     async def unfiltered_iter(self):
@@ -470,13 +508,13 @@ class FunctionCallMetadataRepository(MetadataRepository):
             yield job
 
     @job_getter
-    async def info(self, job: str):
+    async def info(self, job: str, /):
         result = self._info(job)
         if inspect.iscoroutine(result):
             result = await result
         return result
 
-    async def dump(self, job: str, data: Any):
+    async def dump(self, job: str, data: Any, /):
         raise TypeError("Simply don't!")
 
 
@@ -521,13 +559,13 @@ class RelatedItemRepository(Repository):
         else:
             return await self.translator_repository.info(item)
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         basename = await self._lookup(item)
         if basename is None:
             return False
         return await self.base_repository.contains(basename)
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         if not self.allow_deletes:
             return
 
@@ -578,7 +616,7 @@ class RelatedItemMetadataRepository(RelatedItemRepository, MetadataRepository):
         )
 
     @job_getter
-    async def info(self, job):
+    async def info(self, job, /):
         """Perform the info lookup for the base repository."""
         assert isinstance(self.base_repository, MetadataRepository)
         basename = await self._lookup(job)
@@ -587,7 +625,7 @@ class RelatedItemMetadataRepository(RelatedItemRepository, MetadataRepository):
 
         return await self.base_repository.info(basename)
 
-    async def dump(self, job: str, data: Any):
+    async def dump(self, job: str, data: Any, /):
         raise TypeError("Simply don't!")
 
 
@@ -632,13 +670,13 @@ class AggregateAndRepository(Repository):
             if counting[item] == len(self.children):
                 yield item
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         for child in self.children.values():
             if not await child.contains(item):
                 return False
         return True
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         """Deleting a job from an aggregate And repository deletes the job from all of its children."""
         for child in self.children.values():
             await child.delete(job)
@@ -664,13 +702,13 @@ class AggregateOrRepository(Repository):
                 seen.add(item)
                 yield item
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         for child in self.children.values():
             if await child.contains(item):
                 return True
         return False
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         """Deleting a job from an aggregate Or repository deletes the job from all of its children."""
         for child in self.children.values():
             await child.delete(job)
@@ -702,10 +740,10 @@ class BlockingRepository(Repository):
                 continue
             yield item
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return await self.source.contains(item) and not await self.unless.contains(item)
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         await self.source.delete(job)
 
 
@@ -717,13 +755,13 @@ class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
     """
 
     @job_getter
-    async def info(self, job):
+    async def info(self, job, /):
         async with await self.open(job, "rb") as fp:
             s = await fp.read()
         return yaml.safe_load(s)
 
     @job_getter
-    async def dump(self, job, data):
+    async def dump(self, job, data, /):
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         s = yaml.safe_dump(data, None)
@@ -759,10 +797,10 @@ class ExecutorLiveRepo(Repository):
         for job in self.task.rev_jobs:
             yield job
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return item in self.task.rev_jobs
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         """Deleting a job from the repository will cancel the corresponding task."""
         await self.task.cancel(job)
 
@@ -782,19 +820,19 @@ class InProcessMetadataRepository(MetadataRepository):
         return f"<{type(self).__name__}>"
 
     @job_getter
-    async def info(self, job):
+    async def info(self, job, /):
         return self.data.get(job)
 
     @job_getter
-    async def dump(self, job, data):
+    async def dump(self, job, data, /):
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         self.data[job] = data
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return item in self.data
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         del self.data[job]
 
     async def unfiltered_iter(self):
@@ -882,8 +920,87 @@ class InProcessBlobRepository(BlobRepository):
         for item in self.data:
             yield item
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return item in self.data
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         del self.data[job]
+
+
+class _Unknown:
+    pass
+
+
+class CacheInProcessMetadataRepository(MetadataRepository):
+    """Caches all query results performed against a base repository.
+
+    Be careful to flush occasionally!
+    """
+
+    def __init__(self, base: MetadataRepository):
+        super().__init__()
+        self.base = base
+        self._unknown = _Unknown()
+        self._cache: Dict[str, Any] = {}
+        self._negative_cache: Set[str] = set()
+        self._complete_keys = False
+        self._complete_values = False
+
+    async def info(self, job: str, /):
+        # EXPERIMENT
+        # if not self._complete_values:
+        #    await self.info_all()
+        # END EXPERIMENT
+        result = self._cache.get(job, self._unknown)
+        if result is self._unknown:
+            result = await self.base.info(job)
+            self._cache[job] = result
+        return result
+
+    async def info_all(self):
+        if not self._complete_values:
+            self._cache = await self.base.info_all()
+            self._complete_values = True
+            self._complete_keys = True
+        # should we make it so that info raises an error on unknown keys?
+        return dict(self._cache)
+
+    async def contains(self, k: str, /) -> bool:
+        if k in self._cache:
+            return True
+        if k in self._negative_cache:
+            return False
+        result = await self.base.contains(k)
+        if result:
+            self._cache[k] = self._unknown
+        else:
+            self._negative_cache.add(k)
+        return result
+
+    async def unfiltered_iter(self):
+        if self._complete_keys:
+            for k in self._cache:
+                yield k
+        else:
+            # optimization for any()
+            single = next(iter(self._cache), None)
+            if single is not None:
+                yield single
+            async for k in self.base:
+                if k == single:
+                    continue
+                if k not in self._cache:
+                    self._cache[k] = self._unknown
+                yield k
+            self._complete_keys = True
+
+    async def delete(self, k, /):
+        self._cache.pop(k, None)
+        await self.base.delete(k)
+
+    async def dump(self, k, v, /):
+        await self.base.dump(k, v)
+        self._cache[k] = v
+
+    def __getstate__(self):
+        return (self.base,)

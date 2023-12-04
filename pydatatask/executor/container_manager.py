@@ -160,7 +160,10 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def kill(self, task: str, job: str):
         cont = await self.docker.containers.get(self._id_to_name(task, job))
-        await cont.kill()
+        try:
+            await cont.kill()
+        except aiodocker.exceptions.DockerError:
+            pass
         await cont.delete()
 
     async def update(

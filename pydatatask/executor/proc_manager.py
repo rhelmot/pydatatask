@@ -14,6 +14,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
     overload,
 )
 from abc import abstractmethod
@@ -393,8 +394,10 @@ class SSHLinuxManager(AbstractProcessManager):
         if "/" in args[0]:
             async with self.ssh.start_sftp_client() as sftp:
                 await sftp.chmod(args[0], 0o755)
-        p: asyncssh.SSHClientProcess[bytes] = await self.ssh.create_process(
-            f"""
+        p = cast(
+            asyncssh.SSHClientProcess[bytes],
+            await self.ssh.create_process(
+                f"""
             cd {shlex.quote(str(cwd))}
             {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
             PID=$!
@@ -402,7 +405,9 @@ class SSHLinuxManager(AbstractProcessManager):
             wait $PID >/dev/null 2>/dev/null
             echo $? >{shlex.quote(str(return_code))} 2>/dev/null
             """,
-            env=environ,
+                env=environ,
+                encoding=None,
+            ),
         )
         pid = await p.stdout.readline()
         return pid.strip()

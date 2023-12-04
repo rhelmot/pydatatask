@@ -29,7 +29,7 @@ class LiveKubeRepository(Repository):
         for pod in await self.pods():
             yield pod.metadata.labels["job"]
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return bool(await self.task.podman.query(task=self.task.name, job=item))
 
     def __repr__(self):
@@ -39,7 +39,7 @@ class LiveKubeRepository(Repository):
         """A list of live pod objects corresponding to this repository."""
         return await self.task.podman.query(task=self.task.name)
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         """Deleting a job from this repository will delete the pod."""
         pods = await self.task.podman.query(job=job, task=self.task.name)
         for pod in pods:  # there... really should be only one
@@ -66,12 +66,12 @@ class LiveContainerRepository(Repository):
         for name in await self.task.manager.live(self.task.name):
             yield name
 
-    async def contains(self, item):
+    async def contains(self, item, /):
         return item in await self.task.manager.live(self.task.name)
 
     def __repr__(self):
         return f"<LiveKubeRepository task={self.task.name}>"
 
-    async def delete(self, job):
+    async def delete(self, job, /):
         """Deleting a job from this repository will delete the pod."""
         await self.task.manager.kill(self.task.name, job)

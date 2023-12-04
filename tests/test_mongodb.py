@@ -54,18 +54,29 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
             if await p.wait() != 0:
                 raise unittest.SkipTest("No minio endpoint configured and docker failed to launch mongo:latest")
             self.docker_name = self.database
-            await asyncio.sleep(1)
         self.client = motor.motor_asyncio.AsyncIOMotorClient(self.mongo_url)
+
+        exc = None
+        for _ in range(15):
+            try:
+                await self.client.get_database(self.database).test.find_one({})
+            except Exception as e:
+                exc = e
+            else:
+                break
+            await asyncio.sleep(5)
+        else:
+            raise Exception("Can't communicate with mongodb") from exc
 
     async def test_mongo(self):
         assert self.client is not None
         client = self.client
-        repo = pydatatask.MongoMetadataRepository(lambda: client[self.database], "test")
+        repo = pydatatask.MongoMetadataRepository(lambda: client.get_database(self.database), "test")
         assert repr(repo)
         await repo.dump("foo", {"weh": 1})
         assert len([x async for x in repo]) == 1
         assert (await repo.info("foo"))["weh"] == 1
-        assert (await self.client[self.database].test.find_one({"_id": "foo"}))["weh"] == 1
+        assert (await self.client.get_database(self.database).test.find_one({"_id": "foo"}))["weh"] == 1
         assert await repo.contains("foo")
         assert not await repo.contains("bar")
         all_things = await repo.info_all()

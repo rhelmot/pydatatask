@@ -26,9 +26,9 @@ The help screen should look something like this:
 """
 
 from __future__ import annotations
-from collections import defaultdict
 
 from typing import Callable, Dict, Iterable, List, Optional, Set, Union
+from collections import defaultdict
 from pathlib import Path
 import argparse
 import asyncio
@@ -114,18 +114,18 @@ def main(
         help="Show internal repositories",
     )
     parser_status.add_argument(
-        '--json',
-        '-j',
-        dest='json',
-        action='store_true',
-        help='Show status as JSON',
+        "--json",
+        "-j",
+        dest="json",
+        action="store_true",
+        help="Show status as JSON",
     )
     parser_status.add_argument(
-        '--output',
-        '-o',
-        dest='output',
+        "--output",
+        "-o",
+        dest="output",
         type=Path,
-        help='Output path for JSON',
+        help="Output path for JSON",
     )
     parser_status.set_defaults(func=print_status)
 
@@ -336,7 +336,7 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
             yield link
 
 
-async def print_status(pipeline: Pipeline, all_repos: bool, json: bool, output: Optional[Path]):
+async def print_status(pipeline: Pipeline, all_repos: bool, json: bool = False, output: Optional[Path] = None):
     async def inner(repo: repomodule.Repository):
         the_sum = 0
         async for _ in repo:
@@ -347,7 +347,6 @@ async def print_status(pipeline: Pipeline, all_repos: bool, json: bool, output: 
     repo_list = list(set(link.repo for link in link_list))
     repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
 
-
     result = defaultdict(dict)
     for task in pipeline.tasks.values():
         for link_name, link in sorted(
@@ -357,23 +356,23 @@ async def print_status(pipeline: Pipeline, all_repos: bool, json: bool, output: 
             if link in link_list:
                 result[task.name][link_name] = repo_sizes[link.repo]
 
-    msg = ''
+    msg = ""
     if not json:
         for task_name, links in result.items():
-            msg += f'{task_name}\n'
+            msg += f"{task_name}\n"
             for link_name, sizes in links.items():
                 msg += f"  {task_name}.{link_name} {sizes}\n"
-            msg += '\n'
+            msg += "\n"
     else:
         import json
+
         msg = json.dumps(result, indent=2)
 
     if output is None:
         print(msg)
     else:
-        with open(output, 'w') as f:
+        with open(output, "w") as f:
             f.write(msg)
-
 
 
 async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
@@ -514,8 +513,8 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
             name_to_path_mapping[task_name][repo_basename] = repo_to_path_mapping[repo]
             continue
 
-        repo_to_path_mapping[repo] = f'./{repo_name}/'
-        name_to_path_mapping[task_name][repo_basename] = f'./{repo_name}/'
+        repo_to_path_mapping[repo] = f"./{repo_name}/"
+        name_to_path_mapping[task_name][repo_basename] = f"./{repo_name}/"
 
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repomodule.FileRepository(
@@ -540,8 +539,10 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
     async def write_file(path, data):
         async with aiofiles.open(path, "w") as f:
             await f.write(data)
+
     jobs.append(write_file(backup_base / "repo_mapping.yaml", yaml.safe_dump(dict(name_to_path_mapping))))
     await asyncio.gather(*jobs)
+
 
 async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
@@ -552,16 +553,17 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
     if all_repos:
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
-        repos = list(mapping.keys()) # just use the keys to include ALL tasks
+        repos = list(mapping.keys())  # just use the keys to include ALL tasks
 
+    import ipdb
 
-    import ipdb; ipdb.set_trace()
+    ipdb.set_trace()
 
     jobs = []
     for task_name in mapping:
         for repo_basename, repo_path in mapping[task_name].items():
             # simply overwrite the real name being loaded with the actual one
-            if task_name not in repos and f'{task_name}.{repo_basename}' not in repos:
+            if task_name not in repos and f"{task_name}.{repo_basename}" not in repos:
                 continue
 
             repo_base = backup_base / repo_path

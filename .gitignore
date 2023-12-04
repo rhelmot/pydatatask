@@ -9,3 +9,5 @@
 coverage.xml
 .coverage
 *.lock
+parser.out
+.idea

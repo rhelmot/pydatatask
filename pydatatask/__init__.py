@@ -8,6 +8,7 @@ from .main import *
 from .quota import *
 from .executor import *
 from .host import *
+from . import query
 
 __version__ = "0.4.8-dev.1"
 released_version = "0.4.7"
