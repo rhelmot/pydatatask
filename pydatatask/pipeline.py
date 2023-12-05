@@ -75,6 +75,10 @@ class Pipeline:
         self.fail_fast = False
         self.long_running_timeout = long_running_timeout
 
+        for task in tasks:
+            if task is not self.tasks[task.name]:
+                raise NameError(f"The task name {task.name} is duplicated")
+
     def settings(self, synchronous=False, metadata=True, fail_fast=False, task_allowlist: Optional[List[str]] = None):
         """This method can be called to set properties of the current run.
 
