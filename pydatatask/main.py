@@ -115,9 +115,9 @@ def main(
         help="Show internal repositories",
     )
     parser_status.add_argument(
-        "--json",
+        "--as-json",
         "-j",
-        dest="json",
+        dest="as_json",
         action="store_true",
         help="Show status as JSON",
     )
