@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import chain
 import asyncio
 
+from aiodocker import DockerError
 from kubernetes_asyncio.client import V1Pod
 import aiodocker.containers
 import dateutil.parser
@@ -146,7 +147,12 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
         containers = await self.docker.containers.list(all=1)
-        infos = await asyncio.gather(*(c.show() for c in containers))
+        infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
+
+        # avoid docker errors, as they usually come from race-conditions like the container
+        # being deleted between the list and the show
+        infos = [info for info in infos if not isinstance(info, DockerError)]
+
         live = [
             (info, self._name_to_id(task, info["Name"]))
             for info in infos
