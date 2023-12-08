@@ -151,11 +151,24 @@ class DockerContainerManager(AbstractContainerManager):
 
         # avoid docker errors, as they usually come from race-conditions like the container
         # being deleted between the list and the show
-        infos = [info for info in infos if not isinstance(info, DockerError)]
+        docker_exceptions = []
+        other_exceptions = []
+        non_exception_infos = []
+        for info in infos:
+            if isinstance(info, DockerError):
+                docker_exceptions.append(info)
+            elif isinstance(info, BaseException):
+                other_exceptions.append(info)
+            else:
+                non_exception_infos.append(info)
+
+        # ignore docker exceptions, raise other exceptions, and continue with non-exceptions
+        if other_exceptions:
+            raise other_exceptions[0]
 
         live = [
             (info, self._name_to_id(task, info["Name"]))
-            for info in infos
+            for info in non_exception_infos
             # if not info["State"]["Status"] in ('exited',)
         ]
         return {
