@@ -1297,7 +1297,7 @@ class ProcessTask(Task):
         try:
             await self.manager.kill(pid)
         finally:
-            await self._reap(job, start_time)
+            await self._reap(job, start_time, True)
 
 
 class FunctionTaskProtocol(Protocol):

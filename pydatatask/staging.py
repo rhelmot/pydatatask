@@ -199,6 +199,7 @@ class PipelineSpec:
     agent_hosts: Dict[Optional[str], str] = field(default_factory=dict)
     agent_version: str = "unversioned"
     agent_secret: str = "insecure"
+    long_running_timeout: Optional[float] = None
 
 
 @_dataclass_serial
@@ -228,7 +229,6 @@ class PipelineStaging:
         self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
         self.repos_promised_by_parents: Set[str] = set()
         self.executors_promised_by_parents: Set[str] = set()
-        self.long_running_timeout: Optional[timedelta] = None
 
         if filepath is None:
             if basedir is None:
@@ -410,7 +410,7 @@ class PipelineStaging:
             agent_secret=self.spec.agent_secret,
             agent_version=self.spec.agent_version,
             source_file=self.basedir / self.filename,
-            long_running_timeout=self.long_running_timeout,
+            long_running_timeout=timedelta(minutes=self.spec.long_running_timeout) if self.spec.long_running_timeout is not None else None,
         )
 
     def allocate(

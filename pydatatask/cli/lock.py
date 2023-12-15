@@ -90,7 +90,7 @@ def main():
     parser.add_argument(
         "--long-running-timeout",
         help="Cap the execution of long running tasks to the given numberr of minutes",
-        type=lambda s: timedelta(minutes=int(s)),
+        type=float,
     )
     parsed = parser.parse_args()
 
@@ -103,7 +103,7 @@ def main():
     spec = PipelineStaging(cfgpath)
     locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}))
     locked.filename = cfgpath.with_suffix(".lock").name
-    locked.long_running_timeout = parsed.long_running_timeout
+    locked.spec.long_running_timeout = parsed.long_running_timeout
 
     locked.spec.agent_hosts[None] = asyncio.run(get_ip())
     locked.save()
