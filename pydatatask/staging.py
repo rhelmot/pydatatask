@@ -38,6 +38,7 @@ from pydatatask.declarative import (
 )
 from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
+from pydatatask.query.repository import QueryRepository
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import Repository
 from pydatatask.session import Ephemeral, Session
@@ -186,11 +187,19 @@ class HostSpec:
 
 
 @_dataclass_serial
+class RepoQuerySpec:
+    cls: str
+    query: str
+    getters: Dict[str, str] = field(default_factory=dict)
+
+
+@_dataclass_serial
 class PipelineSpec:
     hosts: Dict[str, HostSpec] = field(default_factory=dict)
     tasks: Dict[str, TaskSpec] = field(default_factory=dict)
     executors: Dict[str, Dispatcher] = field(default_factory=dict)
     repos: Dict[str, Dispatcher] = field(default_factory=dict)
+    repo_queries: Dict[str, RepoQuerySpec] = field(default_factory=dict)
     repo_classes: Dict[str, str] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
     quotas: Dict[str, Quota] = field(default_factory=dict)
@@ -202,6 +211,25 @@ class PipelineSpec:
     agent_version: str = "unversioned"
     agent_secret: str = "insecure"
     long_running_timeout: Optional[float] = None
+
+    def desugar(self):
+        query_repo_classes = {
+            "Repository": "Query",
+            "MetadataRepository": "QueryMetadata",
+        }
+        self.repos.update(
+            {
+                name: Dispatcher(
+                    query_repo_classes[query_spec.cls],
+                    {
+                        "query": query_spec.query,
+                        "getters": query_spec.getters,
+                    },
+                )
+                for name, query_spec in self.repo_queries.items()
+            }
+        )
+        self.repo_queries.clear()
 
 
 @_dataclass_serial
@@ -250,6 +278,7 @@ class PipelineStaging:
             with open(filepath, "r", encoding="utf-8") as fp:
                 spec_dict = yaml.safe_load(fp)
             self.spec = PipelineSpec(**spec_dict)
+            self.spec.desugar()
 
             if params is None:
                 params = PipelineChildArgs()
@@ -383,6 +412,10 @@ class PipelineStaging:
             all_repos.update(
                 {name: repo_cache[id(dispatch)] for name, dispatch in staging.repos_fulfilled_by_parents.items()}
             )
+            for repo in all_repos.values():
+                if isinstance(repo, QueryRepository):
+                    repo.query.repos.update(all_repos)
+
             quotas = {name: QuotaManager(val) for name, val in staging.spec.quotas.items()}
             all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
             all_executors.update(
@@ -412,7 +445,9 @@ class PipelineStaging:
             agent_secret=self.spec.agent_secret,
             agent_version=self.spec.agent_version,
             source_file=self.basedir / self.filename,
-            long_running_timeout=timedelta(minutes=self.spec.long_running_timeout) if self.spec.long_running_timeout is not None else None,
+            long_running_timeout=timedelta(minutes=self.spec.long_running_timeout)
+            if self.spec.long_running_timeout is not None
+            else None,
         )
 
     def allocate(

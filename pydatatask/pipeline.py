@@ -79,6 +79,11 @@ class Pipeline:
             if task is not self.tasks[task.name]:
                 raise NameError(f"The task name {task.name} is duplicated")
 
+    def cache_flush(self):
+        """Flush any in-memory caches."""
+        for task in self.tasks.values():
+            task.cache_flush()
+
     def settings(self, synchronous=False, metadata=True, fail_fast=False, task_allowlist: Optional[List[str]] = None):
         """This method can be called to set properties of the current run.
 
@@ -192,6 +197,7 @@ class Pipeline:
 
         to_gather = [task.update() for task in self.tasks.values()]
         gathered = await asyncio.gather(*to_gather, return_exceptions=False)
+        self.cache_flush()
         return any(gathered)
 
     async def update_only_launch(self) -> bool:
@@ -216,6 +222,7 @@ class Pipeline:
             for job in job_list
         ]
         if not jobs:
+            self.cache_flush()
             return False
 
         jobs.sort()  # do not reverse - the next op we're doing implicitly reverses it
@@ -254,6 +261,7 @@ class Pipeline:
             l.debug("Launching jobs of priority %s", prio_queue[0][0])
             await asyncio.gather(leader(prio_queue), *[worker() for _ in range(N_WORKERS)])
 
+        self.cache_flush()
         return True
 
     async def gather_ready_jobs(self, task: taskmodule.Task) -> Set[str]:

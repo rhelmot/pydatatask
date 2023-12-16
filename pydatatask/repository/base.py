@@ -75,6 +75,10 @@ class Repository(ABC):
 
     CHARSET = CHARSET_START_END = string.ascii_letters + string.digits
 
+    def cache_flush(self):
+        """Flush any in-memory caches held for this repository."""
+        pass
+
     @classmethod
     def is_valid_job_id(cls, job: str, /):
         """Determine whether the given job identifier is valid, i.e. that it contains only valid characters (numbers

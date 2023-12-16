@@ -29,6 +29,7 @@ from pydatatask.executor.proc_manager import (
 from pydatatask.host import Host, HostOS
 from pydatatask.query.parser import QueryValueType, tyexpr_basic_to_type
 from pydatatask.query.query import Query
+from pydatatask.query.repository import QueryMetadataRepository, QueryRepository
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import (
     DirectoryRepository,
@@ -356,6 +357,22 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
             {
                 "database": make_picker("MongoDatabase", ephemerals),
                 "collection": str,
+            },
+        ),
+        "Query": make_annotated_constructor(
+            "QueryRepository",
+            QueryRepository,
+            {
+                "query": str,
+                "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+            },
+        ),
+        "QueryMetadata": make_annotated_constructor(
+            "QueryMetadataRepository",
+            QueryMetadataRepository,
+            {
+                "query": str,
+                "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
             },
         ),
     }

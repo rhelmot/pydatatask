@@ -204,6 +204,12 @@ class Task(ABC):
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
 
+    def cache_flush(self):
+        """Flush any in-memory caches."""
+        self._related_cache.clear()
+        for link in self.links.values():
+            link.repo.cache_flush()
+
     @property
     @abstractmethod
     def host(self) -> Host:
@@ -584,7 +590,7 @@ class Task(ABC):
         else:
             result = repomodule.RelatedItemRepository(link.repo, mapped, prefetch_lookup=prefetch_lookup)
 
-        # self._related_cache[linkname] = result   # this would be nice but we need to flush the cache eventually
+        self._related_cache[linkname] = result
         return result
 
     def _repo_filtered(self, job: str, linkname: str) -> "repomodule.Repository":
