@@ -180,6 +180,7 @@ class Task(ABC):
     def __init__(
         self,
         name: str,
+        done: "repomodule.MetadataRepository",
         ready: Optional["repomodule.Repository"] = None,
         disabled: bool = False,
         long_running: bool = False,
@@ -200,6 +201,26 @@ class Task(ABC):
         self.fail_fast = False
         self.timeout = timeout
         self.queries = queries or {}
+        self.done = done
+        self.success = pydatatask.query.repository.QueryRepository(
+            "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}
+        )
+
+        self.link(
+            "done",
+            done,
+            None,
+            is_status=True,
+            inhibits_start=True,
+        )
+
+        self.link(
+            "success",
+            self.success,
+            None,
+            is_status=True,
+            required_for_output=True,
+        )
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.name}>"
@@ -829,7 +850,7 @@ class KubeTask(Task):
         quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"],
-        done: Optional["repomodule.MetadataRepository"],
+        done: "repomodule.MetadataRepository",
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         long_running: bool = False,
@@ -853,18 +874,14 @@ class KubeTask(Task):
             will be timed out and stopped. The method `handle_timeout` will be called in-process.
         :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
-
-        It is highly recommended to provide one or more of ``done`` or ``logs`` so that at least one link is present
-        with ``inhibits_start``.
         """
-        super().__init__(name, ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(name, done, ready, long_running=long_running, timeout=timeout, queries=queries)
 
         self.template = template
         self.quota_manager = quota_manager
         self._executor = executor
         self._podman: Optional["execmodule.PodManager"] = None
         self.logs = logs
-        self.done = done
         self.template_env = template_env if template_env is not None else {}
         self.warned = False
         self.window = window
@@ -883,15 +900,6 @@ class KubeTask(Task):
             self.link(
                 "logs",
                 logs,
-                None,
-                is_status=True,
-                inhibits_start=True,
-                required_for_output=True,
-            )
-        if done:
-            self.link(
-                "done",
-                done,
                 None,
                 is_status=True,
                 inhibits_start=True,
@@ -975,17 +983,16 @@ class KubeTask(Task):
                     await fp.write(await self.podman.logs(pod))
                 except (TimeoutError, ApiException):
                     await fp.write("<failed to fetch logs>\n")
-        if self.done is not None:
-            data = {
-                "reason": reason,
-                "start_time": pod.metadata.creation_timestamp,
-                "end_time": datetime.now(tz=timezone.utc),
-                "image": pod.status.container_statuses[0].image,
-                "node": pod.spec.node_name,
-                "timeout": reason == "Timeout",
-                "success": reason == "Succeeded",
-            }
-            await self.done.dump(job, data)
+        data = {
+            "reason": reason,
+            "start_time": pod.metadata.creation_timestamp,
+            "end_time": datetime.now(tz=timezone.utc),
+            "image": pod.status.container_statuses[0].image,
+            "node": pod.spec.node_name,
+            "timeout": reason == "Timeout",
+            "success": reason == "Succeeded",
+        }
+        await self.done.dump(job, data)
 
         await self.delete(pod)
 
@@ -1048,6 +1055,7 @@ class ProcessTask(Task):
         self,
         name: str,
         template: str,
+        done: "repomodule.MetadataRepository",
         executor: Optional[execmodule.Executor] = None,
         quota_manager: "QuotaManager" = localhost_quota_manager,
         job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
@@ -1056,7 +1064,6 @@ class ProcessTask(Task):
         pids: Optional["repomodule.MetadataRepository"] = None,
         environ: Optional[Dict[str, str]] = None,
         long_running: bool = False,
-        done: Optional["repomodule.MetadataRepository"] = None,
         stdin: Optional["repomodule.BlobRepository"] = None,
         stdout: Optional["repomodule.BlobRepository"] = None,
         stderr: Optional[Union["repomodule.BlobRepository", _StderrIsStdout]] = None,
@@ -1078,7 +1085,7 @@ class ProcessTask(Task):
         :param environ: Additional environment variables to set on the target machine before running the task.
         :param window: How recently a process must have been launched in order to contribute to the process
                        rate-limiting.
-        :param done: Optional: A metadata repository in which to dump some information about the process's lifetime and
+        :param done: metadata repository in which to dump some information about the process's lifetime and
                      termination on completion. Linked as "done" with
                      ``inhibits_start, required_for_output, is_status``.
         :param stdin: Optional: A blob repository from which to source the process' standard input. The content will be
@@ -1093,11 +1100,8 @@ class ProcessTask(Task):
                        target does not need to be authenticated to this repository. Linked as "stderr" with
                        ``is_output``.
         :param ready:  Optional: A repository from which to read task-ready status.
-
-        It is highly recommended to provide at least one of ``done``, ``stdout``, or ``stderr``, so that at least one
-        link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
 
         if pids is None:
             pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
@@ -1105,7 +1109,6 @@ class ProcessTask(Task):
         self.pids = pids
         self.template = template
         self.environ = environ or {}
-        self.done = done
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
@@ -1126,8 +1129,6 @@ class ProcessTask(Task):
             self.link("stdout", stdout, None, is_output=True)
         if isinstance(stderr, repomodule.BlobRepository):
             self.link("stderr", stderr, None, is_output=True)
-        if done is not None:
-            self.link("done", done, None, is_status=True, required_for_output=True, inhibits_start=True)
 
     @property
     def host(self):
@@ -1281,19 +1282,18 @@ class ProcessTask(Task):
                     job, "wb"
                 ) as fpw:
                     await async_copyfile(fpr, fpw)
-            if self.done is not None:
-                async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
-                    code = int(await fp1.read())
-                await self.done.dump(
-                    job,
-                    {
-                        "exit_code": code,
-                        "start_time": start_time,
-                        "end_time": datetime.now(tz=timezone.utc),
-                        "timeout": timeout,
-                        "success": code == 0 and not timeout,
-                    },
-                )
+            async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
+                code = int(await fp1.read())
+            await self.done.dump(
+                job,
+                {
+                    "exit_code": code,
+                    "start_time": start_time,
+                    "end_time": datetime.now(tz=timezone.utc),
+                    "timeout": timeout,
+                    "success": code == 0 and not timeout,
+                },
+            )
             await self.manager.rmtree(self.basedir / job)
             await self.pids.delete(job)
             await self.quota_manager.relinquish(self.job_quota)
@@ -1344,11 +1344,9 @@ class InProcessSyncTask(Task):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, ready=ready)
+        super().__init__(name, done, ready=ready)
 
-        self.done = done
         self.func = func
-        self.link("done", done, None, is_status=True, inhibits_start=True, required_for_output=True)
         self._env: Dict[str, Any] = {}
 
     @property
@@ -1436,7 +1434,7 @@ class ExecutorTask(Task):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, ready, long_running=long_running)
+        super().__init__(name, done, ready, long_running=long_running)
 
         if host is None:
             if isinstance(executor, ThreadPoolExecutor):
@@ -1453,17 +1451,8 @@ class ExecutorTask(Task):
         self.jobs: Dict[ConcurrentFuture[datetime], Tuple[str, datetime]] = {}
         self.rev_jobs: Dict[str, ConcurrentFuture[datetime]] = {}
         self.live = repomodule.ExecutorLiveRepo(self)
-        self.done = done
         self._env: Dict[str, Any] = {}
         self.link("live", self.live, None, is_status=True, inhibits_output=True, inhibits_start=True)
-        self.link(
-            "done",
-            self.done,
-            None,
-            is_status=True,
-            required_for_output=True,
-            inhibits_start=True,
-        )
 
     def __call__(self, f: Callable) -> "ExecutorTask":
         self.func = f
@@ -1584,9 +1573,9 @@ class KubeFunctionTask(KubeTask):
                           cpu: 100m
                           memory: 256Mi
             ''',
-            repo_logs,
             repo_done,
             repo_func_done,
+            repo_logs,
         )
         async def my_task(inp, out):
             await out.dump(await inp.info())
@@ -1601,9 +1590,9 @@ class KubeFunctionTask(KubeTask):
         executor: "execmodule.Executor",
         quota_manager: QuotaManager,
         template: Union[str, Path],
+        kube_done: "repomodule.MetadataRepository",
+        func_done: "repomodule.MetadataRepository",
         logs: Optional["repomodule.BlobRepository"] = None,
-        kube_done: Optional["repomodule.MetadataRepository"] = None,
-        func_done: Optional["repomodule.MetadataRepository"] = None,
         template_env: Optional[Dict[str, Any]] = None,
         func: Optional[Callable] = None,
     ):
@@ -1616,7 +1605,7 @@ class KubeFunctionTask(KubeTask):
                          ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
                                ``inhibits_start, required_for_output, is_status``.
-        :param kube_done: Optional: A MetadataRepository in which to dump some information about the pod's lifetime and
+        :param kube_done: A MetadataRepository in which to dump some information about the pod's lifetime and
                           termination on completion. Linked as "done" with
                           ``inhibits_start, required_for_output, is_status``.
         :param func_done: Optional: A MetadataRepository in which to dump some information about the function's lifetime
@@ -1626,9 +1615,6 @@ class KubeFunctionTask(KubeTask):
         :param ready:   Optional: A repository from which to read task-ready status.
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
-
-        It is highly recommended to provide at least one of ``kube_done``, ``func_done``, or ``logs``, so that at least
-        one link is present with ``inhibits_start``.
         """
         super().__init__(name, executor, quota_manager, template, logs, kube_done, template_env=template_env)
         self.func = func
@@ -1706,6 +1692,7 @@ class ContainerTask(Task):
         name: str,
         image: str,
         template: str,
+        done: "repomodule.MetadataRepository",
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
         executor: Optional[execmodule.Executor] = None,
         quota_manager: "QuotaManager" = localhost_quota_manager,
@@ -1714,7 +1701,6 @@ class ContainerTask(Task):
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
         long_running: bool = False,
-        done: Optional["repomodule.MetadataRepository"] = None,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
         privileged: Optional[bool] = False,
@@ -1741,17 +1727,13 @@ class ContainerTask(Task):
         :param logs: Optional: A blob repository into which to dump the container's logs. Linked as "logs" with
                                ``is_output``.
         :param ready:  Optional: A repository from which to read task-ready status.
-
-        It is highly recommended to provide at least one of ``done`` or ``logs`` so that at least one
-        link is present with ``inhibits_start``.
         """
-        super().__init__(name, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
 
         self.template = template
         self.entrypoint = entrypoint
         self.image = image
         self.environ = environ or {}
-        self.done = done
         self.logs = logs
         self.job_quota = copy.copy(job_quota)
         self.job_quota.launches = 1
@@ -1768,8 +1750,6 @@ class ContainerTask(Task):
 
         if logs is not None:
             self.link("logs", logs, None, is_output=True)
-        if done is not None:
-            self.link("done", done, None, is_status=True, required_for_output=True, inhibits_start=True)
         self.link(
             "live",
             repomodule.LiveContainerRepository(self),
@@ -1806,8 +1786,7 @@ class ContainerTask(Task):
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:
                     await fp.write(log)
-            if self.done is not None:
-                await self.done.dump(job, done)
+            await self.done.dump(job, done)
         return has_any
 
     async def launch(self, job: str):
