@@ -118,6 +118,7 @@ class TaskSpec:
     long_running: bool = False
     job_quota: Optional[Quota] = None
     quota_manager: Optional[str] = None
+    failure_ok: bool = False
 
 
 @_dataclass_serial

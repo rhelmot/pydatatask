@@ -586,11 +586,12 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+                "failure_ok": parse_bool,
 
                 # Process-specific
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
-                "job_quota": quota_constructor,
+                "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
                 "pids": make_picker("Repository", repos),
                 "stdin": make_picker("Repository", repos),
                 "stdout": make_picker("Repository", repos),
@@ -616,6 +617,7 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+                "failure_ok": parse_bool,
 
                 # Kube-specific
                 "template": str,
@@ -640,13 +642,14 @@ def build_task_picker(
                 "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
+                "failure_ok": parse_bool,
 
                 # Container-specific
                 "template": str,
                 "image": str,
                 "environ": make_dict_parser("environ", str, str),
                 "entrypoint": make_list_parser("entrypoint", str),
-                "job_quota": quota_constructor,
+                "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,

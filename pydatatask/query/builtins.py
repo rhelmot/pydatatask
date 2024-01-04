@@ -411,6 +411,8 @@ async def rekey(a: repomodule.Repository, b: Callable[[Key], Awaitable[Key]]) ->
 
 @_builtin("filter")
 async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitable[bool]]) -> repomodule.Repository:
+    async def inner(k: str) -> bool:
+        return await b(Key(k))
 
     if isinstance(a, repomodule.MetadataRepository):
 
@@ -419,11 +421,8 @@ async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitabl
                 if await b(Key(k)):
                     yield k
 
-        return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
+        return repomodule.FilterMetadataRepository(a, filt=inner, filter_all=inner_all)
     else:
-
-        async def inner(k: str) -> bool:
-            return await b(Key(k))
 
         return repomodule.FilterRepository(a, inner)
 
@@ -440,7 +439,12 @@ async def filter_repo_keyvals(
             if await b(Key(k), v):
                 yield k
 
-    return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
+    async def inner(k: str) -> bool:
+        if not await a.contains(k):
+            return False
+        return await b(Key(k), await a.info(k))
+
+    return repomodule.FilterMetadataRepository(a, filt=inner, filter_all=inner_all)
 
 
 @_builtin("filter")
@@ -453,7 +457,12 @@ async def filter_repo_vals(a: repomodule.Repository, b: Callable[[object], Await
             if await b(v):
                 yield k
 
-    return repomodule.FilterMetadataRepository(a, filter_all=inner_all)
+    async def inner(k: str) -> bool:
+        if not await a.contains(k):
+            return False
+        return await b(await a.info(k))
+
+    return repomodule.FilterMetadataRepository(a, filt=inner, filter_all=inner_all)
 
 
 @_builtin("any")

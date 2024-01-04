@@ -19,6 +19,7 @@
       },
 
       "long_running": { "type": "boolean" },
+      "failure_ok": { "type": "boolean" },
 
       "executable": {
         "oneOf": [

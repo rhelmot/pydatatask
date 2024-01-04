@@ -183,6 +183,7 @@ class Task(ABC):
         done: "repomodule.MetadataRepository",
         ready: Optional["repomodule.Repository"] = None,
         disabled: bool = False,
+        failure_ok: bool = False,
         long_running: bool = False,
         timeout: Optional[timedelta] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
@@ -202,8 +203,9 @@ class Task(ABC):
         self.timeout = timeout
         self.queries = queries or {}
         self.done = done
+        self.failure_ok = failure_ok
         self.success = pydatatask.query.repository.QueryRepository(
-            "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}
+            "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
 
         self.link(
@@ -212,6 +214,7 @@ class Task(ABC):
             None,
             is_status=True,
             inhibits_start=True,
+            required_for_output=failure_ok,
         )
 
         self.link(
@@ -219,7 +222,7 @@ class Task(ABC):
             self.success,
             None,
             is_status=True,
-            required_for_output=True,
+            required_for_output=not failure_ok,
         )
 
     def __repr__(self):
@@ -857,6 +860,7 @@ class KubeTask(Task):
         template_env: Optional[Dict[str, Any]] = None,
         ready: Optional["repomodule.Repository"] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
+        failure_ok: bool = False,
     ):
         """
         :param name: The name of the task.
@@ -875,7 +879,9 @@ class KubeTask(Task):
         :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
         """
-        super().__init__(name, done, ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(
+            name, done, ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+        )
 
         self.template = template
         self.quota_manager = quota_manager
@@ -1057,8 +1063,8 @@ class ProcessTask(Task):
         template: str,
         done: "repomodule.MetadataRepository",
         executor: Optional[execmodule.Executor] = None,
-        quota_manager: "QuotaManager" = localhost_quota_manager,
-        job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
+        quota_manager: Optional["QuotaManager"] = None,
+        job_quota: Optional["Quota"] = None,
         timeout: Optional[timedelta] = None,
         window: timedelta = timedelta(minutes=1),
         pids: Optional["repomodule.MetadataRepository"] = None,
@@ -1069,6 +1075,7 @@ class ProcessTask(Task):
         stderr: Optional[Union["repomodule.BlobRepository", _StderrIsStdout]] = None,
         ready: Optional["repomodule.Repository"] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
+        failure_ok: bool = False,
     ):
         """
         :param name: The name of this task.
@@ -1101,7 +1108,9 @@ class ProcessTask(Task):
                        ``is_output``.
         :param ready:  Optional: A repository from which to read task-ready status.
         """
-        super().__init__(name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(
+            name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+        )
 
         if pids is None:
             pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
@@ -1112,9 +1121,9 @@ class ProcessTask(Task):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self.job_quota = copy.copy(job_quota)
+        self.job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
         self.job_quota.launches = 1
-        self.quota_manager = quota_manager
+        self.quota_manager = quota_manager or localhost_quota_manager
         self._executor = executor or execmodule.localhost_manager
         self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
@@ -1335,6 +1344,7 @@ class InProcessSyncTask(Task):
         done: "repomodule.MetadataRepository",
         ready: Optional["repomodule.Repository"] = None,
         func: Optional[FunctionTaskProtocol] = None,
+        failure_ok: bool = False,
     ):
         """
         :param name: The name of this task.
@@ -1344,7 +1354,7 @@ class InProcessSyncTask(Task):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, done, ready=ready)
+        super().__init__(name, done, ready=ready, failure_ok=failure_ok)
 
         self.func = func
         self._env: Dict[str, Any] = {}
@@ -1423,6 +1433,7 @@ class ExecutorTask(Task):
         host: Optional[Host] = None,
         long_running: bool = False,
         ready: Optional["repomodule.Repository"] = None,
+        failure_ok: bool = False,
         func: Optional[Callable] = None,
     ):
         """
@@ -1434,7 +1445,7 @@ class ExecutorTask(Task):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, done, ready, long_running=long_running)
+        super().__init__(name, done, ready, long_running=long_running, failure_ok=failure_ok)
 
         if host is None:
             if isinstance(executor, ThreadPoolExecutor):
@@ -1594,6 +1605,7 @@ class KubeFunctionTask(KubeTask):
         func_done: "repomodule.MetadataRepository",
         logs: Optional["repomodule.BlobRepository"] = None,
         template_env: Optional[Dict[str, Any]] = None,
+        failure_ok: bool = False,
         func: Optional[Callable] = None,
     ):
         """
@@ -1616,7 +1628,9 @@ class KubeFunctionTask(KubeTask):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(name, executor, quota_manager, template, logs, kube_done, template_env=template_env)
+        super().__init__(
+            name, executor, quota_manager, template, logs, kube_done, template_env=template_env, failure_ok=failure_ok
+        )
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -1695,8 +1709,8 @@ class ContainerTask(Task):
         done: "repomodule.MetadataRepository",
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
         executor: Optional[execmodule.Executor] = None,
-        quota_manager: "QuotaManager" = localhost_quota_manager,
-        job_quota: "Quota" = Quota.parse(1, "256Mi", 1),
+        quota_manager: Optional["QuotaManager"] = None,
+        job_quota: Optional["Quota"] = None,
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
@@ -1706,6 +1720,7 @@ class ContainerTask(Task):
         privileged: Optional[bool] = False,
         tty: Optional[bool] = False,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
+        failure_ok: bool = False,
     ):
         """
         :param name: The name of this task.
@@ -1728,16 +1743,18 @@ class ContainerTask(Task):
                                ``is_output``.
         :param ready:  Optional: A repository from which to read task-ready status.
         """
-        super().__init__(name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries)
+        super().__init__(
+            name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+        )
 
         self.template = template
         self.entrypoint = entrypoint
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self.job_quota = copy.copy(job_quota)
+        self.job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
         self.job_quota.launches = 1
-        self.quota_manager = quota_manager
+        self.quota_manager = quota_manager or localhost_quota_manager
         self._executor = executor or execmodule.localhost_docker_manager
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
