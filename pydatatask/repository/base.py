@@ -77,7 +77,6 @@ class Repository(ABC):
 
     def cache_flush(self):
         """Flush any in-memory caches held for this repository."""
-        pass
 
     @classmethod
     def is_valid_job_id(cls, job: str, /):

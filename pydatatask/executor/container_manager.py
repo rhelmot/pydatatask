@@ -208,10 +208,8 @@ class DockerContainerManager(AbstractContainerManager):
         ]
         await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out))
         results = await asyncio.gather(
-            *chain(
-                (self._cleanup(container, info) for info, container, _ in dead),
-                (self._cleanup(container, info, True) for info, container, _ in timed_out),
-            )
+            *(self._cleanup(container, info) for info, container, _ in dead),
+            *(self._cleanup(container, info, True) for info, container, _ in timed_out),
         )
         return activity, {name: result for (_, _, name), result in zip(chain(dead, timed_out), results)}
 
@@ -221,7 +219,16 @@ class DockerContainerManager(AbstractContainerManager):
         log = "".join(line for line in await container.log(stdout=True, stderr=True)).encode()
         await container.delete()
         info["timed_out"] = timed_out
-        return (log, info)
+        now = datetime.now(tz=timezone.utc)
+        meta = {
+            "success": not timed_out and info["State"]["ExitCode"] == 0,
+            "start_time": dateutil.parser.isoparse(info["State"]["StartedAt"]),
+            "end_time": now if timed_out else dateutil.parser.isoparse(info["State"]["FinishedAt"]),
+            "timeout": timed_out,
+            "exit_code": -1 if timed_out else info["State"]["ExitCode"],
+            "image": info["Config"]["Image"],
+        }
+        return (log, meta)
 
 
 class KubeContainerManager(AbstractContainerManager):
@@ -319,11 +326,12 @@ class KubeContainerManager(AbstractContainerManager):
             log.encode(),
             {
                 "reason": pod.status.phase if not timeout else "Timeout",
-                "timed_out": timeout,
+                "timeout": timeout,
                 "start_time": pod.metadata.creation_timestamp,
                 "end_time": datetime.now(tz=timezone.utc),
                 "image": pod.status.container_statuses[0].image,
                 "node": pod.spec.node_name,
+                "success": pod.status.phase == "Succeeded" and not timeout,
             },
         )
 

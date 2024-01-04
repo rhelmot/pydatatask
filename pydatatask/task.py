@@ -982,6 +982,8 @@ class KubeTask(Task):
                 "end_time": datetime.now(tz=timezone.utc),
                 "image": pod.status.container_statuses[0].image,
                 "node": pod.spec.node_name,
+                "timeout": reason == "Timeout",
+                "success": reason == "Succeeded",
             }
             await self.done.dump(job, data)
 
@@ -1285,10 +1287,11 @@ class ProcessTask(Task):
                 await self.done.dump(
                     job,
                     {
-                        "return_code": code,
+                        "exit_code": code,
                         "start_time": start_time,
                         "end_time": datetime.now(tz=timezone.utc),
                         "timeout": timeout,
+                        "success": code == 0 and not timeout,
                     },
                 )
             await self.manager.rmtree(self.basedir / job)
@@ -1387,15 +1390,20 @@ class InProcessSyncTask(Task):
         except Exception as e:
             l.info("In-process task %s:%s failed", self.name, job, exc_info=True)
             result: Dict[str, Any] = {
-                "result": "exception",
+                "success": False,
                 "exception": repr(e),
                 "traceback": traceback.format_tb(e.__traceback__),
             }
         else:
             l.debug("...success")
-            result = {"result": "success"}
+            result = {
+                "success": True,
+                "exception": "",
+                "traceback": "",
+            }
         result["start_time"] = start_time
         result["end_time"] = datetime.now(tz=timezone.utc)
+        result["timeout"] = False
         if self.metadata:
             await self.done.dump(job, result)
 
@@ -1482,15 +1490,21 @@ class ExecutorTask(Task):
         if e is not None:
             l.info("Executor task %s:%s failed", self.name, job, exc_info=e)
             data = {
-                "result": "exception",
+                "success": False,
                 "exception": repr(e),
                 "traceback": traceback.format_tb(e.__traceback__),
                 "end_time": datetime.now(tz=timezone.utc),
             }
         else:
             l.debug("...executor task %s:%s success", self.name, job)
-            data = {"result": "success", "end_time": job_future.result()}
+            data = {
+                "success": True,
+                "end_time": job_future.result(),
+                "exception": "",
+                "traceback": "",
+            }
         data["start_time"] = start_time
+        data["timeout"] = False
         await self.done.dump(job, data)
 
     async def validate(self):
@@ -1666,15 +1680,20 @@ class KubeFunctionTask(KubeTask):
         except Exception as e:
             l.info("--sync task %s:%s failed", self.name, job, exc_info=True)
             result: Dict[str, Any] = {
-                "result": "exception",
+                "success": False,
                 "exception": repr(e),
                 "traceback": traceback.format_tb(e.__traceback__),
             }
         else:
             l.debug("...success")
-            result = {"result": "success"}
+            result = {
+                "success": True,
+                "exception": "",
+                "traceback": "",
+            }
         result["start_time"] = start_time
         result["end_time"] = datetime.now(tz=timezone.utc)
+        result["timeout"] = False
         if self.metadata and self.func_done is not None:
             await self.func_done.dump(job, result)
 
