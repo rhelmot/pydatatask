@@ -22,6 +22,9 @@ class LiveKubeRepository(Repository):
         super().__init__()
         self.task = task
 
+    def footprint(self):
+        return []
+
     def __getstate__(self):
         return (self.task.name,)
 
@@ -58,6 +61,9 @@ class LiveContainerRepository(Repository):
     def __init__(self, task: "ContainerTask"):
         super().__init__()
         self.task = task
+
+    def footprint(self):
+        return []
 
     def __getstate__(self):
         return (self.task.name,)

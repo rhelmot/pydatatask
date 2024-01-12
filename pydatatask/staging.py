@@ -465,7 +465,6 @@ class PipelineStaging:
                     ).returncode
                     != 0
                 ):
-
                     raise Exception(
                         f"Could not lock pipeline: lockstep of {child.basedir / child.filename} failed:\n"
                         f"{child.spec.lockstep.strip()}"

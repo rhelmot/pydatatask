@@ -78,6 +78,11 @@ class Repository(ABC):
     def cache_flush(self):
         """Flush any in-memory caches held for this repository."""
 
+    @abstractmethod
+    def footprint(self):
+        """Yield all the repositories which are lowest-level representations of stored data."""
+        raise NotImplementedError
+
     @classmethod
     def is_valid_job_id(cls, job: str, /):
         """Determine whether the given job identifier is valid, i.e. that it contains only valid characters (numbers
@@ -247,6 +252,9 @@ class MapRepository(MetadataRepository):
         self.filter_all = filter_all
         self.allow_deletes = allow_deletes
 
+    def footprint(self):
+        yield from self.base.footprint()
+
     def __getstate__(self):
         return (self.base, self.func, self.filter, self.allow_deletes)
 
@@ -315,6 +323,9 @@ class FilterRepository(Repository):
 
     def __getstate__(self):
         return (self.base, self.filter, self.allow_deletes)
+
+    def footprint(self):
+        yield from self.base.footprint()
 
     async def contains(self, item, /):
         if self.filter is None or await self.filter(item):
@@ -476,6 +487,9 @@ class FileRepositoryBase(Repository, ABC):
 class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
     """A file repository whose members are files, treated as streamable blobs."""
 
+    def footprint(self):
+        yield self
+
     @job_getter
     async def open(self, job, mode="r"):
         if not self.is_valid_job_id(job):
@@ -496,6 +510,9 @@ class FunctionCallMetadataRepository(MetadataRepository):
         super().__init__()
         self._info = info
         self._domain = domain
+
+    def footprint(self):
+        yield from self._domain.footprint()
 
     def __getstate__(self):
         return (self._info, self._domain)
@@ -547,6 +564,10 @@ class RelatedItemRepository(Repository):
         self.allow_deletes = allow_deletes
         self.prefetch_lookup_setting = prefetch_lookup
         self.prefetch_lookup: Optional[Dict[str, Any]] = None
+
+    def footprint(self):
+        yield from self.base_repository.footprint()
+        yield from self.translator_repository.footprint()
 
     def __getstate__(self):
         return (self.base_repository, self.translator_repository, self.allow_deletes, self.prefetch_lookup_setting)
@@ -663,6 +684,10 @@ class AggregateAndRepository(Repository):
         assert children
         self.children = children
 
+    def footprint(self):
+        for child in self.children.values():
+            yield from child.footprint()
+
     def __getstate__(self):
         return (self.children,)
 
@@ -692,6 +717,10 @@ class AggregateOrRepository(Repository):
         super().__init__()
         assert children
         self.children = children
+
+    def footprint(self):
+        for child in self.children.values():
+            yield from child.footprint()
 
     def __getstate__(self):
         return (self.children,)
@@ -725,6 +754,10 @@ class BlockingRepository(Repository):
         self.source = source
         self.unless = unless
         self.enumerate_unless = enumerate_unless
+
+    def footprint(self):
+        yield from self.source.footprint()
+        yield from self.unless.footprint()
 
     def __getstate__(self):
         return (self.source, self.unless, self.enumerate_unless)
@@ -790,6 +823,9 @@ class ExecutorLiveRepo(Repository):
         super().__init__()
         self.task = task
 
+    def footprint(self):
+        return []
+
     def __getstate__(self):
         return (self.task.name,)
 
@@ -815,6 +851,9 @@ class InProcessMetadataRepository(MetadataRepository):
     def __init__(self, data: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.data: Dict[str, Any] = data if data is not None else {}
+
+    def footprint(self):
+        yield self
 
     def __getstate__(self):
         return id(self)
@@ -885,6 +924,9 @@ class InProcessBlobRepository(BlobRepository):
         super().__init__()
         self.data = data if data is not None else {}
 
+    def footprint(self):
+        yield self
+
     def __getstate__(self):
         return id(self)
 
@@ -948,6 +990,9 @@ class CacheInProcessMetadataRepository(MetadataRepository):
         self._negative_cache: Set[str] = set()
         self._complete_keys = False
         self._complete_values = False
+
+    def footprint(self):
+        yield from self.base.footprint()
 
     async def info(self, job: str, /):
         # EXPERIMENT

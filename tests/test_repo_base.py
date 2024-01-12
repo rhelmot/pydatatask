@@ -10,6 +10,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
             def __getstate__(self):
                 return "foo"
 
+            def footprint(self):
+                yield self
+
             async def unfiltered_iter(self):
                 yield "foo"
                 yield " "
@@ -33,6 +36,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
         class DerivedRepository(pydatatask.MetadataRepository):
             def __getstate__(self):
                 return "foo"
+
+            def footprint(self):
+                yield self
 
             async def unfiltered_iter(self):
                 yield "foo"

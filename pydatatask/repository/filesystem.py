@@ -317,6 +317,9 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
         super().__init__(*args, **kwargs)
         self.discard_empty = discard_empty
 
+    def footprint(self):
+        yield self
+
     async def delete(self, job, /):
         if await self.contains(job):
             await aioshutil.rmtree(self.fullpath(job))
@@ -446,6 +449,10 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         self.meta = meta
         self.pathsep = pathsep
 
+    def footprint(self):
+        # This COULD be split out into a more base level footprint. however this produces a more legible backup result
+        yield self
+
     def __getstate__(self):
         return (self.blobs, self.meta, self.pathsep)
 
@@ -519,7 +526,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         return split
 
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
-        info = await (self.meta.info(job))
+        info = await self.meta.info(job)
         split = self._splitpath(path)
         try:
             child_info = self._follow_path(info, split)

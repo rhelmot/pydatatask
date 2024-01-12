@@ -85,6 +85,9 @@ class S3BucketRepositoryBase(Repository):
         self.bucket = bucket
         self.endpoints = endpoints or {}
 
+    def footprint(self):
+        yield self
+
     def __getstate__(self):
         return (self.endpoints, self.bucket)
 

@@ -36,6 +36,9 @@ class DockerRepository(Repository):
         self.domain = domain
         self.repository = repository
 
+    def footprint(self):
+        yield self
+
     def __getstate__(self):
         return (self.domain, self.repository)
 

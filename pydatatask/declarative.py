@@ -13,6 +13,7 @@ import traceback
 
 from importlib_metadata import entry_points
 from motor.core import AgnosticClient
+from pymongo.database import Database
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async
@@ -226,8 +227,8 @@ def _build_docker_connection(
 
 def _build_mongo_connection(url: str, database: str):
     async def mongo():
-        client: "AgnosticClient[Any]" = motor.motor_asyncio.AsyncIOMotorClient(url)
-        collection = client.get_database(database)
+        client: "AgnosticClient" = motor.motor_asyncio.AsyncIOMotorClient(url)
+        collection: Database[Any] = client.get_database(database)
         yield collection
 
     return mongo

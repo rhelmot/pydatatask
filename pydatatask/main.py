@@ -27,7 +27,17 @@ The help screen should look something like this:
 
 from __future__ import annotations
 
-from typing import Callable, DefaultDict, Dict, Iterable, List, Optional, Set, Union
+from typing import (
+    Callable,
+    DefaultDict,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 from collections import defaultdict
 from pathlib import Path
 import argparse
@@ -40,7 +50,6 @@ import re
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
-import yaml
 
 from . import repository as repomodule
 from . import task as taskmodule
@@ -49,7 +58,6 @@ from .agent import cat_data as cat_data_inner
 from .agent import inject_data as inject_data_inner
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
-from .repository import Repository
 from .utils import async_copyfile
 from .visualize import run_viz
 
@@ -59,7 +67,7 @@ except ModuleNotFoundError:
     fuse = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
-token_re = re.compile(r"\w+\.\w+")
+token_re = re.compile(r"\w+(\.\w+)+")
 
 __all__ = (
     "main",
@@ -338,31 +346,39 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
 
 
 async def print_status(pipeline: Pipeline, all_repos: bool, as_json: bool = False, output: Optional[Path] = None):
-    async def inner(repo: repomodule.Repository):
+    async def inner(repo: repomodule.Repository) -> int:
         the_sum = 0
         async for _ in repo:
             the_sum += 1
         return the_sum
 
     link_list = list(get_links(pipeline, all_repos))
-    repo_list = list(set(link.repo for link in link_list))
-    repo_sizes = dict(zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list))))
+    repo_set = {link.repo for link in link_list}
+    repo_set |= {cokeyed for link in link_list for cokeyed in link.cokeyed.values()}
+    repo_list = list(repo_set)
+    repo_sizes: Dict[repomodule.Repository, int] = dict(
+        zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list)))
+    )
 
-    result: DefaultDict[str, Dict[str, int]] = defaultdict(dict)
+    result: DefaultDict[str, Dict[str, Tuple[int, Dict[str, int]]]] = defaultdict(dict)
     for task in pipeline.tasks.values():
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
             if link in link_list:
-                result[task.name][link_name] = repo_sizes[link.repo]
+                result[task.name][link_name] = repo_sizes[link.repo], {
+                    cokey: repo_sizes[cokeyed] for cokey, cokeyed in link.cokeyed.items()
+                }
 
     msg = ""
     if not as_json:
         for task_name, links in result.items():
             msg += f"{task_name}\n"
-            for link_name, sizes in links.items():
+            for link_name, (sizes, cokeys) in links.items():
                 msg += f"  {task_name}.{link_name} {sizes}\n"
+                for cokey_name, cokey_size in cokeys.items():
+                    msg += f"  {task_name}.{link_name}.{cokey_name} {cokey_size}\n"
             msg += "\n"
     else:
         msg = json.dumps(result, indent=2)
@@ -393,13 +409,33 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
         print()
 
 
-async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
-    item: Union[taskmodule.Task, repomodule.Repository]
-    if "." in data:
-        taskname, reponame = data.split(".")
-        item = pipeline.tasks[taskname].links[reponame].repo
+def lookup_dotted(
+    pipeline: Pipeline, ref: str, enable_footprint: bool = False
+) -> Union[repomodule.Repository, taskmodule.Task]:
+    if enable_footprint and ref.startswith("__footprint."):
+        _, footprint_idx_str, real_ref = ref.split(".", 2)
+        footprint_idx = int(footprint_idx_str)
+        repo = lookup_dotted(pipeline, real_ref)
+        assert isinstance(repo, repomodule.Repository)
+        for i, footprint_repo in enumerate(repo.footprint()):
+            if i == footprint_idx:
+                return footprint_repo
+
+    item: Union[repomodule.Repository, taskmodule.Task]
+    if "." in ref:
+        taskname, reponame = ref.split(".", 1)
+        if "." in reponame:
+            reponame, cokeyname = reponame.split(".", 1)
+            item = pipeline.tasks[taskname].links[reponame].cokeyed[cokeyname]
+        else:
+            item = pipeline.tasks[taskname].links[reponame].repo
     else:
-        item = pipeline.tasks[data]
+        item = pipeline.tasks[ref]
+    return item
+
+
+async def delete_data(pipeline: Pipeline, data: str, recursive: bool, job: List[str]):
+    item = lookup_dotted(pipeline, data)
 
     for dependant in pipeline.dependants(item, recursive):
         if isinstance(dependant, repomodule.Repository):
@@ -422,8 +458,13 @@ async def list_data(pipeline: Pipeline, data: List[str]):
     tokens = token_re.findall(input_text)
     namespace = {name.replace("-", "_"): TaskNamespace(task) for name, task in pipeline.tasks.items()}
     for token in tokens:
-        task, repo = token.split(".")
-        await namespace[task].consume(repo)
+        if token.count(".") == 1:
+            task, repo = token.split(".")
+            await namespace[task]._consume(repo)
+    for token in tokens:
+        if token.count(".") == 2:
+            task, repo, cokey = token.split(".")
+            await getattr(namespace[task], repo)._consume(cokey)
     result = eval(input_text, {}, namespace)  # pylint: disable=eval-used
 
     for job in sorted(result):
@@ -432,22 +473,40 @@ async def list_data(pipeline: Pipeline, data: List[str]):
 
 class TaskNamespace:
     def __init__(self, task: taskmodule.Task):
-        self.task = task
-        self.repos: Dict[str, Set[str]] = {}
+        self._task = task
+        self._repos: Dict[str, LinkSet] = {}
 
     def __getattr__(self, item):
-        return self.repos[item]
+        return self._repos[item]
 
-    async def consume(self, repo: str):
-        result = set()
-        async for x in self.task.links[repo].repo:
+    async def _consume(self, repo: str):
+        result: Set[str] = set()
+        async for x in self._task.links[repo].repo:
             result.add(x)
-        self.repos[repo] = result
+        self._repos[repo] = LinkSet(self._task.links[repo], result)
+
+
+class LinkSet(set):
+    def __init__(self, link: taskmodule.Link, members: Set[str]):
+        super().__init__(members)
+        self._link = link
+        self._cokeys: Dict[str, Set[str]] = {}
+
+    def __getattr__(self, item):
+        return self._cokeys[item]
+
+    async def _consume(self, cokey: str):
+        result: Set[str] = set()
+        async for x in self._link.cokeyed[cokey]:
+            result.add(x)
+        self._cokeys[cokey] = result
 
 
 async def cat_data(pipeline: Pipeline, data: str, job: str):
-    taskname, reponame = data.split(".")
-    item = pipeline.tasks[taskname].links[reponame].repo
+    item = lookup_dotted(pipeline, data)
+    if isinstance(item, taskmodule.Task):
+        print("Cannot `cat` a task")
+        return 1
 
     try:
         await cat_data_inner(item, job, aiofiles.stdout_bytes)
@@ -457,8 +516,10 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
 
 
 async def inject_data(pipeline: Pipeline, data: str, job: str):
-    taskname, reponame = data.split(".")
-    item = pipeline.tasks[taskname].links[reponame].repo
+    item = lookup_dotted(pipeline, data)
+    if isinstance(item, taskmodule.Task):
+        print("Cannot `inject` a task")
+        return 1
 
     try:
         await inject_data_inner(item, job, aiofiles.stdin_bytes)
@@ -487,33 +548,31 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
         repos = list(pipeline.tasks)
-    new_repos = []
-    for repo_name in sorted(repos):
-        if "." in repo_name:
-            new_repos.append(repo_name)
+    looked_up = [(spec, lookup_dotted(pipeline, spec)) for spec in repos]
+    new_repos = {}
+    for name, task_or_repo in looked_up:
+        if isinstance(task_or_repo, repomodule.Repository):
+            new_repos[task_or_repo] = name
         else:
-            task = pipeline.tasks[repo_name]
-            new_repos.extend(
-                {
-                    link.repo: f"{repo_name}.{linkname}" for linkname, link in task.links.items() if not link.is_status
-                }.values()
-            )
-    repos = new_repos
+            for link_name, link in task_or_repo.links.items():
+                new_repos[link.repo] = f"{name}.{link_name}"
+                for cokey_name, cokey in link.cokeyed.items():
+                    new_repos[cokey] = f"{name}.{link_name}.{cokey_name}"
+
+    footprint_repos = {}
+    for repo, name in new_repos.items():
+        for i, footprint_repo in enumerate(repo.footprint()):
+            if footprint_repo in new_repos:
+                footprint_repos[footprint_repo] = new_repos[footprint_repo]
+            else:
+                # generate special names to unambiguously refer to repositories with no direct name
+                # these names are only valid within backup and restore, for now
+                footprint_repos[footprint_repo] = f"__footprint.{name}.{i}"
 
     jobs = []
 
-    repo_to_path_mapping: Dict[Repository, str] = {}
-    name_to_path_mapping: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
-    for repo_name in repos:
+    for repo, repo_name in footprint_repos.items():
         repo_base = backup_base / repo_name
-        task_name, repo_basename = repo_name.split(".")
-        repo = pipeline.tasks[task_name].links[repo_basename].repo
-        if repo in repo_to_path_mapping:
-            name_to_path_mapping[task_name][repo_basename] = repo_to_path_mapping[repo]
-            continue
-
-        repo_to_path_mapping[repo] = f"./{repo_name}/"
-        name_to_path_mapping[task_name][repo_basename] = f"./{repo_name}/"
 
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repomodule.FileRepository(
@@ -534,53 +593,39 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         else:
             print("Warning: cannot backup", repo)
 
-    # write out the name to path mapping to backup_base / "repo_mapping.yaml"
-    async def write_file(path, data):
-        async with aiofiles.open(path, "w") as f:
-            await f.write(data)
-
-    jobs.append(write_file(backup_base / "repo_mapping.yaml", yaml.safe_dump(dict(name_to_path_mapping))))
     await asyncio.gather(*jobs)
 
 
 async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
     backup_base = Path(backup_dir)
 
-    async with aiofiles.open(backup_base / "repo_mapping.yaml") as f:
-        mapping = yaml.safe_load(await f.read())
-
     if all_repos:
         if repos:
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
-        repos = list(mapping.keys())  # just use the keys to include ALL tasks
+        repos = [p.name for p in backup_base.iterdir()]
 
     jobs = []
-    for task_name in mapping:
-        for repo_basename, repo_path in mapping[task_name].items():
-            # simply overwrite the real name being loaded with the actual one
-            if task_name not in repos and f"{task_name}.{repo_basename}" not in repos:
-                continue
-
-            repo_base = backup_base / repo_path
-            repo = pipeline.tasks[task_name].links[repo_basename].repo
-            if isinstance(repo, repomodule.BlobRepository):
-                new_repo_file = repomodule.FileRepository(
-                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-                )
-                await new_repo_file.validate()
-                jobs.append(_repo_copy_blob(new_repo_file, repo))
-            elif isinstance(repo, repomodule.MetadataRepository):
-                new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
-                await new_repo_meta.validate()
-                jobs.append(_repo_copy_meta(new_repo_meta, repo))
-            elif isinstance(repo, repomodule.FilesystemRepository):
-                new_repo_fs = repomodule.DirectoryRepository(
-                    repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-                )
-                await new_repo_fs.validate()
-                jobs.append(_repo_copy_fs(new_repo_fs, repo))
-            else:
-                print("Warning: cannot backup", repo)
+    for repo_path in repos:
+        repo_base = backup_base / repo_path
+        repo = lookup_dotted(pipeline, repo_path, True)
+        if isinstance(repo, repomodule.BlobRepository):
+            new_repo_file = repomodule.FileRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
+            await new_repo_file.validate()
+            jobs.append(_repo_copy_blob(new_repo_file, repo))
+        elif isinstance(repo, repomodule.MetadataRepository):
+            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
+            await new_repo_meta.validate()
+            jobs.append(_repo_copy_meta(new_repo_meta, repo))
+        elif isinstance(repo, repomodule.FilesystemRepository):
+            new_repo_fs = repomodule.DirectoryRepository(
+                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
+            )
+            await new_repo_fs.validate()
+            jobs.append(_repo_copy_fs(new_repo_fs, repo))
+        else:
+            print("Warning: cannot backup", repo)
 
     await asyncio.gather(*jobs)
 

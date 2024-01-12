@@ -20,6 +20,10 @@ class QueryRepository(Repository):
         self.query = Query(QueryValueType.Repository, query, {}, getters or {}, repos or {})
         self._cached: Optional[Repository] = None
 
+    def footprint(self):
+        for repo in self.query.repos.values():
+            yield from repo.footprint()
+
     def cache_flush(self):
         self._cached = None
 

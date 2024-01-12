@@ -23,6 +23,9 @@ class MongoMetadataRepository(MetadataRepository):
         self._database = database
         self._collection = collection
 
+    def footprint(self):
+        yield self
+
     def __getstate__(self):
         return (self.collection,)  # uhhhhhh not enough!
 

@@ -423,7 +423,6 @@ async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitabl
 
         return repomodule.FilterMetadataRepository(a, filt=inner, filter_all=inner_all)
     else:
-
         return repomodule.FilterRepository(a, inner)
 
 
