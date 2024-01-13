@@ -391,39 +391,39 @@ class Task(ABC):
         {self.host.mk_mkdir(lock)}
         {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
         idgen() {{
-            echo $(($(shuf -i0-255 -n1) +
-                    $(shuf -i0-255 -n1)*0x100 +
-                    $(shuf -i0-255 -n1)*0x10000 +
-                    $(shuf -i0-255 -n1)*0x1000000 +
-                    $(shuf -i0-255 -n1)*0x100000000 +
-                    $(shuf -i0-255 -n1)*0x10000000000 +
-                    $(shuf -i0-255 -n1)*0x1000000000000 +
-                    $(shuf -i0-127 -n1)*0x100000000000000))
+          echo $(($(shuf -i0-255 -n1) +
+                  $(shuf -i0-255 -n1)*0x100 +
+                  $(shuf -i0-255 -n1)*0x10000 +
+                  $(shuf -i0-255 -n1)*0x1000000 +
+                  $(shuf -i0-255 -n1)*0x100000000 +
+                  $(shuf -i0-255 -n1)*0x10000000000 +
+                  $(shuf -i0-255 -n1)*0x1000000000000 +
+                  $(shuf -i0-127 -n1)*0x100000000000000))
         }}
         watcher() {{
-            WATCHER_LAST=
-            cd {filepath}
-            while [ -z "$WATCHER_LAST" ]; do
-                sleep 5
-                if [ -f {finished} ]; then
-                    WATCHER_LAST=1
-                fi
-                for f in *; do
-                    if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ]; then
-                        ID=$(idgen)
-                        ln -sf "$PWD/$f" {upload}
-                        {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
-                        rm {upload}
-                        {'; '.join(
-                            f'ln -s "{cokeydir}/$f" {upload} && '
-                            f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID", hostjob)}); '
-                            f'rm {upload}'
-                            for cokey, cokeydir
-                            in cokeyed.items())}
-                        echo $ID >"{scratch}/$f"
-                    fi
-                done
+          WATCHER_LAST=
+          cd {filepath}
+          while [ -z "$WATCHER_LAST" ]; do
+            sleep 5
+            if [ -f {finished} ]; then
+                WATCHER_LAST=1
+            fi
+            for f in *; do
+              if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ]; then
+                ID=$(idgen)
+                ln -sf "$PWD/$f" {upload}
+                {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
+                rm {upload}
+                {'; '.join(
+                  f'(test -e "{cokeydir}/$f" && ln -s "{cokeydir}/$f" {upload} || ln -s /dev/null {upload}) && '
+                  f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID", hostjob)}); '
+                  f'rm {upload}'
+                  for cokey, cokeydir
+                  in cokeyed.items())}
+                echo $ID >"{scratch}/$f"
+              fi
             done
+          done
         }}
         watcher &
         WATCHER_PID=$!
