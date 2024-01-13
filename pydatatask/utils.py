@@ -342,7 +342,7 @@ class AsyncWriterQueueStream:
 
 
 class QueueStream:
-    """A stream queue with synchronous-nonblocking reader and synchronous-blocking writer."""
+    """A stream queue with synchronous-locking reader and synchronous-nonblocking writer."""
 
     def __init__(self) -> None:
         self.buffer: List[Optional[bytes]] = []
@@ -371,6 +371,54 @@ class QueueStream:
                 if self._closed:
                     break
                 time.sleep(0.01)
+                continue
+            buf = self.buffer[line]
+            assert buf is not None
+
+            if size < 0 or size >= len(buf) - col:
+                outbuf.extend(buf[col:])
+                self.buffer[line] = None
+                self.readptr = (line + 1, 0)
+                size -= len(buf) - col
+                continue
+
+            outbuf.extend(buf[col : col + size])
+            self.readptr = (line, col + size)
+            size = 0
+
+        return bytes(outbuf)
+
+
+class AsyncQueueStream:
+    """A stream queue with asynchronous-blocking reader and asynchronous-nonblocking writer."""
+
+    def __init__(self) -> None:
+        self.buffer: List[Optional[bytes]] = []
+        self.readptr = (0, 0)
+        self._closed = False
+
+    def close(self) -> None:
+        """Add data to the queue."""
+        self._closed = True
+
+    async def write(self, data: Buffer, /) -> int:
+        """Add data to the queue."""
+        b = bytes(data)
+        self.buffer.append(b)
+        return len(b)
+
+    async def read(self, size: int = -1, /) -> bytes:
+        """Read up to size bytes from the queue, or until EOF.
+
+        Negative sizes (the default) will read all bytes until EOF.
+        """
+        outbuf = bytearray()
+        while size != 0:
+            line, col = self.readptr
+            if line >= len(self.buffer):
+                if self._closed:
+                    break
+                await asyncio.sleep(0.01)
                 continue
             buf = self.buffer[line]
             assert buf is not None

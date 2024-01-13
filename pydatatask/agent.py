@@ -45,9 +45,18 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         return response
 
     @authorize
-    @parse
-    async def post(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
-        await inject_data(repo, job, request.content)
+    async def post(request: web.Request) -> web.StreamResponse:
+        try:
+            task = pipeline.tasks[request.match_info["task"]]
+            link_str = request.match_info["link"]
+            link = task.links[link_str]
+            repo = link.repo
+            job = request.match_info["job"]
+            hostjob = request.query.getone("hostjob", None)
+        except KeyError as e:
+            raise web.HTTPNotFound() from e
+        content = await task.instrument_dump(request.content, link_str, None, job, hostjob)
+        await inject_data(repo, job, content)
         return web.Response(text=job)
 
     @authorize
@@ -88,12 +97,16 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
     async def cokey_post(request: web.Request) -> web.StreamResponse:
         try:
             task = pipeline.tasks[request.match_info["task"]]
-            link = task.links[request.match_info["link"]]
-            repo = link.cokeyed[request.match_info["cokey"]]
+            link_str = request.match_info["link"]
+            link = task.links[link_str]
+            cokey_str = request.match_info["cokey"]
+            repo = link.cokeyed[cokey_str]
             job = request.match_info["job"]
+            hostjob = request.query.getone("hostjob", None)
         except KeyError as e:
             raise web.HTTPNotFound() from e
-        await inject_data(repo, job, request.content)
+        content = await task.instrument_dump(request.content, link_str, cokey_str, job, hostjob)
+        await inject_data(repo, job, content)
         return web.Response(text=job)
 
     app.add_routes([web.get("/data/{task}/{link}/{job}", get), web.post("/data/{task}/{link}/{job}", post)])

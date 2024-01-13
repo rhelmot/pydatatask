@@ -94,6 +94,8 @@ class LinkSpec:
     kind: str
     key: Optional[str] = None
     cokeyed: Dict[str, str] = field(default_factory=dict)
+    auto_meta: Optional[str] = None
+    auto_values: Optional[Any] = None
 
 
 @_dataclass_serial

@@ -129,7 +129,7 @@ class Repository(ABC):
         raise NotImplementedError
 
     async def template(
-        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str, hostjob: Optional[str] = None
     ) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
@@ -160,6 +160,7 @@ class Repository(ABC):
             preamble, epilogue, extra_dirs = task.mk_watchdir_upload(
                 filepath,
                 link_name,
+                hostjob,
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
@@ -191,10 +192,15 @@ class MetadataRepository(Repository, ABC):
     returning the structured data from the `info` method."""
 
     async def template(
-        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+        self,
+        job: str,
+        task: taskmodule.Task,
+        kind: taskmodule.LinkKind,
+        link_name: str,
+        hostjob: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind, link_name)
+            return await super().template(job, task, kind, link_name, hostjob)
         info = await self.info(job)
         return taskmodule.TemplateInfo(info)
 
@@ -273,7 +279,12 @@ class MapRepository(MetadataRepository):
                 yield item
 
     async def template(
-        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+        self,
+        job: str,
+        task: taskmodule.Task,
+        kind: taskmodule.LinkKind,
+        link_name: str,
+        hostjob: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 
@@ -342,7 +353,12 @@ class FilterRepository(Repository):
                 yield item
 
     async def template(
-        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str
+        self,
+        job: str,
+        task: taskmodule.Task,
+        kind: taskmodule.LinkKind,
+        link_name: str,
+        hostjob: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 

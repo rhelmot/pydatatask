@@ -19,11 +19,13 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
         async def phase0(
             repo_zero,
             repo_one,
+            **kwargs,
         ):
+            print(repo_zero)
             await repo_one.dump(await repo_zero.info() + "!")
 
         @pydatatask.ExecutorTask("phase1", executor, phase1_done)
-        async def phase1(repo_one, repo_two):
+        async def phase1(repo_one, repo_two, **kwargs):
             await repo_two.dump(await repo_one.info() + "?")
 
         phase0.link("repo_zero", repo0, kind=pydatatask.LinkKind.InputRepo)

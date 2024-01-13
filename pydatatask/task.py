@@ -58,6 +58,8 @@ from . import repository as repomodule
 from .quota import Quota, QuotaManager, localhost_quota_manager
 from .utils import (
     STDOUT,
+    AReadStreamBase,
+    AsyncReaderQueueStream,
     _StderrIsStdout,
     async_copyfile,
     crypto_hash,
@@ -165,6 +167,8 @@ class Link:
     kind: Optional[LinkKind] = None
     key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None
     cokeyed: Dict[str, "repomodule.Repository"] = field(default_factory=dict)
+    auto_meta: Optional[str] = None
+    auto_values: Optional[Any] = None
     is_input: bool = False
     is_output: bool = False
     is_status: bool = False
@@ -279,7 +283,7 @@ class Task(ABC):
             result += self.host.mk_unzip(filename, payload_filename)
         return result
 
-    def mk_repo_put(self, filename: str, link_name: str, job: str) -> Any:
+    def mk_repo_put(self, filename: str, link_name: str, job: str, hostjob: Optional[str] = None) -> Any:
         """Generate logic to perform an repository insert for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
@@ -288,7 +292,8 @@ class Task(ABC):
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         result = self.host.mk_http_post(
             payload_filename,
-            f"{self.agent_url}/data/{self.name}/{link_name}/{job}",
+            f"{self.agent_url}/data/{self.name}/{link_name}/{job}"
+            + (f"?hostjob={hostjob}" if hostjob is not None else ""),
             {"Cookie": "secret=" + self.agent_secret},
         )
         if is_filesystem:
@@ -338,13 +343,16 @@ class Task(ABC):
             f"download_{link_name}",
         )
 
-    def mk_repo_put_cokey(self, filename: str, link_name: str, cokey_name: str, job: str) -> Any:
+    def mk_repo_put_cokey(
+        self, filename: str, link_name: str, cokey_name: str, job: str, hostjob: Optional[str] = None
+    ) -> Any:
         """Generate logic to upload a cokeyed link."""
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         result = self.host.mk_http_post(
             payload_filename,
-            f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}",
+            f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}"
+            + (f"?hostjob={hostjob}" if hostjob is not None else ""),
             {"Cookie": "secret=" + self.agent_secret},
         )
         if is_filesystem:
@@ -358,7 +366,9 @@ class Task(ABC):
         """
         return self.host.mk_mkdir(filepath)
 
-    def mk_watchdir_upload(self, filepath: str, link_name: str) -> Tuple[Any, Any, Dict[str, str]]:
+    def mk_watchdir_upload(
+        self, filepath: str, link_name: str, hostjob: Optional[str]
+    ) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
         If you're trying to debug something and you run across this, just ask rhelmot for help.
@@ -402,11 +412,11 @@ class Task(ABC):
                     if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ]; then
                         ID=$(idgen)
                         ln -sf "$PWD/$f" {upload}
-                        {self.mk_repo_put(upload, link_name, "$ID")}
+                        {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
                         rm {upload}
                         {'; '.join(
                             f'ln -s "{cokeydir}/$f" {upload} && '
-                            f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID")}); '
+                            f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID", hostjob)}); '
                             f'rm {upload}'
                             for cokey, cokeydir
                             in cokeyed.items())}
@@ -508,6 +518,8 @@ class Task(ABC):
         kind: Optional[LinkKind],
         key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None,
         cokeyed: Optional[Dict[str, "repomodule.Repository"]] = None,
+        auto_meta: Optional[str] = None,
+        auto_values: Optional[Any] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
         is_status: bool = False,
@@ -526,6 +538,8 @@ class Task(ABC):
         :param key: A related item from a different link to use instead of the current job when doing repository lookup.
             Or, a function taking the task's job and producing the desired job to do a lookup for.
         :param cokeyed: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.
+        :param auto_meta: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB.
+        :param auto_values: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC.
         :param is_input: Whether this repository contains data which is consumed by the task. Default based on kind.
         :param is_output: Whether this repository is populated by the task. Default based on kind.
         :param is_status: Whether this task is populated with task-ephemeral data. Default False.
@@ -560,6 +574,8 @@ class Task(ABC):
             key=key,
             kind=kind,
             cokeyed=cokeyed or {},
+            auto_meta=auto_meta,
+            auto_values=auto_values,
             is_input=is_input,
             is_output=is_output,
             is_status=is_status,
@@ -722,14 +738,23 @@ class Task(ABC):
         """
         raise NotImplementedError
 
+    # This should almost certainly instead return a context manager returning a object wrapping the jinja environment,
+    # the preamble, and the epilogue which cleans up the coroutines on close.
     async def build_template_env(
-        self, env_src: Dict[str, Any], orig_job: str
+        self,
+        orig_job: str,
+        env_src: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         """Transform an environment source into an environment according to Links.
 
         Returns the environment, a list of preambles, and a list of epilogues. These may be of any type depending on the
         task type.
         """
+        if env_src is None:
+            env_src = {}
+        env_src.update(self.links)
+        env_src["job"] = orig_job
+        env_src["task"] = self.name
 
         def subkey(items: List[str]):
             src = result[items[0]]
@@ -766,7 +791,9 @@ class Task(ABC):
                         pending[items[0]].append((env_name, link))
                         continue
 
-            arg = self.instrument_arg(orig_job, await link.repo.template(subjob, self, link.kind, env_name), link.kind)
+            arg = self.instrument_arg(
+                orig_job, await link.repo.template(subjob, self, link.kind, env_name, orig_job), link.kind
+            )
             result[env_name] = arg.arg
             if arg.preamble is not None:
                 preamble.append(arg.preamble)
@@ -778,7 +805,7 @@ class Task(ABC):
                     assert link.kind is not None
                     subjob = subkey(link.key.split("."))
                     arg = self.instrument_arg(
-                        orig_job, await link.repo.template(subjob, self, link.kind, env_name2), link.kind
+                        orig_job, await link.repo.template(subjob, self, link.kind, env_name2, orig_job), link.kind
                     )
                     result[env_name2] = arg.arg
                     if arg.preamble is not None:
@@ -805,6 +832,57 @@ class Task(ABC):
         This is called during build_template_env on each link, after Repository.template() runs on it.
         """
         return arg
+
+    async def instrument_dump(
+        self, content: AReadStreamBase, link: str, cokey: Optional[str], job: str, hostjob: Optional[str]
+    ) -> AReadStreamBase:
+        """Called when data is injected from a task through a link (currently only throgh the agent).
+
+        Should return either the original stream or a new stream which is derivative of the old stream's content. By
+        default, it applies auto_meta link data for metadata repositories.
+        """
+        if self.links[link].auto_meta == cokey and self.links[link].auto_values is not None and hostjob is not None:
+            # just assume it's yaml. this is fine.
+            data_str = await content.read()
+            data = yaml.safe_load(data_str)
+            env, _, _ = await self.build_template_env(hostjob)
+            rendered = await self._render_auto_values(env, self.links[link].auto_values)
+            if isinstance(rendered, dict):
+                if data is None:
+                    pass
+                elif isinstance(data, dict):
+                    rendered.update(data)
+                else:
+                    raise TypeError(f"Cannot combine auto-meta, bad types: dict and {type(data)}")
+            elif isinstance(rendered, list):
+                if data is None:
+                    pass
+                elif isinstance(data, list):
+                    rendered.extend(data)
+                else:
+                    raise TypeError(f"Cannot combine auto-meta, bad types: list and {type(data)}")
+            else:
+                raise TypeError(f"Bad rendered auto-meta type: {type(rendered)}")
+
+            for item in env.values():
+                if asyncio.iscoroutine(item):
+                    item.close()
+
+            result = AsyncReaderQueueStream()
+            result.write(yaml.safe_dump(rendered).encode())
+            result.close()
+            return result
+        return content
+
+    async def _render_auto_values(self, template_env: Dict[str, Any], template: Any) -> Any:
+        if isinstance(template, str):
+            return yaml.safe_load(await render_template(template, template_env))
+        elif isinstance(template, dict):
+            return {k: await self._render_auto_values(template_env, v) for k, v in template.items()}
+        elif isinstance(template, list):
+            return [await self._render_auto_values(template_env, i) for i in template]
+        else:
+            return template
 
 
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
@@ -942,16 +1020,19 @@ class KubeTask(Task):
 
         return usage
 
+    async def build_template_env(self, orig_job, env_src=None):
+        if env_src is None:
+            env_src = {}
+        env_src.update(vars(self))
+        env_src.update(self.template_env)
+        template_env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
+        template_env["argv0"] = os.path.basename(sys.argv[0])
+        return template_env, preamble, epilogue
+
     async def launch(self, job):
-        env_input = dict(vars(self))
-        env_input.update(self.links)
-        env_input.update(self.template_env)
-        template_env, preamble, epilogue = await self.build_template_env(env_input, job)
+        template_env, preamble, epilogue = await self.build_template_env(job)
         if preamble or epilogue:
             raise Exception("TODO: preamble and epilogue and error handling for KubeTask")
-        template_env["job"] = job
-        template_env["task"] = self.name
-        template_env["argv0"] = os.path.basename(sys.argv[0])
         manifest = yaml.safe_load(await render_template(self.template, template_env))
         for item in template_env.values():
             if asyncio.iscoroutine(item):
@@ -1238,10 +1319,7 @@ class ProcessTask(Task):
             stderr: Optional[Union[str, Path, _StderrIsStdout]] = STDOUT
             if not isinstance(self._stderr, _StderrIsStdout):
                 stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
-            env_src: Dict[str, Any] = dict(self.links)
-            env_src["job"] = job
-            env_src["task"] = self.name
-            template_env, preamble, epilogue = await self.build_template_env(env_src, job)
+            template_env, preamble, epilogue = await self.build_template_env(job)
             exe_path = self.basedir / job / "exe"
             exe_txt = await render_template(self.template, template_env)
             for item in template_env.values():
@@ -1387,8 +1465,7 @@ class InProcessSyncTask(Task):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching in-process %s:%s...", self.name, job)
-        args: Dict[str, Any] = dict(self.links)
-        args, preamble, epilogue = await self.build_template_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(job)
         try:
             for p in preamble:
                 p(**args)
@@ -1512,16 +1589,17 @@ class ExecutorTask(Task):
             raise ValueError("InProcessAsyncTask %s has func None" % self.name)
 
         sig = inspect.signature(self.func, follow_wrapped=True)
-        for name in sig.parameters.keys():
-            if name in self.links:
+        for name, param in sig.parameters.items():
+            if param.kind == param.VAR_KEYWORD:
+                pass
+            elif name in self.links:
                 self._env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def launch(self, job):
         l.info("Launching %s:%s with %s...", self.name, job, self.executor)
-        args = dict(self.links)
-        args, preamble, epilogue = await self.build_template_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(job)
         start_time = datetime.now(tz=timezone.utc)
         running_job = self.executor.submit(self._timestamped_func, self.func, preamble, args, epilogue)
         if self.synchronous:
@@ -1669,8 +1747,7 @@ class KubeFunctionTask(KubeTask):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching --sync %s:%s...", self.name, job)
-        args = dict(self.links)
-        args, preamble, epilogue = await self.build_template_env(args, job)
+        args, preamble, epilogue = await self.build_template_env(job)
         try:
             for p in preamble:
                 await p(**args)
@@ -1814,10 +1891,7 @@ class ContainerTask(Task):
                 self.warned = True
             return
 
-        env_src: Dict[str, Any] = dict(self.links)
-        env_src["job"] = job
-        env_src["task"] = self.name
-        template_env, preamble, epilogue = await self.build_template_env(env_src, job)
+        template_env, preamble, epilogue = await self.build_template_env(job)
         exe_txt = await render_template(self.template, template_env)
         exe_txt = "\n".join(
             [

@@ -57,13 +57,15 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                     if i > 100:
                         subprocess.run("find /tmp/pydatatask", shell=True, check=True)
                         subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout", shell=True, check=True)
-                        subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=True)
+                        subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=False)
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}
-                allMeta = [await outputMeta.info(key) for key in keys]
+                allMeta = {key: await outputMeta.info(key) for key in keys}
                 assert allBlob == {b"hoo\nhey", b"hoo\ndone", b"hoo\nho"}
                 assert len(allMeta) == 3
-                # assert allMeta == [{"filename": "100", "parent": "1"}, {"filename": "103", "parent": "1"}, {"filename": "104", "parent": "1"}]
+                assert all(v["job"] == 1 for v in allMeta.values())
+                assert all(v["complex"]["thing_1"] is True for v in allMeta.values())
+                assert {v["parent"] for v in allMeta.values()} == {100, 103, 104}
         finally:
             await task.manager.teardown_agent()

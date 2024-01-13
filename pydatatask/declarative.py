@@ -540,6 +540,8 @@ def build_task_picker(
             "kind": link_kind_constructor,
             "key": lambda thing: None if thing is None else str(thing),
             "cokeyed": lambda thing: {x: repos[y] for x, y in thing.items()},
+            "auto_meta": lambda thing: str(thing) if thing is not None else None,
+            "auto_values": lambda thing: thing,
             "is_input": parse_bool,
             "is_output": parse_bool,
             "is_status": parse_bool,

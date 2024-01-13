@@ -23,6 +23,11 @@ tasks:
       output:
         repo: output
         kind: StreamingOutputFilepath
+        auto_meta: meta
+        auto_values:
+          job: '{{ job }}'
+          complex: |
+            thing_{{job}}: true
         cokeyed:
           meta: outputMeta
     executable:

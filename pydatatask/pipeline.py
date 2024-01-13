@@ -149,6 +149,8 @@ class Pipeline:
                         None,
                         self._make_single_func(attrs["rfollow"]),
                         cokeyed=None,
+                        auto_meta=None,
+                        auto_values=None,
                         **link_attrs,
                     )
 
