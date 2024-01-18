@@ -383,6 +383,14 @@ class Task(ABC):
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
         dict_result = dict(cokeyed)
         dict_result["lock"] = lock
+        # auto_values = self.links[link_name].auto_values is not None
+        auto_cokey = self.links[link_name].auto_meta
+
+        def prep_upload(cokey, cokeydir):
+            if auto_cokey == cokey:
+                return f'(test -e "{cokeydir}/$f" && ln -s "{cokeydir}/$f" {upload} || ln -s /dev/null {upload}) && '
+            else:
+                return f"ln -s {cokeydir}/$f {upload}"
 
         return (
             f"""
@@ -415,7 +423,7 @@ class Task(ABC):
                 {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
                 rm {upload}
                 {'; '.join(
-                  f'(test -e "{cokeydir}/$f" && ln -s "{cokeydir}/$f" {upload} || ln -s /dev/null {upload}) && '
+                  f'{prep_upload(cokey, cokeydir)}'
                   f'({self.mk_repo_put_cokey(upload, link_name, cokey, "$ID", hostjob)}); '
                   f'rm {upload}'
                   for cokey, cokeydir
