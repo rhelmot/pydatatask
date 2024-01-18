@@ -89,7 +89,7 @@ class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
     """A protocol for writing data to an asynchronous stream with context management."""
 
 
-async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, blocksize=1024 * 16):
+async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, blocksize=1024 * 1024):
     """Stream data from ``copyfrom`` to ``copyto``."""
     while True:
         data = await copyfrom.read(blocksize)
@@ -258,7 +258,7 @@ class AsyncReaderQueueStream:
             if line >= len(self.buffer):
                 if self.closed:
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.0001)
                 continue
             buf = self.buffer[line]
             assert buf is not None
@@ -294,7 +294,7 @@ class AsyncWriterQueueStream:
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Add data to the queue."""
         while self.bufsize >= self.max_bufsize:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.0001)
         self.bufsize += len(data)
         self.buffer.append(bytes(data))
         return len(data)
@@ -317,7 +317,7 @@ class AsyncWriterQueueStream:
             if line >= len(self.buffer):
                 if self.closed:
                     break
-                time.sleep(0.01)
+                time.sleep(0.0001)
                 continue
             buf = self.buffer[line]
             assert buf is not None
@@ -370,7 +370,7 @@ class QueueStream:
             if line >= len(self.buffer):
                 if self._closed:
                     break
-                time.sleep(0.01)
+                time.sleep(0.0001)
                 continue
             buf = self.buffer[line]
             assert buf is not None
@@ -418,7 +418,7 @@ class AsyncQueueStream:
             if line >= len(self.buffer):
                 if self._closed:
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.0001)
                 continue
             buf = self.buffer[line]
             assert buf is not None

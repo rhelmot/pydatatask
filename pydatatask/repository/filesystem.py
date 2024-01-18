@@ -223,7 +223,7 @@ class FilesystemRepository(Repository, abc.ABC):
                         async def _pproducer(member, inner_queue):
                             assert member.data is not None
                             while True:
-                                bytes_data = await member.data.read(1024 * 16)
+                                bytes_data = await member.data.read(1024 * 1024)
                                 if not bytes_data:
                                     break
                                 inner_queue.write(bytes_data)
@@ -309,12 +309,14 @@ async def _walk(top, onerror=None, followlinks=False) -> AsyncIterator[Tuple[str
 class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
     """A directory repository is a repository which stores its data as a basic on-local-disk filesystem."""
 
-    def __init__(self, *args, discard_empty=True, **kwargs):
+    def __init__(
+        self, basedir: Union[str, Path], extension: str = "", case_insensitive: bool = False, discard_empty=True
+    ):
         """
         :param discard_empty: Whether only directories containing at least one member should be considered as "present"
                               in the repository.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__(basedir=basedir, extension=extension, case_insensitive=case_insensitive)
         self.discard_empty = discard_empty
 
     def footprint(self):
