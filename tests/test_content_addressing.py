@@ -29,6 +29,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         tar = tarfile.open(fileobj=buf, mode="w:")
         info = tarfile.TarInfo("letters/a")
         info.size = 1
+        info.mode = 123
         tar.addfile(info, io.BytesIO(b"A"))
         info = tarfile.TarInfo("letters/b")
         info.size = 1
@@ -54,6 +55,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         async with await self.repo.open("1", "letters/B") as fp:
             data = await fp.read()
             assert b"B" == data
+        assert await self.repo.get_mode("1", "letters/a") == 123
 
     async def asyncTearDown(self):
         if self.meta_dir is not None:

@@ -77,6 +77,7 @@ class FilesystemEntry:
 
     name: str
     type: FilesystemType
+    mode: int
     data: Optional[AReadStream] = None
     link_target: Optional[str] = None
     content_hash: Optional[str] = None
@@ -96,6 +97,11 @@ class FilesystemRepository(Repository, abc.ABC):
 
     @abc.abstractmethod
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
+        """Given a path, get the type of the file at that path."""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
         """Given a path, get the type of the file at that path."""
         raise NotImplementedError
 
@@ -167,11 +173,13 @@ class FilesystemRepository(Repository, abc.ABC):
                 if f is None:
                     break
                 if f.issym():
-                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, link_target=f.linkname))
+                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, f.mode, link_target=f.linkname))
                 elif f.isdir():
-                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.DIRECTORY))
+                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.DIRECTORY, f.mode))
                 elif f.isreg():
-                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.FILE, data=wrap(tar.extractfile(f))))
+                    await cursor.asend(
+                        FilesystemEntry(f.name, FilesystemType.FILE, f.mode, data=wrap(tar.extractfile(f)))
+                    )
                 else:
                     l.warning("Could not dump archive member %s: bad type", f)
             await cursor.aclose()
@@ -189,17 +197,23 @@ class FilesystemRepository(Repository, abc.ABC):
             rtopp = Path(rtop)
             for name in dirs:
                 fullname = rtopp / name
-                yield FilesystemEntry(str(fullname), FilesystemType.DIRECTORY)
+                perms = await self.get_mode(job, str(fullname))
+                assert perms is not None
+                yield FilesystemEntry(str(fullname), FilesystemType.DIRECTORY, perms)
             for name in symlinks:
                 fullname = rtopp / name
                 target = await self.readlink(job, str(fullname))
-                yield FilesystemEntry(str(fullname), FilesystemType.SYMLINK, link_target=target)
+                perms = await self.get_mode(job, str(fullname))
+                assert perms is not None
+                yield FilesystemEntry(str(fullname), FilesystemType.SYMLINK, perms, link_target=target)
             for name in regulars:
                 fullname = rtopp / name
                 size, contenthash = await self.get_regular_meta(job, str(fullname))
+                perms = await self.get_mode(job, str(fullname))
+                assert perms is not None
                 async with await self.open(job, fullname) as fp:
                     yield FilesystemEntry(
-                        str(fullname), FilesystemType.FILE, data=fp, content_size=size, content_hash=contenthash
+                        str(fullname), FilesystemType.FILE, perms, data=fp, content_size=size, content_hash=contenthash
                     )
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase):
@@ -211,6 +225,7 @@ class FilesystemRepository(Repository, abc.ABC):
             with tarfile.open(mode="w", fileobj=typed_queue) as tar:
                 async for member in self.iter_members(job):
                     info = tarfile.TarInfo(member.name)
+                    info.mode = member.mode
                     data = None
                     pproducer: Tuple[Coroutine[Any, Any, Any], ...] = ()
                     if member.type == FilesystemType.FILE:
@@ -238,7 +253,6 @@ class FilesystemRepository(Repository, abc.ABC):
 
                     elif member.type == FilesystemType.DIRECTORY:
                         info.type = tarfile.DIRTYPE
-                        info.mode = 0o755
 
                     await asyncio.gather(
                         asyncio.get_running_loop().run_in_executor(None, tar.addfile, info, data), *pproducer
@@ -392,6 +406,12 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             return FilesystemType.FILE
         return None
 
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
+        r = os.stat(os.path.join(self.fullpath(job), path))
+        if r is not None:
+            return stat.S_IMODE(r.st_mode)
+        return None
+
     async def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
         root = self.fullpath(job)
         try:
@@ -414,6 +434,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
                         fullpath.symlink_to(entry.link_target)
                 else:
                     fullpath.mkdir(exist_ok=True, parents=True)
+                fullpath.chmod(entry.mode)
         except StopAsyncIteration:
             pass
 
@@ -495,6 +516,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
                     child = {
                         "name": key,
                         "type": "DIRECTORY",
+                        "mode": 0o755,
                         "children": [],
                     }
                     meta.append(child)
@@ -536,6 +558,15 @@ class ContentAddressedBlobRepository(FilesystemRepository):
             return None
         return FilesystemType.from_name(child_info["type"])
 
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
+        info = await self.meta.info(job)
+        split = self._splitpath(path)
+        try:
+            child_info = self._follow_path(info, split)
+        except (ValueError, KeyError):
+            return None
+        return child_info["mode"]
+
     async def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
         meta: List[Dict[str, Any]] = []
 
@@ -544,6 +575,7 @@ class ContentAddressedBlobRepository(FilesystemRepository):
                 entry = yield
                 subpath = self._splitpath(entry.name)
                 submeta = self._follow_path(meta, subpath, insert=True)
+                submeta["mode"] = entry.mode
                 if entry.type == FilesystemType.DIRECTORY:
                     submeta["type"] = "DIRECTORY"
                     submeta["children"] = []
