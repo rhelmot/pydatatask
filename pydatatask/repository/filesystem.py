@@ -429,12 +429,18 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
                         assert entry.data is not None
                         async with aopen(fullpath, "wb") as fp:
                             await async_copyfile(entry.data, fp)
+
+                        fullpath.chmod(entry.mode)
                     else:
                         assert entry.link_target is not None
+                        try:
+                            os.unlink(fullpath)
+                        except FileNotFoundError:
+                            pass
                         fullpath.symlink_to(entry.link_target)
                 else:
                     fullpath.mkdir(exist_ok=True, parents=True)
-                fullpath.chmod(entry.mode)
+                    fullpath.chmod(entry.mode)
         except StopAsyncIteration:
             pass
 
