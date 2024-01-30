@@ -61,7 +61,7 @@ class Host:
              {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
             ERR_FILENAME=$(mktemp)
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
-            wget -q -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || curl --fail-with-body -s $URL {headers_str} --data-binary @$FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}&& false)
+            wget -q -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || curl --fail-with-body -s $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}&& false)
             rm $ERR_FILENAME
             {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
             """
