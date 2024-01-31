@@ -480,6 +480,7 @@ MERMAID_TASK_MATURITY_STYLES = {
     "fullyIntegrated": "fill:green,color:black",
     "missingPydatataskFeatures": "fill:lightgreen,color:black,stroke:red,stroke-width:2px,stroke-dasharray: 5, 5",
     "mostlyComplete": "fill:yellow,color:black",
+    "teenager": "fill:yellow,color:black",
     "inProgress": "fill:orange,color:black",
     "noProgress": "fill:red,color:black",
     "unknown": "fill:grey,color:black",
