@@ -39,6 +39,7 @@ dependencies = [
     "plotly",
     "numpy",
     "ply",
+    "check-jsonschema"
 ]
 
 [project.scripts]
