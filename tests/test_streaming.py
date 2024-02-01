@@ -1,3 +1,4 @@
+import getpass
 import os
 from typing import cast
 import asyncio
@@ -56,9 +57,9 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.5)
                     i += 1
                     if i > 100:
-                        subprocess.run(f"find /tmp/pydatatask-{os.getlogin()}", shell=True, check=True)
-                        subprocess.run(f"cat /tmp/pydatatask-{os.getlogin()}/test_streaming/task/1/stdout", shell=True, check=True)
-                        subprocess.run(f"cat /tmp/pydatatask-{os.getlogin()}/agent-stdout", shell=True, check=False)
+                        subprocess.run(f"find /tmp/pydatatask-{getpass.getuser()}", shell=True, check=True)
+                        subprocess.run(f"cat /tmp/pydatatask-{getpass.getuser()}/test_streaming/task/1/stdout", shell=True, check=True)
+                        subprocess.run(f"cat /tmp/pydatatask-{getpass.getuser()}/agent-stdout", shell=True, check=False)
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}

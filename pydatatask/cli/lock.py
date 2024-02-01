@@ -23,20 +23,20 @@ def _allocate_temp_blob() -> Dispatcher:
 
 
 def _allocate_local_meta() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
+    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
     return Dispatcher("YamlFile", {"basedir": basedir})
 
 
 def _allocate_local_blob() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
+    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
     return Dispatcher("File", {"basedir": basedir})
 
 
 def _allocate_local_fs() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
+    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
     return Dispatcher("Directory", {"basedir": basedir})
 
 

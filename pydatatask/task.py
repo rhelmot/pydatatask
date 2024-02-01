@@ -8,6 +8,7 @@ Tasks are related to Repositories by Links. Links are created by
 .. autodata:: STDOUT
 """
 from __future__ import annotations
+import getpass
 
 from typing import (
     Any,
@@ -1202,7 +1203,7 @@ class ProcessTask(Task):
         )
 
         if pids is None:
-            pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask-{os.getlogin()}/{name}_pids")
+            pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask-{getpass.getuser()}/{name}_pids")
 
         self.pids = pids
         self.template = template

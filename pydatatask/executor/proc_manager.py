@@ -4,6 +4,7 @@ All a process manager needs to specify is how to launch a process and manipulate
 will set up an appropriate environment for running the task and retrieve the results using this interface.
 """
 
+import getpass
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
@@ -153,13 +154,13 @@ class AbstractProcessManager(Executor):
 class LocalLinuxManager(AbstractProcessManager):
     """A process manager to run tasks on the local linux machine.
 
-    By default, it will create a directory ``/tmp/pydatatask-{os.getlogin()}`` in which to store data.
+    By default, it will create a directory ``/tmp/pydatatask-{getpass.getuser()}`` in which to store data.
     """
 
     def to_container_manager(self):
         return DockerContainerManager(self.app)
 
-    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{os.getlogin()}"):
+    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}"):
         super().__init__(Path(local_path) / app)
         self.app = app
 
@@ -257,8 +258,8 @@ class LocalLinuxManager(AbstractProcessManager):
             await self.kill(pid)
 
         # lmao, hack
-        Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
-        with open(f"/tmp/pydatatask-{os.getlogin()}/agent-stdout", "wb") as fp:
+        Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+        with open(f"/tmp/pydatatask-{getpass.getuser()}/agent-stdout", "wb") as fp:
             p = await asyncio.create_subprocess_exec(
                 sys.executable,
                 Path(__file__).parent.parent / "cli" / "main.py",
@@ -334,7 +335,7 @@ class SSHLinuxManager(AbstractProcessManager):
         app: str,
         ssh: Ephemeral[asyncssh.SSHClientConnection],
         host: Host,
-        remote_path: Union[Path, str] = f"/tmp/pydatatask-{os.getlogin()}",
+        remote_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}",
     ):
         super().__init__(Path(remote_path) / app)
         self._ssh = ssh
@@ -419,7 +420,7 @@ localhost_manager = LocalLinuxManager("default")
 class InProcessLocalLinuxManager(LocalLinuxManager):
     """A process manager for the local linux system which can launch an http agent inside the current process."""
 
-    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{os.getlogin()}"):
+    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}"):
         super().__init__(app, local_path)
 
         self.runner: Optional[web.AppRunner] = None

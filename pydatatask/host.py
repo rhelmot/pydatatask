@@ -4,6 +4,7 @@ Pydatatask needs to be able to know how to make resources accessible regardless 
 can be e.g. dicts of urls keyed on Hosts, indicating that a given target resource needs to be accessed through a
 different url depending on which host is accessing it.
 """
+import getpass
 from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -28,7 +29,7 @@ class Host:
     def mktemp(self, identifier: str) -> str:
         """Generate a temporary filepath for the host system."""
         if self.os == HostOS.Linux:
-            return f'/tmp/pydatatask-{os.getlogin()}-{"".join(random.choice(string.ascii_lowercase) for _ in range(8))}-{identifier}'
+            return f'/tmp/pydatatask-{getpass.getuser()}-{"".join(random.choice(string.ascii_lowercase) for _ in range(8))}-{identifier}'
         else:
             raise TypeError(self.os)
 
