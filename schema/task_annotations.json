@@ -4,7 +4,7 @@
   "properties": {
     "maturity": {
       "type": "string",
-      "enum": ["inProgress", "fullyIntegrated"]
+      "enum": ["inProgress", "fullyIntegrated", "teenager"]
     },
     "doc": {
       "type": "string"
