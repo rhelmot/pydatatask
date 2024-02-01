@@ -1,3 +1,4 @@
+import os
 from typing import cast
 import asyncio
 import pathlib
@@ -55,9 +56,9 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                     await asyncio.sleep(0.5)
                     i += 1
                     if i > 100:
-                        subprocess.run("find /tmp/pydatatask", shell=True, check=True)
-                        subprocess.run("cat /tmp/pydatatask/test_streaming/task/1/stdout", shell=True, check=True)
-                        subprocess.run("cat /tmp/pydatatask/agent-stdout", shell=True, check=False)
+                        subprocess.run(f"find /tmp/pydatatask-{os.getlogin()}", shell=True, check=True)
+                        subprocess.run(f"cat /tmp/pydatatask-{os.getlogin()}/test_streaming/task/1/stdout", shell=True, check=True)
+                        subprocess.run(f"cat /tmp/pydatatask-{os.getlogin()}/agent-stdout", shell=True, check=False)
                         assert False, "Pipeline timeout"
                 keys = {x async for x in outputBlob}
                 allBlob = {await outputBlob.blobinfo(key) for key in keys}

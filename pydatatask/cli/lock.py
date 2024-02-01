@@ -1,3 +1,4 @@
+import os
 from typing import Callable, Dict
 from datetime import timedelta
 from pathlib import Path
@@ -22,20 +23,20 @@ def _allocate_temp_blob() -> Dispatcher:
 
 
 def _allocate_local_meta() -> Dispatcher:
-    Path("/tmp/pydatatask").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
     return Dispatcher("YamlFile", {"basedir": basedir})
 
 
 def _allocate_local_blob() -> Dispatcher:
-    Path("/tmp/pydatatask").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
     return Dispatcher("File", {"basedir": basedir})
 
 
 def _allocate_local_fs() -> Dispatcher:
-    Path("/tmp/pydatatask").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir="/tmp/pydatatask")
+    Path(f"/tmp/pydatatask-{os.getlogin()}").mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{os.getlogin()}")
     return Dispatcher("Directory", {"basedir": basedir})
 
 

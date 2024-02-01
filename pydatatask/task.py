@@ -1202,7 +1202,7 @@ class ProcessTask(Task):
         )
 
         if pids is None:
-            pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask/{name}_pids")
+            pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask-{os.getlogin()}/{name}_pids")
 
         self.pids = pids
         self.template = template
