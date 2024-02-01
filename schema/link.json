@@ -9,8 +9,35 @@
     "key": {
       "type": "string"
     },
-    "multi_meta": {
+    "cokeyed": {
+      "type": "object",
+    },
+    "auto_meta": {
       "type": "string"
+    },
+    "auto_values": {
+      "type": "object"
+    }
+    "is_input": {
+      "type": "boolean"
+    },
+    "is_output": {
+      "type": "boolean"
+    },
+    "is_status": {
+      "type": "boolean"
+    },
+    "inhibits_start": {
+      "type": "boolean"
+    },
+    "required_for_start": {
+      "type": "boolean"
+    },
+    "inhibits_output": {
+      "type": "boolean"
+    },
+    "required_for_output": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false,
