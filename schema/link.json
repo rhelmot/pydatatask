@@ -10,14 +10,14 @@
       "type": "string"
     },
     "cokeyed": {
-      "type": "object",
+      "type": "object"
     },
     "auto_meta": {
       "type": "string"
     },
     "auto_values": {
       "type": "object"
-    }
+    },
     "is_input": {
       "type": "boolean"
     },
