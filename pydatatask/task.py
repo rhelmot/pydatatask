@@ -1040,8 +1040,6 @@ class KubeTask(Task):
 
     async def launch(self, job):
         template_env, preamble, epilogue = await self.build_template_env(job)
-        if preamble or epilogue:
-            raise Exception("TODO: preamble and epilogue and error handling for KubeTask")
         manifest = yaml.safe_load(await render_template(self.template, template_env))
         for item in template_env.values():
             if asyncio.iscoroutine(item):
