@@ -357,6 +357,11 @@ class Pipeline:
                 follow = self._make_follow_func(task, link_name, True)
                 rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
+
+                # TODO: Figure out how to handle this correctly
+                del attrs['cokeyed']
+                del attrs['auto_values']
+
                 attrs["link_name"] = link_name
                 attrs["follow"] = follow
                 attrs["rfollow"] = rfollow
