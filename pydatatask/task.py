@@ -8,7 +8,6 @@ Tasks are related to Repositories by Links. Links are created by
 .. autodata:: STDOUT
 """
 from __future__ import annotations
-import getpass
 
 from typing import (
     Any,
@@ -36,6 +35,7 @@ from enum import Enum, auto
 from pathlib import Path
 import asyncio
 import copy
+import getpass
 import inspect
 import logging
 import os
@@ -1058,6 +1058,27 @@ class KubeTask(Task):
                 container["resources"]["requests"]["memory"],
                 0,
             )
+            # horrible and incomplete
+            command = container.pop("command", [])
+            args = container.pop("args", [])
+            execute = shlex.join(command + args)
+            container["command"] = [
+                "sh",
+                "-c",
+                f"""
+            set -e
+            {"; ".join(preamble)}
+            set +e
+            (
+            set -e
+            {execute}
+            )
+            RETCODE=$?
+            set -e
+            {"; ".join(epilogue)}
+            exit $RETCODE
+            """,
+            ]
 
         limit = await self.quota_manager.reserve(request)
         if limit is None:
