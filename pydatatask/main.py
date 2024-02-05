@@ -67,7 +67,7 @@ except ModuleNotFoundError:
     fuse = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
-token_re = re.compile(r"\w+(\.\w+)+")
+token_re = re.compile(r"\w+(?:\.\w+)+")
 
 __all__ = (
     "main",
