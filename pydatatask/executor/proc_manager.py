@@ -268,7 +268,7 @@ class LocalLinuxManager(AbstractProcessManager):
                 stdout=fp,
                 stderr=asyncio.subprocess.STDOUT,
                 close_fds=True,
-                env={"PIPELINE_YAML": pipeline.source_file},
+                env={"PIPELINE_YAML": pipeline.source_file} | os.environ,
             )
         agent_path = self.tmp_path / "agent"
         await self.mkdir(self.tmp_path)
