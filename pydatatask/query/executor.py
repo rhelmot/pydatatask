@@ -2,6 +2,7 @@
 
 The rest of this module is runtime support for this naive form of execution.
 """
+
 # pylint: disable=missing-function-docstring,missing-class-docstring
 
 from __future__ import annotations
@@ -233,11 +234,15 @@ class Scope:
         #
         result: Dict[ArgTypes, FunctionDefinition] = {}
         targtype_options = [
-            [arg]
-            if isinstance(arg, (QueryValueType, FunctionType))
-            else [x.type.strip_template() for x in arg.defns.values()]
-            if isinstance(arg, TemplatedFunction)
-            else [arg.type]
+            (
+                [arg]
+                if isinstance(arg, (QueryValueType, FunctionType))
+                else (
+                    [x.type.strip_template() for x in arg.defns.values()]
+                    if isinstance(arg, TemplatedFunction)
+                    else [arg.type]
+                )
+            )
             for arg in args
         ]
         for targtypes in product(targtype_options):

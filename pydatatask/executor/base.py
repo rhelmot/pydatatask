@@ -7,6 +7,7 @@ runnable type (containers, processes, or kubernetes pods), which may fail.
 This level of abstraction allows Tasks to be unconcerned by which executor they are passed, which allows Task to be a
 class focused on what is run instead of how it is run.
 """
+
 from typing import TYPE_CHECKING
 
 from pydatatask.host import Host

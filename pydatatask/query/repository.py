@@ -1,4 +1,5 @@
 """High-level interfaces for accessing query results in the form of repositories."""
+
 from typing import Any, Dict, Optional
 
 from pydatatask.repository import MetadataRepository, Repository

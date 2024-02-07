@@ -49,6 +49,7 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
 
         buf.seek(0)
         await self.repo.dump_tarball("1", wrap(buf))
+        assert (await self.repo.meta.info("1")) is not None
 
         files = [f async for f in self.repo.blobs]
         assert len(files) == 2
@@ -58,7 +59,8 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
         assert await self.repo.get_mode("1", "letters/a") == 123
 
     async def asyncTearDown(self):
-        if self.meta_dir is not None:
-            await aioshutil.rmtree(self.meta_dir)
-        if self.blob_dir is not None:
-            await aioshutil.rmtree(self.blob_dir)
+        pass
+        # if self.meta_dir is not None:
+        #    await aioshutil.rmtree(self.meta_dir)
+        # if self.blob_dir is not None:
+        #    await aioshutil.rmtree(self.blob_dir)

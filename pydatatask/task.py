@@ -7,6 +7,7 @@ Tasks are related to Repositories by Links. Links are created by
 
 .. autodata:: STDOUT
 """
+
 from __future__ import annotations
 
 from typing import (

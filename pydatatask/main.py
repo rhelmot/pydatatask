@@ -50,6 +50,7 @@ import re
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
 import aiofiles
+import uvloop
 
 from . import repository as repomodule
 from . import task as taskmodule
@@ -249,6 +250,9 @@ def main(
     ns = vars(args)
     func = ns.pop("func")
     result_or_coro = func(pipeline, **ns)
+
+    uvloop.install()
+
     if asyncio.iscoroutine(result_or_coro):
         return asyncio.run(main_inner(pipeline, result_or_coro))
     else:

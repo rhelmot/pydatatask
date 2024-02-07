@@ -1,11 +1,10 @@
 """This module houses the filesystem repositories, or repositories whose data is a whole filesystem."""
+
 from typing import (
-    IO,
     Any,
     AsyncContextManager,
     AsyncGenerator,
     AsyncIterator,
-    Coroutine,
     Dict,
     List,
     Optional,
@@ -18,16 +17,14 @@ from hashlib import sha256
 from itertools import filterfalse, tee
 from pathlib import Path
 import abc
-import asyncio
 import logging
 import os
 import stat
-import tarfile
 
 from aiofiles.threadpool import open as aopen
-from aiofiles.threadpool import wrap  # type: ignore
 import aiofiles.os
 import aioshutil
+import aiotarfile
 
 from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import (
@@ -37,12 +34,9 @@ from pydatatask.repository.base import (
     job_getter,
 )
 from pydatatask.utils import (
-    AReadStream,
     AReadStreamBase,
-    AsyncReaderQueueStream,
-    AsyncWriterQueueStream,
     AWriteStreamBase,
-    QueueStream,
+    AWriteStreamWrapper,
     async_copyfile,
     asyncasynccontextmanager,
 )
@@ -78,7 +72,7 @@ class FilesystemEntry:
     name: str
     type: FilesystemType
     mode: int
-    data: Optional[AReadStream] = None
+    data: Optional[AReadStreamBase] = None
     link_target: Optional[str] = None
     content_hash: Optional[str] = None
     content_size: Optional[int] = None
@@ -111,8 +105,8 @@ class FilesystemRepository(Repository, abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, str]:
-        """Given a path to a regular file, return the filessize and content hash."""
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
+        """Given a path to a regular file, return the filesize and content hash (if available)."""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -124,7 +118,7 @@ class FilesystemRepository(Repository, abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStream]:
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStreamBase]:
         """Open a file from the filesystem repository for reading.
 
         The file is opened with mode ``rb``.
@@ -133,63 +127,30 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         """Add an entire filesystem from a tarball."""
-        queue = AsyncWriterQueueStream()
-        typed_queue: IO[bytes] = queue  # type: ignore
 
-        async def consumer():
-            # pylint: disable=missing-class-docstring,missing-function-docstring,consider-using-with
-            class Fucker:
-                def __init__(self):
-                    self._tar = None
-                    self._iter = None
-
-                def init(self):
-                    self._tar = tarfile.open(mode="r|*", fileobj=typed_queue)
-                    self._iter = iter(self._tar)
-
-                def next(self):
-                    assert self._iter is not None
-                    result = next(self._iter, None)
-                    return result
-
-                def extractfile(self, f: tarfile.TarInfo) -> IO[bytes]:
-                    assert self._tar is not None
-                    result = self._tar.extractfile(f)
-                    assert result is not None
-                    return result
-
-                def close(self):
-                    assert self._tar is not None
-                    self._tar.close()
-
-            # pylint: enable=missing-class-docstring,missing-function-docstring,consider-using-with
-
-            tar = Fucker()
-            await asyncio.get_running_loop().run_in_executor(None, tar.init)
-            cursor = self.dump(job)
-            await cursor.__anext__()
-            while True:
-                f = await asyncio.get_running_loop().run_in_executor(None, tar.next)
-                if f is None:
-                    break
-                if f.issym():
-                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.SYMLINK, f.mode, link_target=f.linkname))
-                elif f.isdir():
-                    await cursor.asend(FilesystemEntry(f.name, FilesystemType.DIRECTORY, f.mode))
-                elif f.isreg():
+        cursor = self.dump(job)
+        await cursor.__anext__()
+        async with await aiotarfile.open_rd(stream) as tar:
+            async for entry in tar:
+                ty = entry.entry_type()
+                if ty == aiotarfile.TarfileEntryType.Symlink:
                     await cursor.asend(
-                        FilesystemEntry(f.name, FilesystemType.FILE, f.mode, data=wrap(tar.extractfile(f)))
+                        FilesystemEntry(
+                            entry.name().decode(),
+                            FilesystemType.SYMLINK,
+                            entry.mode(),
+                            link_target=entry.link_target().decode(),
+                        )
+                    )
+                elif ty == aiotarfile.TarfileEntryType.Directory:
+                    await cursor.asend(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    await cursor.asend(
+                        FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
                     )
                 else:
-                    l.warning("Could not dump archive member %s: bad type", f)
-            await cursor.aclose()
-            tar.close()
-
-        async def producer():
-            await async_copyfile(stream, queue)
-            queue.close()
-
-        await asyncio.gather(producer(), consumer())
+                    l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
+        await cursor.aclose()
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
@@ -218,48 +179,16 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase):
         """Stream a tarball for the given job to the provided asynchronous stream."""
-        queue = AsyncReaderQueueStream()
-        typed_queue: IO[bytes] = queue  # type: ignore
-
-        async def producer():
-            with tarfile.open(mode="w", fileobj=typed_queue) as tar:
-                async for member in self.iter_members(job):
-                    info = tarfile.TarInfo(member.name)
-                    info.mode = member.mode
-                    data = None
-                    pproducer: Tuple[Coroutine[Any, Any, Any], ...] = ()
-                    if member.type == FilesystemType.FILE:
-                        info.type = tarfile.REGTYPE
-                        assert member.content_size is not None
-                        info.size = member.content_size
-                        inner_queue = QueueStream()
-                        data = inner_queue
-
-                        async def _pproducer(member, inner_queue):
-                            assert member.data is not None
-                            while True:
-                                bytes_data = await member.data.read(1024 * 1024)
-                                if not bytes_data:
-                                    break
-                                inner_queue.write(bytes_data)
-                            inner_queue.close()
-
-                        pproducer = (_pproducer(member, inner_queue),)
-
-                    elif member.type == FilesystemType.SYMLINK:
-                        assert member.link_target is not None
-                        info.type = tarfile.SYMTYPE
-                        info.linkname = member.link_target
-
-                    elif member.type == FilesystemType.DIRECTORY:
-                        info.type = tarfile.DIRTYPE
-
-                    await asyncio.gather(
-                        asyncio.get_running_loop().run_in_executor(None, tar.addfile, info, data), *pproducer
-                    )
-            queue.close()
-
-        await asyncio.gather(producer(), async_copyfile(queue, dest))
+        async with await aiotarfile.open_wr(AWriteStreamWrapper(dest), aiotarfile.CompressionType.Clear) as tar:
+            async for member in self.iter_members(job):
+                if member.type == FilesystemType.FILE:
+                    assert member.data is not None
+                    await tar.add_file(member.name, member.mode, member.data)
+                elif member.type == FilesystemType.SYMLINK:
+                    assert member.link_target is not None
+                    await tar.add_symlink(member.name, member.mode, member.link_target)
+                elif member.type == FilesystemType.DIRECTORY:
+                    await tar.add_dir(member.name, member.mode)
 
 
 # https://github.com/Tinche/aiofiles/issues/167
@@ -407,7 +336,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
         return None
 
     async def get_mode(self, job: str, path: str) -> Optional[int]:
-        r = os.stat(os.path.join(self.fullpath(job), path))
+        r = os.lstat(os.path.join(self.fullpath(job), path))
         if r is not None:
             return stat.S_IMODE(r.st_mode)
         return None
@@ -445,7 +374,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             pass
 
     @asyncasynccontextmanager
-    async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStream]:
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStreamBase]:
         async with aopen(os.path.join(self.fullpath(job), path), "rb") as fp:
             yield fp
 
@@ -619,12 +548,12 @@ class ContentAddressedBlobRepository(FilesystemRepository):
 
         await self.meta.dump(job, meta)
 
-    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStream]:
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStreamBase]:
         return await self._open(job, path)
 
     async def _open(
         self, job: str, path: Union[str, Path, List[str]], link_level: int = 0
-    ) -> AsyncContextManager[AReadStream]:
+    ) -> AsyncContextManager[AReadStreamBase]:
         if not isinstance(path, list):
             ppath = self._splitpath(str(path))
         else:

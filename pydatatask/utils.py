@@ -71,6 +71,23 @@ class AWriteStreamBase(Protocol):
         """Write ``data`` to the stream."""
 
 
+class AWriteStreamWrapper:
+    """A wrapper that turns an AWriteStreamBase into an AWriteStream by stubbing its close method."""
+
+    def __init__(self, inner: AWriteStreamBase):
+        self.inner = inner
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``dat`` to the stream."""
+        return await self.inner.write(data)
+
+    async def close(self):
+        """Do nothing.
+
+        Bye!
+        """
+
+
 class AWriteStream(Protocol):
     """A protocol for writing data to an asynchronous stream."""
 

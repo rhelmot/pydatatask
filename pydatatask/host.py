@@ -4,10 +4,11 @@ Pydatatask needs to be able to know how to make resources accessible regardless 
 can be e.g. dicts of urls keyed on Hosts, indicating that a given target resource needs to be accessed through a
 different url depending on which host is accessing it.
 """
-import getpass
+
 from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum, auto
+import getpass
 import os
 import random
 import string
@@ -29,7 +30,10 @@ class Host:
     def mktemp(self, identifier: str) -> str:
         """Generate a temporary filepath for the host system."""
         if self.os == HostOS.Linux:
-            return f'/tmp/pydatatask-{getpass.getuser()}-{"".join(random.choice(string.ascii_lowercase) for _ in range(8))}-{identifier}'
+            return (
+                f"/tmp/pydatatask-{getpass.getuser()}-"
+                f'{"".join(random.choice(string.ascii_lowercase) for _ in range(8))}-{identifier}'
+            )
         else:
             raise TypeError(self.os)
 
@@ -42,7 +46,9 @@ class Host:
             FILENAME="$(mktemp)"
             ERR_FILENAME=$(mktemp)
             if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
-            wget -q -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || curl --fail-with-body -s $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME && false)
+            wget -q -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
+                curl --fail-with-body -s $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
+                (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME && false)
             rm $ERR_FILENAME
             cat $FILENAME >"{filename}"
             rm $FILENAME
@@ -55,6 +61,7 @@ class Host:
     ) -> str:
         """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
+            output_redirect = ">>$OUTPUT_FILENAME" if output_filename else ">/dev/null"
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
             return f"""
             URL="{url}"
@@ -62,7 +69,10 @@ class Host:
              {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
             ERR_FILENAME=$(mktemp)
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
-            wget -q -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || curl --fail-with-body -s $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {'>>$OUTPUT_FILENAME' if output_filename else '>/dev/null'} || (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}&& false)
+            wget -q -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
+                curl -s $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
+                (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''} \\
+                    && false)
             rm $ERR_FILENAME
             {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
             """

@@ -4,7 +4,6 @@ All a process manager needs to specify is how to launch a process and manipulate
 will set up an appropriate environment for running the task and retrieve the results using this interface.
 """
 
-import getpass
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
@@ -21,6 +20,7 @@ from typing import (
 from abc import abstractmethod
 from pathlib import Path
 import asyncio
+import getpass
 import os
 import shlex
 import signal

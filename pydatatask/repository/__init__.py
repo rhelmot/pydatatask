@@ -7,6 +7,7 @@ which repository subclass you're working with, and use its interfaces. For examp
 its values are structured objects and loads them fully into memory, and `BlobRepository` provides a streaming interface
 to a flat address space.
 """
+
 from .base import *
 from .bucket import *
 from .docker import *

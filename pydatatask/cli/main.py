@@ -2,6 +2,7 @@
 
 Its whole purpose is to parse pipeline.yaml files and then feed the result into pydatatask.main.main().
 """
+
 from typing import Optional
 import sys
 

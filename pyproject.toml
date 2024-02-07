@@ -26,6 +26,7 @@ dependencies = [
     "ipython",
     "aiofiles",
     "aioshutil",
+    "aiotarfile",
     "psutil",
     "asyncssh",
     "aiodocker",
@@ -39,7 +40,8 @@ dependencies = [
     "plotly",
     "numpy",
     "ply",
-    "check-jsonschema"
+    "check-jsonschema",
+    "uvloop",
 ]
 
 [project.scripts]
@@ -154,6 +156,7 @@ skip = ["__init__.py"]
 
 [tool.pylint]
 py-version = "3.8"
+extension-pkg-allow-list = ["aiotarfile"]
 
 [tool.pylint.FORMAT]
 max-line-length = 120

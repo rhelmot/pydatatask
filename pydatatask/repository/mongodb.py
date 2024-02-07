@@ -1,4 +1,5 @@
 """This module contains repositories for interacting with MongoDB as a data store."""
+
 from typing import Any, Callable, Dict, Optional
 
 import motor.core

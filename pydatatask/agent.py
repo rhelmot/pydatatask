@@ -2,6 +2,7 @@
 
 This is the only hammer you will ever need, if you are okay with that hammer kind of sucking.
 """
+
 from __future__ import annotations
 
 from aiohttp import web

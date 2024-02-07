@@ -9,6 +9,7 @@ Typical usage is to construct a :class:`QuotaManager` and pass it to a task cons
     quota = pydatatask.QuotaManager(pydatatask.Quota.parse(cpu='1000m', mem='1Gi'))
     task = pydatatask.ProcessTask("my_task", localhost, quota, ...)
 """
+
 from typing import Awaitable, Callable, List, Optional, Union
 from asyncio import Lock
 from dataclasses import dataclass, field

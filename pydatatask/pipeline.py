@@ -359,8 +359,8 @@ class Pipeline:
                 attrs = dict(vars(link))
 
                 # TODO: Figure out how to handle this correctly
-                del attrs['cokeyed']
-                del attrs['auto_values']
+                del attrs["cokeyed"]
+                del attrs["auto_values"]
 
                 attrs["link_name"] = link_name
                 attrs["follow"] = follow

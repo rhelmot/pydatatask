@@ -1,4 +1,5 @@
 """Home of the Query class."""
+
 from typing import Any, Dict
 
 import yaml

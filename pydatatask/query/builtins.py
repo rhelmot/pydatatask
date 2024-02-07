@@ -1,4 +1,5 @@
 """Tools for communicating between python and the pydatatask query langauge."""
+
 from __future__ import annotations
 
 from typing import (

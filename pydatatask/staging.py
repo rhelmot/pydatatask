@@ -6,6 +6,7 @@ they can be used they need to either be imported by another pipeline file or "lo
 allocates the needed resources and generates a lockfile, which is itself a pipeline file that imports the original
 pipeline file.
 """
+
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -448,9 +449,11 @@ class PipelineStaging:
             agent_secret=self.spec.agent_secret,
             agent_version=self.spec.agent_version,
             source_file=self.basedir / self.filename,
-            long_running_timeout=timedelta(minutes=self.spec.long_running_timeout)
-            if self.spec.long_running_timeout is not None
-            else None,
+            long_running_timeout=(
+                timedelta(minutes=self.spec.long_running_timeout)
+                if self.spec.long_running_timeout is not None
+                else None
+            ),
         )
 
     def allocate(
