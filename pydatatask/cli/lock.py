@@ -1,18 +1,15 @@
-import getpass
-import os
 from typing import Callable, Dict
-from datetime import timedelta
 from pathlib import Path
 import argparse
 import asyncio
+import getpass
 import sys
 import tempfile
 
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
-from pydatatask.host import LOCAL_HOST, LOCAL_OS, HostOS
-from pydatatask.staging import Dispatcher, HostSpec, PipelineStaging, find_config
+from pydatatask.staging import Dispatcher, PipelineStaging, find_config
 
 
 def _allocate_temp_meta() -> Dispatcher:
@@ -21,6 +18,10 @@ def _allocate_temp_meta() -> Dispatcher:
 
 def _allocate_temp_blob() -> Dispatcher:
     return Dispatcher("InProcessBlob", {})
+
+
+def _allocate_temp_fs() -> Dispatcher:
+    return Dispatcher("Tarfile", {"inner": {"cls": "InProcessBlob", "args": {}}})
 
 
 def _allocate_local_meta() -> Dispatcher:
@@ -38,13 +39,14 @@ def _allocate_local_blob() -> Dispatcher:
 def _allocate_local_fs() -> Dispatcher:
     Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
     basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
-    return Dispatcher("Directory", {"basedir": basedir})
+    return Dispatcher("Tarfile", {"inner": {"cls": "File", "args": {"basedir": basedir}}})
 
 
 def default_allocators_temp() -> Dict[str, Callable[[], Dispatcher]]:
     return {
         "MetadataRepository": _allocate_temp_meta,
         "BlobRepository": _allocate_temp_blob,
+        "FilesystemRepository": _allocate_temp_fs,
     }
 
 

@@ -49,6 +49,7 @@ __all__ = (
     "FilesystemRepository",
     "DirectoryRepository",
     "ContentAddressedBlobRepository",
+    "TarfileFilesystemRepository",
 )
 
 
@@ -177,7 +178,7 @@ class FilesystemRepository(Repository, abc.ABC):
                         str(fullname), FilesystemType.FILE, perms, data=fp, content_size=size, content_hash=contenthash
                     )
 
-    async def get_tarball(self, job: str, dest: AWriteStreamBase):
+    async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
         """Stream a tarball for the given job to the provided asynchronous stream."""
         async with await aiotarfile.open_wr(AWriteStreamWrapper(dest), aiotarfile.CompressionType.Clear) as tar:
             async for member in self.iter_members(job):
@@ -592,3 +593,121 @@ class ContentAddressedBlobRepository(FilesystemRepository):
             raise ValueError("Not a regular file")
 
         return child["size"], child["content"]
+
+
+class TarfileFilesystemRepository(FilesystemRepository):
+    def __init__(self, inner: BlobRepository):
+        super().__init__()
+        self.inner = inner
+
+    def footprint(self):
+        # This COULD be split out into a more base level footprint. however this produces a more legible backup result
+        yield self
+
+    def __getstate__(self):
+        return (self.inner,)
+
+    # all of this except for dump_tarball and get_tarball will be hella slow
+    # pending https://github.com/dignifiedquire/async-tar/issues/47
+
+    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
+        # NOTE: does not implement the part where you can manipulate the yielded dir list to skip subtrees
+        members = {}
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                ty = entry.entry_type()
+                if ty == aiotarfile.TarfileEntryType.Directory:
+                    idx = 0
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    idx = 1
+                elif ty == aiotarfile.TarfileEntryType.Symlink:
+                    idx = 2
+                else:
+                    continue
+
+                name = entry.name().decode()
+                dirname, basename = name.rsplit("/", 1)
+                while not basename:
+                    dirname, basename = dirname.rsplit("/", 1)
+
+                if dirname not in members:
+                    members[dirname] = ([], [], [])
+                members[dirname][idx].append(name)
+
+        for name, (d, r, s) in members.items():
+            yield name, d, r, s
+
+    async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    ty = entry.entry_type()
+                    if ty == aiotarfile.TarfileEntryType.Directory:
+                        return FilesystemType.DIRECTORY
+                    elif ty == aiotarfile.TarfileEntryType.Regular:
+                        return FilesystemType.FILE
+                    elif ty == aiotarfile.TarfileEntryType.Symlink:
+                        return FilesystemType.SYMLINK
+                    else:
+                        return None
+        return None
+
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return entry.mode()
+        return None
+
+    async def readlink(self, job: str, path: str) -> str:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return entry.link_target().decode()
+        raise ValueError("Member %s not found" % path)
+
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return (entry.size(), None)
+        raise ValueError("Member %s not found" % path)
+
+    def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
+        raise NotImplementedError("Not implemented - just dump as a tarball...")
+
+    @asyncasynccontextmanager
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStreamBase]:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                if entry.name().decode().strip("/") == str(path).strip("/"):
+                    yield entry
+        raise ValueError("Member %s not found" % path)
+
+    async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
+        async with await self.inner.open(job, "wb") as fp:
+            await async_copyfile(stream, fp)
+
+    async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                ty = entry.entry_type()
+                if ty == aiotarfile.TarfileEntryType.Directory:
+                    tty = FilesystemType.DIRECTORY
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    tty = FilesystemType.FILE
+                elif ty == aiotarfile.TarfileEntryType.Symlink:
+                    tty = FilesystemType.SYMLINK
+                else:
+                    continue
+                yield FilesystemEntry(str(entry.name()), tty, entry.mode(), entry, content_size=entry.size())
+
+    async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
+        async with await self.inner.open(job, "rb") as fp:
+            await async_copyfile(fp, dest)
+
+    def unfiltered_iter(self):
+        return self.inner.unfiltered_iter()
+
+    def delete(self, job: str):
+        return self.inner.delete(job)

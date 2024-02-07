@@ -45,6 +45,7 @@ from pydatatask.repository import (
     YamlMetadataFileRepository,
     YamlMetadataS3Repository,
 )
+from pydatatask.repository.filesystem import TarfileFilesystemRepository
 from pydatatask.session import Ephemeral
 from pydatatask.task import ContainerTask, KubeTask, LinkKind, ProcessTask, Task
 import pydatatask
@@ -299,6 +300,14 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 "basedir": str,
                 "extension": str,
                 "case_insensitive": parse_bool,
+            },
+        ),
+        "Tarfile": make_annotated_constructor(
+            "TarfileFilesystemRepository",
+            TarfileFilesystemRepository,
+            {
+                # HACK
+                "inner": lambda x: build_repository_picker(ephemerals)(x),
             },
         ),
         "Directory": make_annotated_constructor(
