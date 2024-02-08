@@ -700,15 +700,19 @@ class TarfileFilesystemRepository(FilesystemRepository):
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
                 ty = entry.entry_type()
+                link_target = None
                 if ty == aiotarfile.TarfileEntryType.Directory:
                     tty = FilesystemType.DIRECTORY
                 elif ty == aiotarfile.TarfileEntryType.Regular:
                     tty = FilesystemType.FILE
                 elif ty == aiotarfile.TarfileEntryType.Symlink:
                     tty = FilesystemType.SYMLINK
+                    link_target = entry.link_target().decode()
                 else:
                     continue
-                yield FilesystemEntry(str(entry.name()), tty, entry.mode(), entry, content_size=entry.size())
+                yield FilesystemEntry(
+                    str(entry.name()), tty, entry.mode(), entry, content_size=entry.size(), link_target=link_target
+                )
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
         async with await self.inner.open(job, "rb") as fp:
