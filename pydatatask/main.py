@@ -623,19 +623,15 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
         repo_base = backup_base / repo_path
         repo = lookup_dotted(pipeline, repo_path, True)
         if isinstance(repo, repomodule.BlobRepository):
-            new_repo_file = repomodule.FileRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
+            new_repo_file = repo.construct_backup_repo(repo_base)
             await new_repo_file.validate()
             jobs.append(_repo_copy_blob(new_repo_file, repo))
         elif isinstance(repo, repomodule.MetadataRepository):
-            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
+            new_repo_meta = repo.construct_backup_repo(repo_base)
             await new_repo_meta.validate()
             jobs.append(_repo_copy_meta(new_repo_meta, repo))
         elif isinstance(repo, repomodule.FilesystemRepository):
-            new_repo_fs = repomodule.DirectoryRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
+            new_repo_fs = repo.construct_backup_repo(repo_base)
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(new_repo_fs, repo))
         else:
