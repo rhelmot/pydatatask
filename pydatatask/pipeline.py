@@ -20,6 +20,7 @@ from datetime import timedelta
 from pathlib import Path
 import asyncio
 import logging
+import os
 
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
@@ -72,7 +73,7 @@ class Pipeline:
         self.agent_port: int = agent_port
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
         self.source_file = source_file
-        self.fail_fast = False
+        self.fail_fast = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
         self.long_running_timeout = long_running_timeout
 
         for task in tasks:
@@ -91,11 +92,11 @@ class Pipeline:
             launch phase succeeds.
         :param metadata: Whether jobs will store their completion metadata.
         """
-        self.fail_fast = fail_fast
+        self.fail_fast |= fail_fast
         for task in self.tasks.values():
             task.synchronous = synchronous
             task.metadata = metadata
-            task.fail_fast = fail_fast
+            task.fail_fast |= fail_fast
             if task_allowlist and task.name not in task_allowlist:
                 task.disabled = True
 

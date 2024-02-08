@@ -14,12 +14,14 @@ from typing import Dict, Literal, Optional, Set, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
+import asyncio.subprocess
 import inspect
 import io
 import logging
 import os
 import string
 
+from aiofiles.threadpool.binary import AsyncFileIO
 import aiofiles.os
 import yaml
 
@@ -28,8 +30,12 @@ from .. import task as taskmodule
 from ..utils import (
     AReadStreamManager,
     AReadText,
+    AWriteStreamDrainer,
     AWriteStreamManager,
     AWriteText,
+    async_copyfile,
+    async_copyfile_close,
+    asyncasynccontextmanager,
     roundrobin,
 )
 
@@ -72,6 +78,7 @@ class Repository(ABC):
 
     def __init__(self):
         self.annotations: Dict[str, str] = {}
+        self.compress_backup: bool = False
 
     CHARSET = CHARSET_START_END = string.ascii_letters + string.digits
 
@@ -190,6 +197,12 @@ class Repository(ABC):
 class MetadataRepository(Repository, ABC):
     """A metadata repository has values which are small, structured data, and loads them entirely into memory,
     returning the structured data from the `info` method."""
+
+    def construct_backup_repo(self, path: Path) -> "MetadataRepository":
+        """Construct a repository appropriate for backing up this repository to the given path."""
+        if self.compress_backup:
+            l.warning("Compressed backups not yet implemented for %s", type(self))
+        return YamlMetadataFileRepository(path, extension=".yaml")
 
     async def template(
         self,
@@ -414,6 +427,13 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
 class BlobRepository(Repository, ABC):
     """A blob repository has values which are flat data blobs that can be streamed for reading or writing."""
 
+    def construct_backup_repo(self, path: Path) -> "BlobRepository":
+        """Construct a repository appropriate for backing up this repository to the given path."""
+        if self.compress_backup:
+            return CompressedBlobRepository(FileRepository(path, extension=".gz"))
+        else:
+            return FileRepository(path)
+
     @overload
     @abstractmethod
     async def open(self, job: str, mode: Literal["r"]) -> AReadText:
@@ -443,7 +463,7 @@ class BlobRepository(Repository, ABC):
         """
         Convenience function: dump the entire contents of a string or bytestring into a job.
         """
-        if isinstance(value, bytes):
+        if isinstance(value, (bytes, memoryview, bytearray)):
             async with await self.open(job, "wb") as fp:
                 await fp.write(value)
         else:
@@ -1068,3 +1088,59 @@ class CacheInProcessMetadataRepository(MetadataRepository):
 
     def __getstate__(self):
         return (self.base,)
+
+
+class CompressedBlobRepository(BlobRepository):
+    """A repository which exposes a normal blob interface but compresses all the data it stores under the hood."""
+
+    def __init__(self, inner: BlobRepository):
+        super().__init__()
+        self.inner = inner
+
+    @asyncasynccontextmanager
+    async def open(self, job, mode="r"):
+        """Open the given job's value as a stream for reading or writing, in text or binary mode."""
+        if mode in ("r", "w"):
+            raise NotImplementedError("Take your sensitive ass back to .decode()")
+        if mode == "rb":
+            # ULTIMATE HACKS
+            proc = await asyncio.subprocess.create_subprocess_exec(
+                "gzip", "-d", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            )
+            assert proc.stdin is not None
+            async with await self.inner.open(job, "rb") as fp, AWriteStreamDrainer(proc.stdin) as stdin:
+                assert proc.stdout is not None
+                task = asyncio.create_task(async_copyfile_close(fp, stdin))
+                yield proc.stdout
+            await task
+            await proc.wait()
+        elif mode == "wb":
+            # ULTIMATE HACKS II
+            proc = await asyncio.subprocess.create_subprocess_exec(
+                "gzip", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            )
+            assert proc.stdin is not None
+            async with await self.inner.open(job, "wb") as fp:
+                async with AWriteStreamDrainer(proc.stdin) as stdin:
+                    assert proc.stdout is not None
+                    task = asyncio.create_task(async_copyfile(proc.stdout, fp))
+                    yield stdin
+                await task
+            await proc.wait()
+        else:
+            raise ValueError("Bad blob open mode: %s" % mode)
+
+    def __getstate__(self):
+        return (self.inner,)
+
+    def footprint(self):
+        yield self
+
+    async def validate(self):
+        await self.inner.validate()
+
+    def delete(self, job):
+        return self.inner.delete(job)
+
+    def unfiltered_iter(self):
+        return self.inner.unfiltered_iter()

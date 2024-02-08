@@ -1,4 +1,3 @@
-from typing import Callable, Dict
 from pathlib import Path
 import argparse
 import asyncio
@@ -9,53 +8,41 @@ import tempfile
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
-from pydatatask.staging import Dispatcher, PipelineStaging, find_config
+from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
 
 
-def _allocate_temp_meta() -> Dispatcher:
-    return Dispatcher("InProcessMetadata", {})
+def default_allocators_temp(spec: RepoClassSpec) -> Dispatcher:
+    if spec.cls == "MetadataRepository":
+        return Dispatcher("InProcessMetadata", {})
+    if spec.cls == "BlobRepository":
+        return Dispatcher("InProcessBlob", {})
+    if spec.cls == "FilesystemRepository":
+        return Dispatcher("Tarfile", {"inner": {"cls": "InProcessBlob", "args": {}}})
+    raise ValueError("Cannot allocate repository type %s as temporary" % spec.cls)
 
 
-def _allocate_temp_blob() -> Dispatcher:
-    return Dispatcher("InProcessBlob", {})
-
-
-def _allocate_temp_fs() -> Dispatcher:
-    return Dispatcher("Tarfile", {"inner": {"cls": "InProcessBlob", "args": {}}})
-
-
-def _allocate_local_meta() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
-    return Dispatcher("YamlFile", {"basedir": basedir})
-
-
-def _allocate_local_blob() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
-    return Dispatcher("File", {"basedir": basedir})
-
-
-def _allocate_local_fs() -> Dispatcher:
-    Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=f"/tmp/pydatatask-{getpass.getuser()}")
-    return Dispatcher("Tarfile", {"inner": {"cls": "File", "args": {"basedir": basedir}}})
-
-
-def default_allocators_temp() -> Dict[str, Callable[[], Dispatcher]]:
-    return {
-        "MetadataRepository": _allocate_temp_meta,
-        "BlobRepository": _allocate_temp_blob,
-        "FilesystemRepository": _allocate_temp_fs,
-    }
-
-
-def default_allocators_local() -> Dict[str, Callable[[], Dispatcher]]:
-    return {
-        "MetadataRepository": _allocate_local_meta,
-        "BlobRepository": _allocate_local_blob,
-        "FilesystemRepository": _allocate_local_fs,
-    }
+def default_allocators_local(spec: RepoClassSpec) -> Dispatcher:
+    path = Path(f"/tmp/pydatatask-{getpass.getuser()}")
+    path.mkdir(exist_ok=True)
+    basedir = tempfile.mkdtemp(dir=path)
+    if spec.cls == "MetadataRepository":
+        result = Dispatcher("YamlFile", {"basedir": basedir})
+    elif spec.cls == "BlobRepository":
+        if spec.compress_backend:
+            result = Dispatcher(
+                "CompressedBlob", {"inner": {"cls": "File", "args": {"basedir": basedir, "extension": ".gz"}}}
+            )
+        else:
+            result = Dispatcher("File", {"basedir": basedir})
+    elif spec.cls == "FilesystemRepository":
+        if spec.compress_backend:
+            result = Dispatcher("Tarfile", {"inner": {"cls": "File", "args": {"basedir": basedir}}})
+        else:
+            result = Dispatcher("Directory", {"basedir": basedir})
+    else:
+        raise ValueError("Cannot allocate repository type %s as local" % spec.cls)
+    result.args["compress_backup"] = spec.compress_backup
+    return result
 
 
 async def get_ip() -> str:
@@ -72,8 +59,8 @@ async def get_ip() -> str:
 
 def main():
     all_allocators = {
-        "local": default_allocators_local(),
-        "temp": default_allocators_temp(),
+        "local": default_allocators_local,
+        "temp": default_allocators_temp,
     }
 
     parser = argparse.ArgumentParser(

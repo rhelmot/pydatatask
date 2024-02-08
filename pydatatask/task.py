@@ -205,7 +205,7 @@ class Task(ABC):
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
         self.annotations: Dict[str, str] = {}
-        self.fail_fast = False
+        self.fail_fast = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
         self.timeout = timeout
         self.queries = queries or {}
         self.done = done

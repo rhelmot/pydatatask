@@ -84,6 +84,8 @@ __all__ = (
     "run",
 )
 
+FAIL_FAST = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
+
 # pylint: disable=missing-function-docstring,missing-class-docstring
 
 
@@ -156,6 +158,7 @@ def main(
         "data",
         type=str,
         help="Name of repository [task.repo] or task from which to delete data",
+        metavar="repo",
     )
     parser_delete.add_argument("job", type=str, nargs="+", help="Name of job of which to delete data")
     parser_delete.set_defaults(func=delete_data)
@@ -166,16 +169,21 @@ def main(
         type=str,
         nargs="+",
         help="Name of repository [task.repo] from which to list data",
+        metavar="repo",
     )
     parser_ls.set_defaults(func=list_data)
 
     parser_cat = subparsers.add_parser("cat", help="Print data from a repository")
-    parser_cat.add_argument("data", type=str, help="Name of repository [task.repo] from which to print data")
+    parser_cat.add_argument(
+        "data", type=str, help="Name of repository [task.repo] from which to print data", metavar="repo"
+    )
     parser_cat.add_argument("job", type=str, help="Name of job of which to delete data")
     parser_cat.set_defaults(func=cat_data)
 
     parser_inject = subparsers.add_parser("inject", help="Dump data into a repository")
-    parser_inject.add_argument("data", type=str, help="Name of repository [task.repo] to which to inject data")
+    parser_inject.add_argument(
+        "data", type=str, help="Name of repository [task.repo] to which to inject data", metavar="repo"
+    )
     parser_inject.add_argument("job", type=str, help="Name of job of which to inject data")
     parser_inject.set_defaults(func=inject_data)
 
@@ -515,6 +523,8 @@ async def cat_data(pipeline: Pipeline, data: str, job: str):
     try:
         await cat_data_inner(item, job, aiofiles.stdout_bytes)
     except TypeError:
+        if FAIL_FAST:
+            raise
         print("Error: cannot serialize a job in a repository which is not a blob or metadata or filesystem")
         return 1
 
@@ -528,9 +538,13 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
     try:
         await inject_data_inner(item, job, aiofiles.stdin_bytes)
     except TypeError:
+        if FAIL_FAST:
+            raise
         print("Error: cannot deserialize a job in a repository which is not a blob or metadata")
         return 1
     except ValueError as e:
+        if FAIL_FAST:
+            raise
         print(f"Bad data structure: {e.args[0]}")
         return 1
 
@@ -579,19 +593,15 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
         repo_base = backup_base / repo_name
 
         if isinstance(repo, repomodule.BlobRepository):
-            new_repo_file = repomodule.FileRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
+            new_repo_file = repo.construct_backup_repo(repo_base)
             await new_repo_file.validate()
             jobs.append(_repo_copy_blob(repo, new_repo_file))
         elif isinstance(repo, repomodule.MetadataRepository):
-            new_repo_meta = repomodule.YamlMetadataFileRepository(repo_base, extension=".yaml")
+            new_repo_meta = repo.construct_backup_repo(repo_base)
             await new_repo_meta.validate()
             jobs.append(_repo_copy_meta(repo, new_repo_meta))
         elif isinstance(repo, repomodule.FilesystemRepository):
-            new_repo_fs = repomodule.DirectoryRepository(
-                repo_base, extension=getattr(repo, "extension", getattr(repo, "suffix", ""))
-            )
+            new_repo_fs = repo.construct_backup_repo(repo_base)
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(repo, new_repo_fs))
         else:

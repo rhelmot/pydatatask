@@ -154,7 +154,7 @@ class PipelineChildArgs:
 
 @_dataclass_serial
 class PipelineChildArgsMissing:
-    repos: Dict[str, str] = field(default_factory=dict)  # {child's name: class name}
+    repos: Dict[str, "RepoClassSpec"] = field(default_factory=dict)  # {child's name: class spec}
     executors: Set[str] = field(default_factory=set)  # {task name}
     imports: Dict[str, "PipelineChildArgsMissing"] = field(default_factory=dict)
 
@@ -162,15 +162,13 @@ class PipelineChildArgsMissing:
         return not self.repos and not self.executors and all(child.ready() for child in self.imports.values())
 
     def allocate(
-        self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Optional[Dispatcher]
+        self, repo_allocators: Callable[["RepoClassSpec"], Dispatcher], default_executor: Optional[Dispatcher]
     ) -> PipelineChildArgs:
         new_repos: Dict[str, Optional[Dispatcher]] = {}
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
-            if repo_spec not in repo_allocators:
-                raise ValueError(f"No allocator available for {repo_spec}")
-            new_repos[repo_name] = repo_allocators[repo_spec]()
+            new_repos[repo_name] = repo_allocators(repo_spec)
 
         for task_name in self.executors:
             if default_executor is None:
@@ -198,13 +196,20 @@ class RepoQuerySpec:
 
 
 @_dataclass_serial
+class RepoClassSpec:
+    cls: str
+    compress_backend: bool = False
+    compress_backup: bool = False
+
+
+@_dataclass_serial
 class PipelineSpec:
     hosts: Dict[str, HostSpec] = field(default_factory=dict)
     tasks: Dict[str, TaskSpec] = field(default_factory=dict)
     executors: Dict[str, Dispatcher] = field(default_factory=dict)
     repos: Dict[str, Dispatcher] = field(default_factory=dict)
     repo_queries: Dict[str, RepoQuerySpec] = field(default_factory=dict)
-    repo_classes: Dict[str, str] = field(default_factory=dict)
+    repo_classes: Dict[str, RepoClassSpec] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
     quotas: Dict[str, Quota] = field(default_factory=dict)
     ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
@@ -233,6 +238,9 @@ class PipelineSpec:
                 for name, query_spec in self.repo_queries.items()
             }
         )
+        for k, v in self.repo_classes.items():
+            if isinstance(v, str):
+                self.repo_classes[k] = RepoClassSpec(v)
         self.repo_queries.clear()
 
 
@@ -457,7 +465,7 @@ class PipelineStaging:
         )
 
     def allocate(
-        self, repo_allocators: Dict[str, Callable[[], Dispatcher]], default_executor: Dispatcher
+        self, repo_allocators: Callable[[RepoClassSpec], Dispatcher], default_executor: Dispatcher
     ) -> "PipelineStaging":
         """Lock a pipeline, generating a new PipelineStaging which imports this one and specifies all of its missing
         dependencies."""

@@ -45,6 +45,7 @@ from pydatatask.repository import (
     YamlMetadataFileRepository,
     YamlMetadataS3Repository,
 )
+from pydatatask.repository.base import CompressedBlobRepository
 from pydatatask.repository.filesystem import TarfileFilesystemRepository
 from pydatatask.session import Ephemeral
 from pydatatask.task import ContainerTask, KubeTask, LinkKind, ProcessTask, Task
@@ -269,11 +270,16 @@ def make_annotated_constructor(
 
     def inner_constructor(**kwargs):
         annotations = kwargs.pop("annotations", {})
+        compress = kwargs.pop("compress_backup", False)
         result = constructor(**kwargs)
         result.annotations.update(annotations)  # type: ignore
+        # sketchy...
+        if compress:
+            result.compress_backup = compress  # type: ignore
         return result
 
     schema["annotations"] = lambda x: x
+    schema["compress_backup"] = lambda x: x
     return make_constructor(name, inner_constructor, schema)
 
 
@@ -282,111 +288,120 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
 
     This function can be extended through the ``pydatatask.repository_constructors`` entrypoint.
     """
-    kinds: Dict[str, Callable[[Any], Repository]] = {
-        "InProcessMetadata": make_annotated_constructor(
-            "InProcessMetadataRepository",
-            InProcessMetadataRepository,
-            {},
-        ),
-        "InProcessBlob": make_annotated_constructor(
-            "InProcessBlobRepository",
-            InProcessBlobRepository,
-            {},
-        ),
-        "File": make_annotated_constructor(
-            "FileRepository",
-            FileRepository,
-            {
-                "basedir": str,
-                "extension": str,
-                "case_insensitive": parse_bool,
-            },
-        ),
-        "Tarfile": make_annotated_constructor(
-            "TarfileFilesystemRepository",
-            TarfileFilesystemRepository,
-            {
-                # HACK
-                "inner": lambda x: build_repository_picker(ephemerals)(x),
-            },
-        ),
-        "Directory": make_annotated_constructor(
-            "DirectoryRepository",
-            DirectoryRepository,
-            {
-                "basedir": str,
-                "extension": str,
-                "case_insensitive": parse_bool,
-                "discard_empty": parse_bool,
-            },
-        ),
-        "YamlFile": make_annotated_constructor(
-            "YamlMetadataFileRepository",
-            YamlMetadataFileRepository,
-            {
-                "basedir": str,
-                "extension": str,
-                "case_insensitive": parse_bool,
-            },
-        ),
-        "S3Bucket": make_annotated_constructor(
-            "S3BucketRepository",
-            S3BucketRepository,
-            {
-                "client": make_picker("S3Connection", ephemerals),
-                "bucket": str,
-                "prefix": str,
-                "suffix": str,
-                "mimetype": str,
-                "incluster_endpoint": str,
-            },
-        ),
-        "YamlMetadataS3Bucket": make_annotated_constructor(
-            "YamlMetadataS3Repository",
-            YamlMetadataS3Repository,
-            {
-                "client": make_picker("S3Connection", ephemerals),
-                "bucket": str,
-                "prefix": str,
-                "suffix": str,
-                "mimetype": str,
-                "incluster_endpoint": str,
-            },
-        ),
-        "DockerRegistry": make_annotated_constructor(
-            "DockerRepository",
-            DockerRepository,
-            {
-                "registry": make_picker("DockerRegistry", ephemerals),
-                "domain": str,
-                "repository": str,
-            },
-        ),
-        "MongoMetadata": make_annotated_constructor(
-            "MongoMetadataRepository",
-            MongoMetadataRepository,
-            {
-                "database": make_picker("MongoDatabase", ephemerals),
-                "collection": str,
-            },
-        ),
-        "Query": make_annotated_constructor(
-            "QueryRepository",
-            QueryRepository,
-            {
-                "query": str,
-                "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
-            },
-        ),
-        "QueryMetadata": make_annotated_constructor(
-            "QueryMetadataRepository",
-            QueryMetadataRepository,
-            {
-                "query": str,
-                "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
-            },
-        ),
-    }
+    kinds: Dict[str, Callable[[Any], Repository]] = {}
+    kinds.update(
+        {
+            "InProcessMetadata": make_annotated_constructor(
+                "InProcessMetadataRepository",
+                InProcessMetadataRepository,
+                {},
+            ),
+            "InProcessBlob": make_annotated_constructor(
+                "InProcessBlobRepository",
+                InProcessBlobRepository,
+                {},
+            ),
+            "File": make_annotated_constructor(
+                "FileRepository",
+                FileRepository,
+                {
+                    "basedir": str,
+                    "extension": str,
+                    "case_insensitive": parse_bool,
+                },
+            ),
+            "Tarfile": make_annotated_constructor(
+                "TarfileFilesystemRepository",
+                TarfileFilesystemRepository,
+                {
+                    "inner": make_dispatcher("Repository", kinds),
+                },
+            ),
+            "CompressedBlob": make_annotated_constructor(
+                "CompressedBlobRepository",
+                CompressedBlobRepository,
+                {
+                    "inner": make_dispatcher("Repository", kinds),
+                },
+            ),
+            "Directory": make_annotated_constructor(
+                "DirectoryRepository",
+                DirectoryRepository,
+                {
+                    "basedir": str,
+                    "extension": str,
+                    "case_insensitive": parse_bool,
+                    "discard_empty": parse_bool,
+                },
+            ),
+            "YamlFile": make_annotated_constructor(
+                "YamlMetadataFileRepository",
+                YamlMetadataFileRepository,
+                {
+                    "basedir": str,
+                    "extension": str,
+                    "case_insensitive": parse_bool,
+                },
+            ),
+            "S3Bucket": make_annotated_constructor(
+                "S3BucketRepository",
+                S3BucketRepository,
+                {
+                    "client": make_picker("S3Connection", ephemerals),
+                    "bucket": str,
+                    "prefix": str,
+                    "suffix": str,
+                    "mimetype": str,
+                    "incluster_endpoint": str,
+                },
+            ),
+            "YamlMetadataS3Bucket": make_annotated_constructor(
+                "YamlMetadataS3Repository",
+                YamlMetadataS3Repository,
+                {
+                    "client": make_picker("S3Connection", ephemerals),
+                    "bucket": str,
+                    "prefix": str,
+                    "suffix": str,
+                    "mimetype": str,
+                    "incluster_endpoint": str,
+                },
+            ),
+            "DockerRegistry": make_annotated_constructor(
+                "DockerRepository",
+                DockerRepository,
+                {
+                    "registry": make_picker("DockerRegistry", ephemerals),
+                    "domain": str,
+                    "repository": str,
+                },
+            ),
+            "MongoMetadata": make_annotated_constructor(
+                "MongoMetadataRepository",
+                MongoMetadataRepository,
+                {
+                    "database": make_picker("MongoDatabase", ephemerals),
+                    "collection": str,
+                },
+            ),
+            "Query": make_annotated_constructor(
+                "QueryRepository",
+                QueryRepository,
+                {
+                    "query": str,
+                    "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                },
+            ),
+            "QueryMetadata": make_annotated_constructor(
+                "QueryMetadataRepository",
+                QueryMetadataRepository,
+                {
+                    "query": str,
+                    "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                },
+            ),
+        }
+    )
     for ep in entry_points(group="pydatatask.repository_constructors"):
         maker = ep.load()
         try:

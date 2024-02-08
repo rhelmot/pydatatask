@@ -106,6 +106,34 @@ class AWriteStreamManager(AWriteStream, AsyncContextManager, Protocol):
     """A protocol for writing data to an asynchronous stream with context management."""
 
 
+class AWriteStreamDrainer:
+    """A class that wraps an asyncio streamwriter and turns the synchronous write into an asynchronous write by
+    calling drain().
+
+    Keep in mind this is a step in the right direction but is not perfect, as per
+    https://vorpus.org/blog/some-thoughts-on-asynchronous-api-design-in-a-post-asyncawait-world/
+    """
+
+    def __init__(self, inner: asyncio.StreamWriter):
+        self.inner = inner
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        self.inner.write(data)
+        await self.inner.drain()
+        return len(data)
+
+    async def close(self) -> None:
+        self.inner.close()
+        # um.
+        # await self.inner.wait_closed()
+
+    async def __aenter__(self) -> "AWriteStreamDrainer":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+
 async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, blocksize=1024 * 1024):
     """Stream data from ``copyfrom`` to ``copyto``."""
     while True:
@@ -113,6 +141,12 @@ async def async_copyfile(copyfrom: AReadStreamBase, copyto: AWriteStreamBase, bl
         if not data:
             break
         await copyto.write(data)
+
+
+async def async_copyfile_close(copyfrom: AReadStreamBase, copyto: AWriteStream, blocksize=1024 * 1024):
+    """Stream data from ``copyfrom`` to ``copyto``, closing the sink stream on completion."""
+    await async_copyfile(copyfrom, copyto, blocksize)
+    await copyto.close()
 
 
 class AReadText:
@@ -212,7 +246,12 @@ class _AACM(Generic[_T]):
         return await self.live.__anext__()
 
     async def __aexit__(self, exc_type, exc_value, exc_tb):
-        pass
+        try:
+            await self.live.__anext__()
+        except StopAsyncIteration:
+            pass
+        else:
+            raise Exception("Programming error: async generator yields more than once")
 
 
 P = ParamSpec("P")

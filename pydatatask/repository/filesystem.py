@@ -29,6 +29,7 @@ import aiotarfile
 from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import (
     BlobRepository,
+    FileRepository,
     MetadataRepository,
     Repository,
     job_getter,
@@ -126,6 +127,13 @@ class FilesystemRepository(Repository, abc.ABC):
         """
         raise NotImplementedError
 
+    def construct_backup_repo(self, path: Path) -> "FilesystemRepository":
+        """Construct a repository appropriate for backing up this repository to the given path."""
+        if self.compress_backup:
+            return TarfileFilesystemRepository(FileRepository(path, extension=".tar.gz"))
+        else:
+            return DirectoryRepository(path)
+
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         """Add an entire filesystem from a tarball."""
 
@@ -180,7 +188,7 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
         """Stream a tarball for the given job to the provided asynchronous stream."""
-        async with await aiotarfile.open_wr(AWriteStreamWrapper(dest), aiotarfile.CompressionType.Clear) as tar:
+        async with await aiotarfile.open_wr(AWriteStreamWrapper(dest), aiotarfile.CompressionType.Gzip) as tar:
             async for member in self.iter_members(job):
                 if member.type == FilesystemType.FILE:
                     assert member.data is not None
@@ -711,3 +719,6 @@ class TarfileFilesystemRepository(FilesystemRepository):
 
     def delete(self, job: str):
         return self.inner.delete(job)
+
+    async def validate(self):
+        await self.inner.validate()
