@@ -59,7 +59,7 @@ from .agent import cat_data as cat_data_inner
 from .agent import inject_data as inject_data_inner
 from .pipeline import Pipeline
 from .quota import localhost_quota_manager
-from .utils import async_copyfile
+from .utils import AsyncQueueStream, async_copyfile
 from .visualize import run_viz
 
 try:
@@ -656,9 +656,12 @@ async def _repo_copy_meta(repo_src: repomodule.MetadataRepository, repo_dst: rep
 
 
 async def _repo_copy_fs(repo_src: repomodule.FilesystemRepository, repo_dst: repomodule.FilesystemRepository):
+    # probably want to specify something about whether to use dump or dump tarball
     async for ident in repo_src:
-        cursor = repo_dst.dump(ident)
-        await cursor.__anext__()
-        async for member in repo_src.iter_members(ident):
-            await cursor.asend(member)
-        await cursor.aclose()
+        queue = AsyncQueueStream()
+
+        async def write_then_close():
+            await repo_src.get_tarball(ident, queue)
+            queue.close()
+
+        await asyncio.gather(repo_dst.dump_tarball(ident, queue), write_then_close())

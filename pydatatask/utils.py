@@ -448,6 +448,8 @@ class QueueStream:
 class AsyncQueueStream:
     """A stream queue with asynchronous-blocking reader and asynchronous-nonblocking writer."""
 
+    # TODO FIXME this does not do flow control and thus may buffer data infinitely, causing OOMs
+
     def __init__(self) -> None:
         self.buffer: List[Optional[bytes]] = []
         self.readptr = (0, 0)
