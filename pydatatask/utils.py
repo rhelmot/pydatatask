@@ -67,7 +67,7 @@ class AReadStream(Protocol):
 class AWriteStreamBase(Protocol):
     """A protocol for writing data to an asynchronous stream (bass boosted)."""
 
-    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> Any:
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
 
 
@@ -199,7 +199,7 @@ class AWriteText:
 
     async def write(self, data: str):
         """Write ``data`` to the stream."""
-        await self.base.write(data.encode(self.encoding, self.errors))
+        return await self.base.write(data.encode(self.encoding, self.errors))
 
     async def close(self) -> None:
         """Close and release the stream."""

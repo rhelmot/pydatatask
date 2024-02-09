@@ -41,9 +41,9 @@ class S3BucketBinaryWriter:
             ContentType=self.repo.mimetype,
         )
 
-    async def write(self, data: bytes):
+    async def write(self, data: bytes) -> int:
         """Write some data to the stream."""
-        self.buffer.write(data)
+        return self.buffer.write(data)
 
 
 class S3BucketReader:

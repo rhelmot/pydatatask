@@ -80,6 +80,7 @@ __all__ = (
     "InProcessSyncTask",
     "ExecutorTask",
     "KubeFunctionTask",
+    "ContainerTask",
     "STDOUT",
 )
 
