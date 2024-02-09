@@ -110,9 +110,9 @@ class QuerySpec:
 @_dataclass_serial
 class TaskSpec:
     executable: Dispatcher
+    done: str
     annotations: Dict[str, Any] = field(default_factory=dict)
     executor: Optional[str] = None
-    done: Optional[str] = None
     ready: Optional[str] = None
     links: Dict[str, LinkSpec] = field(default_factory=dict)
     queries: Dict[str, QuerySpec] = field(default_factory=dict)
