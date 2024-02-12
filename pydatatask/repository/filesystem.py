@@ -141,24 +141,25 @@ class FilesystemRepository(Repository, abc.ABC):
 
         async with await aiotarfile.open_rd(stream) as tar, self.dump(job) as cursor:
             async for entry in tar:
-                ty = entry.entry_type()
-                if ty == aiotarfile.TarfileEntryType.Symlink:
-                    await cursor.add(
-                        FilesystemEntry(
-                            entry.name().decode(),
-                            FilesystemType.SYMLINK,
-                            entry.mode(),
-                            link_target=entry.link_target().decode(),
+                async with entry:
+                    ty = entry.entry_type()
+                    if ty == aiotarfile.TarfileEntryType.Symlink:
+                        await cursor.add(
+                            FilesystemEntry(
+                                entry.name().decode(),
+                                FilesystemType.SYMLINK,
+                                entry.mode(),
+                                link_target=entry.link_target().decode(),
+                            )
                         )
-                    )
-                elif ty == aiotarfile.TarfileEntryType.Directory:
-                    await cursor.add(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
-                elif ty == aiotarfile.TarfileEntryType.Regular:
-                    await cursor.add(
-                        FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
-                    )
-                else:
-                    l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
+                    elif ty == aiotarfile.TarfileEntryType.Directory:
+                        await cursor.add(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
+                    elif ty == aiotarfile.TarfileEntryType.Regular:
+                        await cursor.add(
+                            FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
+                        )
+                    else:
+                        l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
