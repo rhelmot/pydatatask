@@ -8,8 +8,10 @@ from typing import (
     Dict,
     List,
     Optional,
+    Protocol,
     Tuple,
     Union,
+    Awaitable,
 )
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -25,6 +27,7 @@ from aiofiles.threadpool import open as aopen
 import aiofiles.os
 import aioshutil
 import aiotarfile
+from typing_extensions import Self
 
 from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import (
@@ -79,7 +82,6 @@ class FilesystemEntry:
     content_hash: Optional[str] = None
     content_size: Optional[int] = None
 
-
 class FilesystemRepository(Repository, abc.ABC):
     """The base class for repositories whose members are whole directory structures.
 
@@ -112,7 +114,7 @@ class FilesystemRepository(Repository, abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
+    def dump(self, job: str) -> "Dumper":
         """A generator interface for adding an entire filesystem as a value.
 
         See the `dump_tarball` implementation for an example of how to use this.
@@ -137,13 +139,11 @@ class FilesystemRepository(Repository, abc.ABC):
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         """Add an entire filesystem from a tarball."""
 
-        cursor = self.dump(job)
-        await cursor.__anext__()
-        async with await aiotarfile.open_rd(stream) as tar:
+        async with await aiotarfile.open_rd(stream) as tar, self.dump(job) as cursor:
             async for entry in tar:
                 ty = entry.entry_type()
                 if ty == aiotarfile.TarfileEntryType.Symlink:
-                    await cursor.asend(
+                    await cursor.add(
                         FilesystemEntry(
                             entry.name().decode(),
                             FilesystemType.SYMLINK,
@@ -152,14 +152,13 @@ class FilesystemRepository(Repository, abc.ABC):
                         )
                     )
                 elif ty == aiotarfile.TarfileEntryType.Directory:
-                    await cursor.asend(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
+                    await cursor.add(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
                 elif ty == aiotarfile.TarfileEntryType.Regular:
-                    await cursor.asend(
+                    await cursor.add(
                         FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
                     )
                 else:
                     l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
-        await cursor.aclose()
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
@@ -257,6 +256,52 @@ async def _walk(top, onerror=None, followlinks=False) -> AsyncIterator[Tuple[str
     async for top, dirs, nondirs in _walk_inner(top, onerror, followlinks):
         yield top, dirs, nondirs
 
+class Dumper(Protocol):
+    async def add(self, entry: FilesystemEntry) -> None: ...
+    async def __aenter__(self) -> Self: ...
+    async def __aexit__(self, a, b, c) -> None: ...
+    
+
+class DirDumper:
+    def __init__(self, parent: "DirectoryRepository", job: str):
+        self.parent = parent
+        self.job = job
+        self._opened = False
+
+    async def add(self, entry: FilesystemEntry) -> None:
+        assert self._opened
+        root = self.parent.fullpath(self.job)
+        subpath = Path(entry.name)
+        if subpath.is_absolute():
+            ssubpath = os.path.join(*subpath.parts[1:])
+        else:
+            ssubpath = str(subpath)
+        fullpath = root / ssubpath
+        if entry.type != FilesystemType.DIRECTORY:
+            fullpath.parent.mkdir(exist_ok=True, parents=True)
+            if entry.type == FilesystemType.FILE:
+                assert entry.data is not None
+                async with aopen(fullpath, "wb") as fp:
+                    await async_copyfile(entry.data, fp)
+
+                fullpath.chmod(entry.mode)
+            else:
+                assert entry.link_target is not None
+                try:
+                    os.unlink(fullpath)
+                except FileNotFoundError:
+                    pass
+                fullpath.symlink_to(entry.link_target)
+        else:
+            fullpath.mkdir(exist_ok=True, parents=True)
+            fullpath.chmod(entry.mode)
+
+    async def __aenter__(self) -> "DirDumper":
+        self._opened = True
+        return self
+
+    async def __aexit__(self, a, b, c) -> None:
+        self._opened = False
 
 class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
     """A directory repository is a repository which stores its data as a basic on-local-disk filesystem."""
@@ -350,37 +395,8 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             return stat.S_IMODE(r.st_mode)
         return None
 
-    async def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
-        root = self.fullpath(job)
-        try:
-            while True:
-                entry = yield
-                subpath = Path(entry.name)
-                if subpath.is_absolute():
-                    ssubpath = os.path.join(*subpath.parts[1:])
-                else:
-                    ssubpath = str(subpath)
-                fullpath = root / ssubpath
-                if entry.type != FilesystemType.DIRECTORY:
-                    fullpath.parent.mkdir(exist_ok=True, parents=True)
-                    if entry.type == FilesystemType.FILE:
-                        assert entry.data is not None
-                        async with aopen(fullpath, "wb") as fp:
-                            await async_copyfile(entry.data, fp)
-
-                        fullpath.chmod(entry.mode)
-                    else:
-                        assert entry.link_target is not None
-                        try:
-                            os.unlink(fullpath)
-                        except FileNotFoundError:
-                            pass
-                        fullpath.symlink_to(entry.link_target)
-                else:
-                    fullpath.mkdir(exist_ok=True, parents=True)
-                    fullpath.chmod(entry.mode)
-        except StopAsyncIteration:
-            pass
+    def dump(self, job: str) -> DirDumper:
+        return DirDumper(self, job)
 
     @asyncasynccontextmanager
     async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStreamBase]:
@@ -405,6 +421,59 @@ def _splitdirs(directory):
 def _splitlinks(directory):
     return partition(lambda elem: elem["type"] == "SYMLINK", directory)
 
+class CABDumper:
+    def __init__(self, parent: "ContentAddressedBlobRepository", job: str):
+        self._opened = False
+        self.parent = parent
+        self.job = job
+        self.meta: List[Dict[str, Any]] = []
+
+    async def __aenter__(self):
+        self._opened = True
+        self.meta = []
+        return self
+
+    async def __aexit__(self, a, b, c):
+        await self.parent.meta.dump(self.job, self.meta)
+        self._opened = False
+
+    async def add(self, entry: FilesystemEntry):
+        assert self._opened
+        subpath = self.parent._splitpath(entry.name)
+        submeta = self.parent._follow_path(self.meta, subpath, insert=True)
+        submeta["mode"] = entry.mode
+        if entry.type == FilesystemType.DIRECTORY:
+            submeta["type"] = "DIRECTORY"
+            submeta["children"] = []
+        elif entry.type == FilesystemType.SYMLINK:
+            submeta["type"] = "SYMLINK"
+            submeta["link_target"] = entry.link_target
+        elif entry.type == FilesystemType.FILE:
+            assert entry.data is not None
+            submeta["type"] = "FILE"
+            if entry.content_hash is None:
+                all_content = await entry.data.read()  # uhhhhhhhhhhhhhhhhhhhhhh not good
+                hash_content = sha256(all_content).hexdigest()
+                async with await self.parent.blobs.open(hash_content, "wb") as fp:
+                    await fp.write(all_content)
+                size = len(all_content)
+            else:
+                hash_content = entry.content_hash
+                h = sha256()
+                size = 0
+                async with await self.parent.blobs.open(hash_content, "wb") as fp:
+                    while True:
+                        data = await entry.data.read(1024 * 16)
+                        if not data:
+                            break
+                        h.update(data)
+                        size += len(data)
+                        await fp.write(data)
+                if h.hexdigest() != hash_content:
+                    raise ValueError("Bad content hash")
+
+            submeta["content"] = hash_content
+            submeta["size"] = size
 
 class ContentAddressedBlobRepository(FilesystemRepository):
     """A repository which uses a blob repository and a metadata repository to store files in a deduplicated
@@ -511,51 +580,9 @@ class ContentAddressedBlobRepository(FilesystemRepository):
             return None
         return child_info["mode"]
 
-    async def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
-        meta: List[Dict[str, Any]] = []
+    def dump(self, job: str) -> CABDumper:
+        return CABDumper(self, job)
 
-        try:
-            while True:
-                entry = yield
-                subpath = self._splitpath(entry.name)
-                submeta = self._follow_path(meta, subpath, insert=True)
-                submeta["mode"] = entry.mode
-                if entry.type == FilesystemType.DIRECTORY:
-                    submeta["type"] = "DIRECTORY"
-                    submeta["children"] = []
-                elif entry.type == FilesystemType.SYMLINK:
-                    submeta["type"] = "SYMLINK"
-                    submeta["link_target"] = entry.link_target
-                elif entry.type == FilesystemType.FILE:
-                    assert entry.data is not None
-                    submeta["type"] = "FILE"
-                    if entry.content_hash is None:
-                        all_content = await entry.data.read()  # uhhhhhhhhhhhhhhhhhhhhhh not good
-                        hash_content = sha256(all_content).hexdigest()
-                        async with await self.blobs.open(hash_content, "wb") as fp:
-                            await fp.write(all_content)
-                        size = len(all_content)
-                    else:
-                        hash_content = entry.content_hash
-                        h = sha256()
-                        size = 0
-                        async with await self.blobs.open(hash_content, "wb") as fp:
-                            while True:
-                                data = await entry.data.read(1024 * 16)
-                                if not data:
-                                    break
-                                h.update(data)
-                                size += len(data)
-                                await fp.write(data)
-                        if h.hexdigest() != hash_content:
-                            raise ValueError("Bad content hash")
-
-                    submeta["content"] = hash_content
-                    submeta["size"] = size
-        except GeneratorExit:
-            pass
-
-        await self.meta.dump(job, meta)
 
     async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStreamBase]:
         return await self._open(job, path)
@@ -681,7 +708,7 @@ class TarfileFilesystemRepository(FilesystemRepository):
                     return (entry.size(), None)
         raise ValueError("Member %s not found" % path)
 
-    def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
+    def dump(self, job: str):
         raise NotImplementedError("Not implemented - just dump as a tarball...")
 
     @asyncasynccontextmanager
