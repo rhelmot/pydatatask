@@ -169,6 +169,9 @@ class TaskVisualizer:
                             for repo in node.success.footprint():
                                 info = await repo.info(job) or {}
                                 is_valid &= info.get("success", False)
+                                if not is_valid:
+                                    break
+
                             exit_code = 0 if is_valid else 1
                             if exit_code is not None:
                                 self.exit_codes[node][job] = exit_code
