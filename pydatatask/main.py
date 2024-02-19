@@ -84,7 +84,7 @@ __all__ = (
     "run",
 )
 
-FAIL_FAST = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
+FAIL_FAST = os.getenv("PDT_MAIN_FAIL_FAST", "").lower() not in ("", "0", "false", "no")
 
 # pylint: disable=missing-function-docstring,missing-class-docstring
 
@@ -112,6 +112,11 @@ def main(
     parser_run.add_argument("--verbose", action="store_true", help="Only evaluates tasks-to-launch once")
     parser_run.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
+    parser_run.add_argument(
+        "--require-success",
+        action="store_true",
+        help="Raise an error when workers fail instead of marking them as completed-but-failed",
     )
     parser_run.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
     parser_run.add_argument(
@@ -216,6 +221,11 @@ def main(
     )
     parser_launch.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
+    parser_run.add_argument(
+        "--require-success",
+        action="store_true",
+        help="Raise an error when workers fail instead of marking them as completed-but-failed",
     )
     parser_launch.add_argument(
         "--debug-trace",
@@ -333,10 +343,13 @@ async def run(
     timeout: Optional[float],
     verbose: bool = False,
     fail_fast: bool = False,
+    require_success: bool = False,
     tasks: Optional[List[str]] = None,
     debug_trace: bool = False,
 ):
-    pipeline.settings(fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace)
+    pipeline.settings(
+        fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
+    )
 
     async def update_only_update_flush():
         await pipeline.update_only_update()
@@ -569,9 +582,10 @@ async def launch(
     force: bool,
     fail_fast: bool,
     debug_trace: bool,
+    require_success: bool,
 ):
     task = pipeline.tasks[task_name]
-    pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace)
+    pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace, require_success=require_success)
 
     if force or await task.ready.contains(job):
         await task.launch(job)
