@@ -200,6 +200,7 @@ class Task(ABC):
         self.links: Dict[str, Link] = {}
         self.synchronous = False
         self.metadata = True
+        self.debug_trace = False
         self.disabled = disabled
         self.agent_url = ""
         self.agent_secret = ""
@@ -896,6 +897,20 @@ class Task(ABC):
             return template
 
 
+class ShellTask(Task):
+    """A task which templates a shell script to run."""
+
+    async def build_template_env(
+        self,
+        orig_job: str,
+        env_src: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
+        env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
+        if self.debug_trace:
+            preamble.insert(0, "set -x\n")
+        return env, preamble, epilogue
+
+
 class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
     """A class to instrument jinja2 to be more aggressive about awaiting objects and to cache their results.
 
@@ -928,7 +943,7 @@ class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
             self.write("))")
 
 
-class KubeTask(Task):
+class KubeTask(ShellTask):
     """A task which runs a kubernetes pod.
 
     Will automatically link a `LiveKubeRepository` as "live" with
@@ -1161,7 +1176,7 @@ class KubeTask(Task):
         """
 
 
-class ProcessTask(Task):
+class ProcessTask(ShellTask):
     """A task that runs a script.
 
     The interpreter is specified by the shebang, or the default shell if none present. The execution environment for the
@@ -1805,7 +1820,7 @@ class KubeFunctionTask(KubeTask):
             await self.func_done.dump(job, result)
 
 
-class ContainerTask(Task):
+class ContainerTask(ShellTask):
     """A task that runs a container."""
 
     def __init__(
