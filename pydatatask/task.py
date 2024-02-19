@@ -201,13 +201,14 @@ class Task(ABC):
         self.synchronous = False
         self.metadata = True
         self.debug_trace = False
+        self.require_success = False
         self.disabled = disabled
         self.agent_url = ""
         self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
         self.annotations: Dict[str, str] = {}
-        self.fail_fast = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
+        self.fail_fast = False
         self.timeout = timeout
         self.queries = queries or {}
         self.done = done
@@ -1108,13 +1109,6 @@ class KubeTask(ShellTask):
 
     async def _cleanup(self, pod: V1Pod, reason: str):
         job = pod.metadata.labels["job"]
-
-        if self.logs is not None:
-            async with await self.logs.open(job, "w") as fp:
-                try:
-                    await fp.write(await self.podman.logs(pod))
-                except (TimeoutError, ApiException):
-                    await fp.write("<failed to fetch logs>\n")
         data = {
             "reason": reason,
             "start_time": pod.metadata.creation_timestamp,
@@ -1122,8 +1116,22 @@ class KubeTask(ShellTask):
             "image": pod.status.container_statuses[0].image,
             "node": pod.spec.node_name,
             "timeout": reason == "Timeout",
-            "success": reason == "Succeeded",
+            "success": reason == "Succeeded" or (reason == "Timeout" and self.long_running),
         }
+        if not data["success"] and self.require_success:
+            message = f"require_success is set but {self.name}:{job} failed"
+            if self.fail_fast:
+                await self.delete(pod)
+                raise Exception(message)
+            else:
+                l.error(message)
+
+        if self.logs is not None:
+            async with await self.logs.open(job, "w") as fp:
+                try:
+                    await fp.write(await self.podman.logs(pod))
+                except (TimeoutError, ApiException):
+                    await fp.write("<failed to fetch logs>\n")
         await self.done.dump(job, data)
 
         await self.delete(pod)
@@ -1404,6 +1412,16 @@ class ProcessTask(ShellTask):
 
     async def _reap(self, job: str, start_time: datetime, timeout: bool = False):
         try:
+            async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
+                code = int(await fp1.read())
+            success = code == 0 and (not timeout or self.long_running)
+            if not success and self.require_success:
+                if not self.fail_fast:
+                    await self.manager.rmtree(self.basedir / job)
+                    await self.pids.delete(job)
+                    await self.quota_manager.relinquish(self.job_quota)
+                raise Exception(f"require_success is set but {self.name}:{job} failed")
+
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
                     job, "wb"
@@ -1414,8 +1432,6 @@ class ProcessTask(ShellTask):
                     job, "wb"
                 ) as fpw:
                     await async_copyfile(fpr, fpw)
-            async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
-                code = int(await fp1.read())
             await self.done.dump(
                 job,
                 {
@@ -1423,7 +1439,7 @@ class ProcessTask(ShellTask):
                     "start_time": start_time,
                     "end_time": datetime.now(tz=timezone.utc),
                     "timeout": timeout,
-                    "success": code == 0 and not timeout,
+                    "success": success,
                 },
             )
             await self.manager.rmtree(self.basedir / job)
@@ -1922,6 +1938,15 @@ class ContainerTask(ShellTask):
     async def update(self) -> bool:
         has_any, reaped = await self.manager.update(self.name, timeout=self.timeout)
         for job, (log, done) in reaped.items():
+            done["success"] |= done["timeout"] and self.long_running
+            if not done["success"] and self.require_success:
+                message = f"require_success is set but {self.name}:{job} failed"
+                if self.fail_fast:
+                    raise Exception("message")
+                else:
+                    l.error(message)
+                    continue
+
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:
                     await fp.write(log)

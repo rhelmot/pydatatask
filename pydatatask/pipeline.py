@@ -73,7 +73,7 @@ class Pipeline:
         self.agent_port: int = agent_port
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
         self.source_file = source_file
-        self.fail_fast = os.getenv("FAIL_FAST", "").lower() not in ("", "0", "false", "no")
+        self.fail_fast = False
         self.long_running_timeout = long_running_timeout
 
         for task in tasks:
@@ -87,26 +87,42 @@ class Pipeline:
 
     def settings(
         self,
-        synchronous=False,
-        metadata=True,
-        fail_fast=False,
-        debug_trace=False,
+        synchronous: Optional[bool] = None,
+        metadata: Optional[bool] = None,
+        fail_fast: Optional[bool] = None,
+        debug_trace: Optional[bool] = None,
+        require_success: Optional[bool] = None,
         task_allowlist: Optional[List[str]] = None,
     ):
-        """This method can be called to set properties of the current run.
+        """This method can be called to set properties of the current run. Only settings set to non-none will be
+        updated.
 
         :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
             launch phase succeeds.
         :param metadata: Whether jobs will store their completion metadata.
+        :param fail_fast: Whether failures during update and launch should result in a raised exception rather than a
+            logged message
+        :param debug_trace: Whether worker scripts should print out their execution traces
+        :param require_success: Whether tasks that fail should raise an exception instead of being marked as complete-
+            but-failed. If fail_fast is set, this will abort the pipeline; if fail_fast is unset, this will eventually
+            retry the task.
+        :param task_allowlist: A list of the only tasks which should be scheduled
         """
-        self.fail_fast |= fail_fast
+        if fail_fast is not None:
+            self.fail_fast = fail_fast
         for task in self.tasks.values():
-            task.synchronous = synchronous
-            task.metadata = metadata
-            task.fail_fast |= fail_fast
-            task.debug_trace |= debug_trace
-            if task_allowlist and task.name not in task_allowlist:
-                task.disabled = True
+            if synchronous is not None:
+                task.synchronous = synchronous
+            if metadata is not None:
+                task.metadata = metadata
+            if fail_fast is not None:
+                task.fail_fast = fail_fast
+            if debug_trace is not None:
+                task.debug_trace = debug_trace
+            if require_success is not None:
+                task.require_success = require_success
+            if task_allowlist is not None:
+                task.disabled = task.name not in task_allowlist
 
     async def _validate(self):
         seen_repos = set()
@@ -169,6 +185,7 @@ class Pipeline:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_val is not None:
+            # should this reraise if fail_fast?
             l.error("Terminated with error", exc_info=exc_val)
         await self.close()
 
