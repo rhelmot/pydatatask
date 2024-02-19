@@ -38,7 +38,17 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
 
         async with pipeline:
             await pydatatask.run(pipeline, forever=False, launch_once=False, timeout=120)
-            await pydatatask.launch(pipeline, "phase0", "bar", sync=True, meta=True, force=True, fail_fast=True)
+            await pydatatask.launch(
+                pipeline,
+                "phase0",
+                "bar",
+                sync=True,
+                meta=True,
+                force=True,
+                fail_fast=True,
+                debug_trace=False,
+                require_success=True,
+            )
 
         assert repo2.data["foo"] == "weh!?"
         assert "exception" in phase0_done.data["bar"]
