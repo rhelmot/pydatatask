@@ -114,6 +114,11 @@ def main(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
     parser_run.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
+    parser_run.add_argument(
+        "--debug-trace",
+        action="store_true",
+        help="Make every worker script print out its execution trace for debugging",
+    )
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -211,6 +216,11 @@ def main(
     )
     parser_launch.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
+    parser_launch.add_argument(
+        "--debug-trace",
+        action="store_true",
+        help="Make every worker script print out its execution trace for debugging",
     )
     parser_launch.set_defaults(func=launch)
 
@@ -324,8 +334,9 @@ async def run(
     verbose: bool = False,
     fail_fast: bool = False,
     tasks: Optional[List[str]] = None,
+    debug_trace: bool = False,
 ):
-    pipeline.settings(fail_fast=fail_fast, task_allowlist=tasks)
+    pipeline.settings(fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace)
 
     async def update_only_update_flush():
         await pipeline.update_only_update()
@@ -549,9 +560,18 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
         return 1
 
 
-async def launch(pipeline: Pipeline, task_name: str, job: str, sync: bool, meta: bool, force: bool, fail_fast: bool):
+async def launch(
+    pipeline: Pipeline,
+    task_name: str,
+    job: str,
+    sync: bool,
+    meta: bool,
+    force: bool,
+    fail_fast: bool,
+    debug_trace: bool,
+):
     task = pipeline.tasks[task_name]
-    pipeline.settings(sync, meta, fail_fast)
+    pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace)
 
     if force or await task.ready.contains(job):
         await task.launch(job)

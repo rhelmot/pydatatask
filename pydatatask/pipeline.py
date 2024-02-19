@@ -85,7 +85,14 @@ class Pipeline:
         for task in self.tasks.values():
             task.cache_flush()
 
-    def settings(self, synchronous=False, metadata=True, fail_fast=False, task_allowlist: Optional[List[str]] = None):
+    def settings(
+        self,
+        synchronous=False,
+        metadata=True,
+        fail_fast=False,
+        debug_trace=False,
+        task_allowlist: Optional[List[str]] = None,
+    ):
         """This method can be called to set properties of the current run.
 
         :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
@@ -97,6 +104,7 @@ class Pipeline:
             task.synchronous = synchronous
             task.metadata = metadata
             task.fail_fast |= fail_fast
+            task.debug_trace |= debug_trace
             if task_allowlist and task.name not in task_allowlist:
                 task.disabled = True
 
