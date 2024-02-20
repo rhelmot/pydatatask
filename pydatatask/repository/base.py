@@ -855,6 +855,8 @@ class ExecutorLiveRepo(Repository):
     manually.
     """
 
+    _EXCLUDE_BACKUP = True
+
     def __init__(self, task: "taskmodule.ExecutorTask"):
         super().__init__()
         self.task = task

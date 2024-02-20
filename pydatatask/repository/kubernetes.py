@@ -18,6 +18,8 @@ class LiveKubeRepository(Repository):
     Do not construct this class manually.
     """
 
+    _EXCLUDE_BACKUP = True
+
     def __init__(self, task: "KubeTask"):
         super().__init__()
         self.task = task
@@ -57,6 +59,8 @@ class LiveContainerRepository(Repository):
     This repository is constructed automatically by a :class:`ContainerTask` or subclass and is linked as the ``live``
     repository. Do not construct this class manually.
     """
+
+    _EXCLUDE_BACKUP = True
 
     def __init__(self, task: "ContainerTask"):
         super().__init__()
