@@ -222,7 +222,7 @@ def main(
     parser_launch.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
-    parser_run.add_argument(
+    parser_launch.add_argument(
         "--require-success",
         action="store_true",
         help="Raise an error when workers fail instead of marking them as completed-but-failed",
