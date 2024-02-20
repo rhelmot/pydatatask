@@ -1250,6 +1250,7 @@ class ProcessTask(ShellTask):
             pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask-{getpass.getuser()}/{name}_pids")
 
         self.pids = pids
+        setattr(self.pids, "_EXCLUDE_BACKUP", True)
         self.template = template
         self.environ = environ or {}
         self.stdin = stdin

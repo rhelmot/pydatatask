@@ -448,14 +448,16 @@ async def print_trace(pipeline: Pipeline, all_repos: bool, job: List[str]):
 def lookup_dotted(
     pipeline: Pipeline, ref: str, enable_footprint: bool = False
 ) -> Union[repomodule.Repository, taskmodule.Task]:
-    if enable_footprint and ref.startswith("__footprint."):
-        _, footprint_idx_str, real_ref = ref.split(".", 2)
+    if enable_footprint and ".__footprint." in ref:
+        real_ref, _, footprint_idx_str = ref.rsplit(".", 2)
         footprint_idx = int(footprint_idx_str)
         repo = lookup_dotted(pipeline, real_ref)
         assert isinstance(repo, repomodule.Repository)
         for i, footprint_repo in enumerate(repo.footprint()):
             if i == footprint_idx:
                 return footprint_repo
+        else:
+            raise KeyError("Implicit dependency " + footprint_idx_str)
 
     item: Union[repomodule.Repository, taskmodule.Task]
     if "." in ref:
@@ -601,30 +603,41 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
             raise ValueError("Do you want specific repos or all repos? Make up your mind!")
         repos = list(pipeline.tasks)
     looked_up = [(spec, lookup_dotted(pipeline, spec)) for spec in repos]
-    new_repos = {}
+    new_repos: Dict[str, repomodule.Repository] = {}
     for name, task_or_repo in looked_up:
         if isinstance(task_or_repo, repomodule.Repository):
-            new_repos[task_or_repo] = name
+            new_repos[name] = task_or_repo
         else:
             for link_name, link in task_or_repo.links.items():
-                new_repos[link.repo] = f"{name}.{link_name}"
+                new_repos[f"{name}.{link_name}"] = link.repo
                 for cokey_name, cokey in link.cokeyed.items():
-                    new_repos[cokey] = f"{name}.{link_name}.{cokey_name}"
+                    new_repos[f"{name}.{link_name}.{cokey_name}"] = cokey
 
-    footprint_repos = {}
-    for repo, name in new_repos.items():
-        for i, footprint_repo in enumerate(repo.footprint()):
-            if footprint_repo in new_repos:
-                footprint_repos[footprint_repo] = new_repos[footprint_repo]
-            else:
-                # generate special names to unambiguously refer to repositories with no direct name
-                # these names are only valid within backup and restore, for now
-                footprint_repos[footprint_repo] = f"__footprint.{name}.{i}"
+    # generate special names to unambiguously refer to repositories with no direct name
+    # these names are only valid within backup and restore, for now
+    for name, repo in list(new_repos.items()):
+        footprint = list(repo.footprint())
+        if len(footprint) == 1 and footprint[0] is repo:
+            continue
+        for i, footprint_repo in enumerate(footprint):
+            footprint_name = f"{name}.__footprint.{i}"
+            new_repos[footprint_name] = footprint_repo
+        new_repos.pop(name)
 
     jobs = []
+    canonical: Dict[repomodule.Repository, str] = {}
 
-    for repo, repo_name in footprint_repos.items():
+    for repo_name, repo in new_repos.items():
+        if getattr(repo, "_EXCLUDE_BACKUP", False):
+            continue
+
         repo_base = backup_base / repo_name
+
+        if repo in canonical:
+            if repo_base.is_symlink():
+                repo_base.unlink()
+            repo_base.symlink_to(canonical[repo])
+            continue
 
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repo.construct_backup_repo(repo_base)
@@ -639,7 +652,9 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(repo, new_repo_fs))
         else:
-            print("Warning: cannot backup", repo)
+            print("Warning: cannot backup", repo_name, "because it is of unknown type", repo)
+            continue
+        canonical[repo] = repo_name
 
     await asyncio.gather(*jobs)
 
@@ -653,9 +668,17 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
         repos = [p.name for p in backup_base.iterdir()]
 
     jobs = []
+    seen = set()
     for repo_path in repos:
         repo_base = backup_base / repo_path
-        repo = lookup_dotted(pipeline, repo_path, True)
+        try:
+            repo = lookup_dotted(pipeline, repo_path, True)
+        except KeyError as e:
+            print("Warning: cannot restore", repo_path, "because I can't find", e.args[0])
+            continue
+        if repo in seen:
+            continue
+        seen.add(repo)
         if isinstance(repo, repomodule.BlobRepository):
             new_repo_file = repo.construct_backup_repo(repo_base)
             await new_repo_file.validate()
@@ -669,7 +692,7 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(new_repo_fs, repo))
         else:
-            print("Warning: cannot backup", repo)
+            print("Warning: cannot backup", repo_path, "because it is of unknown type", repo)
 
     await asyncio.gather(*jobs)
 
