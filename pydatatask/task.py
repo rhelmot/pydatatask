@@ -1943,7 +1943,7 @@ class ContainerTask(ShellTask):
             if not done["success"] and self.require_success:
                 message = f"require_success is set but {self.name}:{job} failed"
                 if self.fail_fast:
-                    raise Exception("message")
+                    raise Exception(message)
                 else:
                     l.error(message)
                     continue
