@@ -1119,23 +1119,30 @@ class KubeTask(ShellTask):
             "success": reason == "Succeeded" or (reason == "Timeout" and self.long_running),
         }
 
+        try:
+            logs = await self.podman.logs(pod)
+        except (TimeoutError, ApiException):
+            logs = "<failed to fetch logs>\n"
+
+        if not data["success"] and self.require_success and not self.fail_fast:
+            l.error(
+                "require_success is set but %s:%s failed. job will be retried. logs follow:\n%s", self.name, job, logs
+            )
+            await self.delete(pod)
+            return
+
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
-                try:
-                    await fp.write(await self.podman.logs(pod))
-                except (TimeoutError, ApiException):
-                    await fp.write("<failed to fetch logs>\n")
+                await fp.write(logs)
         await self.done.dump(job, data)
 
         await self.delete(pod)
 
         if not data["success"] and self.require_success:
-            message = f"require_success is set but {self.name}:{job} failed"
-            if self.fail_fast:
-                await self.delete(pod)
-                raise Exception(message)
-            else:
-                l.error(message)
+            assert self.fail_fast
+            raise Exception(
+                f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting. Logs follow:\n{logs}"
+            )
 
     async def delete(self, pod: V1Pod):
         """Kill a pod and relinquish its resources without marking the task as complete."""
@@ -1418,6 +1425,30 @@ class ProcessTask(ShellTask):
                 code = int(await fp1.read())
             success = code == 0 and (not timeout or self.long_running)
 
+            if not success and self.require_success and not self.fail_fast:
+                if self.stdout is not None:
+                    async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr:
+                        stdout = await fpr.read().decode(errors="replace")
+                else:
+                    stdout = "<stdout not captured>"
+                if isinstance(self._stderr, repomodule.BlobRepository):
+                    async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr:
+                        stderr = await fpr.read().decode(errors="replace")
+                else:
+                    stderr = "<stderr not captured or merged with stdout>"
+
+                l.error(
+                    "require_success is set but %s:%s failed. job will be retried. logs follow:\n### stdout:\n%s ### stderr: %s\n",
+                    self.name,
+                    job,
+                    stdout,
+                    stderr,
+                )
+                await self.manager.rmtree(self.basedir / job)
+                await self.pids.delete(job)
+                await self.quota_manager.relinquish(self.job_quota)
+                return
+
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
                     job, "wb"
@@ -1443,11 +1474,11 @@ class ProcessTask(ShellTask):
             await self.quota_manager.relinquish(self.job_quota)
 
             if not success and self.require_success:
-                if not self.fail_fast:
-                    await self.manager.rmtree(self.basedir / job)
-                    await self.pids.delete(job)
-                    await self.quota_manager.relinquish(self.job_quota)
-                raise Exception(f"require_success is set but {self.name}:{job} failed")
+                assert self.fail_fast
+                raise Exception(
+                    f"require_success is set but {self.name}:{job} failed. aborting pipeline. stdout and stderr have been written to appropraite repositories."
+                )
+
         except Exception:
             if self.fail_fast:
                 raise
@@ -1943,17 +1974,25 @@ class ContainerTask(ShellTask):
         for job, (log, done) in reaped.items():
             done["success"] |= done["timeout"] and self.long_running
 
+            if not done["success"] and self.require_success and not self.fail_fast:
+                l.error(
+                    "require_success is set but %s:%s failed. job will be retried. logs follow:\n%s",
+                    self.name,
+                    job,
+                    log,
+                )
+                continue
+
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:
                     await fp.write(log)
             await self.done.dump(job, done)
 
             if not done["success"] and self.require_success:
-                message = f"require_success is set but {self.name}:{job} failed"
-                if self.fail_fast:
-                    raise Exception(message)
-                else:
-                    l.error(message)
+                assert self.fail_fast
+                raise Exception(
+                    f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting. Logs follow:\n{log}"
+                )
 
         return has_any
 
