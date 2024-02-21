@@ -347,6 +347,8 @@ async def run(
     tasks: Optional[List[str]] = None,
     debug_trace: bool = False,
 ):
+    if tasks == []:
+        tasks = None
     pipeline.settings(
         fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
     )
