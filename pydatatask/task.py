@@ -1118,13 +1118,6 @@ class KubeTask(ShellTask):
             "timeout": reason == "Timeout",
             "success": reason == "Succeeded" or (reason == "Timeout" and self.long_running),
         }
-        if not data["success"] and self.require_success:
-            message = f"require_success is set but {self.name}:{job} failed"
-            if self.fail_fast:
-                await self.delete(pod)
-                raise Exception(message)
-            else:
-                l.error(message)
 
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
@@ -1135,6 +1128,14 @@ class KubeTask(ShellTask):
         await self.done.dump(job, data)
 
         await self.delete(pod)
+
+        if not data["success"] and self.require_success:
+            message = f"require_success is set but {self.name}:{job} failed"
+            if self.fail_fast:
+                await self.delete(pod)
+                raise Exception(message)
+            else:
+                l.error(message)
 
     async def delete(self, pod: V1Pod):
         """Kill a pod and relinquish its resources without marking the task as complete."""
@@ -1416,12 +1417,6 @@ class ProcessTask(ShellTask):
             async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
                 code = int(await fp1.read())
             success = code == 0 and (not timeout or self.long_running)
-            if not success and self.require_success:
-                if not self.fail_fast:
-                    await self.manager.rmtree(self.basedir / job)
-                    await self.pids.delete(job)
-                    await self.quota_manager.relinquish(self.job_quota)
-                raise Exception(f"require_success is set but {self.name}:{job} failed")
 
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
@@ -1446,6 +1441,13 @@ class ProcessTask(ShellTask):
             await self.manager.rmtree(self.basedir / job)
             await self.pids.delete(job)
             await self.quota_manager.relinquish(self.job_quota)
+
+            if not success and self.require_success:
+                if not self.fail_fast:
+                    await self.manager.rmtree(self.basedir / job)
+                    await self.pids.delete(job)
+                    await self.quota_manager.relinquish(self.job_quota)
+                raise Exception(f"require_success is set but {self.name}:{job} failed")
         except Exception:
             if self.fail_fast:
                 raise
@@ -1952,7 +1954,6 @@ class ContainerTask(ShellTask):
                     raise Exception(message)
                 else:
                     l.error(message)
-                    continue
 
         return has_any
 
