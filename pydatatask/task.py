@@ -1940,6 +1940,12 @@ class ContainerTask(ShellTask):
         has_any, reaped = await self.manager.update(self.name, timeout=self.timeout)
         for job, (log, done) in reaped.items():
             done["success"] |= done["timeout"] and self.long_running
+
+            if self.logs is not None:
+                async with await self.logs.open(job, "wb") as fp:
+                    await fp.write(log)
+            await self.done.dump(job, done)
+
             if not done["success"] and self.require_success:
                 message = f"require_success is set but {self.name}:{job} failed"
                 if self.fail_fast:
@@ -1948,10 +1954,6 @@ class ContainerTask(ShellTask):
                     l.error(message)
                     continue
 
-            if self.logs is not None:
-                async with await self.logs.open(job, "wb") as fp:
-                    await fp.write(log)
-            await self.done.dump(job, done)
         return has_any
 
     async def launch(self, job: str):
