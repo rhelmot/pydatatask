@@ -332,6 +332,7 @@ async def update(pipeline: Pipeline):
 
 
 def http_agent(pipeline: Pipeline, host: str) -> None:
+    logging.getLogger("aiohttp.access").setLevel("DEBUG")
     app = build_agent_app(pipeline, True)
     web.run_app(app, host=host, port=pipeline.agent_port)
 
