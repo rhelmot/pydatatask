@@ -681,16 +681,17 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
         if repo in seen:
             continue
         seen.add(repo)
+        compress = next(repo_base.iterdir(), Path("")).name.endswith(".gz")
         if isinstance(repo, repomodule.BlobRepository):
-            new_repo_file = repo.construct_backup_repo(repo_base)
+            new_repo_file = repo.construct_backup_repo(repo_base, force_compress=compress)
             await new_repo_file.validate()
             jobs.append(_repo_copy_blob(new_repo_file, repo))
         elif isinstance(repo, repomodule.MetadataRepository):
-            new_repo_meta = repo.construct_backup_repo(repo_base)
+            new_repo_meta = repo.construct_backup_repo(repo_base, force_compress=compress)
             await new_repo_meta.validate()
             jobs.append(_repo_copy_meta(new_repo_meta, repo))
         elif isinstance(repo, repomodule.FilesystemRepository):
-            new_repo_fs = repo.construct_backup_repo(repo_base)
+            new_repo_fs = repo.construct_backup_repo(repo_base, force_compress=compress)
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(new_repo_fs, repo))
         else:

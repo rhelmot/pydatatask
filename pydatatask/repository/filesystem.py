@@ -129,9 +129,9 @@ class FilesystemRepository(Repository, abc.ABC):
         """
         raise NotImplementedError
 
-    def construct_backup_repo(self, path: Path) -> "FilesystemRepository":
+    def construct_backup_repo(self, path: Path, force_compress: Optional[bool] = None) -> "FilesystemRepository":
         """Construct a repository appropriate for backing up this repository to the given path."""
-        if self.compress_backup:
+        if (self.compress_backup or force_compress is True) and force_compress is not False:
             return TarfileFilesystemRepository(FileRepository(path, extension=".tar.gz"))
         else:
             return DirectoryRepository(path)
