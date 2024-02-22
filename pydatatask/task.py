@@ -261,7 +261,7 @@ class Task(ABC):
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_get(filename, url, headers)
+        return self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace)
 
     def mk_http_post(
         self, filename: str, url: str, headers: Dict[str, str], output_filename: Optional[str] = None
@@ -270,7 +270,7 @@ class Task(ABC):
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_post(filename, url, headers, output_filename)
+        return self.host.mk_http_post(filename, url, headers, output_filename, verbose=self.debug_trace)
 
     def mk_repo_get(self, filename: str, link_name: str, job: str) -> Any:
         """Generate logic to perform an repository download for the task host system.
@@ -283,6 +283,7 @@ class Task(ABC):
             payload_filename,
             f"{self.agent_url}/data/{self.name}/{link_name}/{job}",
             {"Cookie": "secret=" + self.agent_secret},
+            verbose=self.debug_trace,
         )
         if is_filesystem:
             result += self.host.mk_unzip(filename, payload_filename)
@@ -300,6 +301,7 @@ class Task(ABC):
             f"{self.agent_url}/data/{self.name}/{link_name}/{job}"
             + (f"?hostjob={hostjob}" if hostjob is not None else ""),
             {"Cookie": "secret=" + self.agent_secret},
+            verbose=self.debug_trace,
         )
         if is_filesystem:
             result = self.host.mk_zip(payload_filename, filename) + result
@@ -326,7 +328,8 @@ class Task(ABC):
                 "$INPUT_FILE",
                 f"{self.agent_url}/query/{self.name}/{query_name}",
                 {"Cookie": "secret=" + self.agent_secret},
-                "/dev/stdout"
+                "/dev/stdout",
+                verbose=self.debug_trace,
             )}
             rm $INPUT_FILE
         }}
@@ -359,6 +362,7 @@ class Task(ABC):
             f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}"
             + (f"?hostjob={hostjob}" if hostjob is not None else ""),
             {"Cookie": "secret=" + self.agent_secret},
+            verbose=self.debug_trace,
         )
         if is_filesystem:
             result = self.host.mk_zip(payload_filename, filename) + result
@@ -1554,7 +1558,7 @@ class InProcessSyncTask(Task):
         #        raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def update(self):
-        pass
+        return False
 
     async def launch(self, job: str):
         assert self.func is not None
