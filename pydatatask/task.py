@@ -978,7 +978,7 @@ class KubeTask(ShellTask):
             break the quota.
         :param template: YAML markup for a pod manifest template, either as a string or a path to a file.
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
-            ``inhibits_start, required_for_output, is_status``.
+            ``is_status``.
         :param done: A MetadataRepository in which to dump some information about the pod's lifetime and
             termination on completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
         :param window:  Optional: How far back into the past to look in order to determine whether we have recently
@@ -1017,8 +1017,6 @@ class KubeTask(ShellTask):
                 logs,
                 None,
                 is_status=True,
-                inhibits_start=True,
-                required_for_output=True,
             )
 
     @property
@@ -1127,26 +1125,24 @@ class KubeTask(ShellTask):
             logs = await self.podman.logs(pod)
         except (TimeoutError, ApiException):
             logs = "<failed to fetch logs>\n"
-
-        if not data["success"] and self.require_success and not self.fail_fast:
-            l.error(
-                "require_success is set but %s:%s failed. job will be retried. logs follow:\n%s", self.name, job, logs
-            )
-            await self.delete(pod)
-            return
-
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
                 await fp.write(logs)
-        await self.done.dump(job, data)
-
         await self.delete(pod)
+
+        if not data["success"] and self.require_success and not self.fail_fast:
+            l.error(
+                "require_success is set but %s:%s failed. job will be retried.",
+                self.name,
+                job,
+            )
+            return
+
+        await self.done.dump(job, data)
 
         if not data["success"] and self.require_success:
             assert self.fail_fast
-            raise Exception(
-                f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting. Logs follow:\n{logs}"
-            )
+            raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
     async def delete(self, pod: V1Pod):
         """Kill a pod and relinquish its resources without marking the task as complete."""
@@ -1246,12 +1242,12 @@ class ProcessTask(ShellTask):
                       authenticated to this repository. Linked as "stdin" with ``is_input``.
         :param stdout: Optional: A blob repository into which to dump the process' standard output. The content will be
                        transferred from the target environment on completion, so the target does not need to be
-                       authenticated to this repository. Linked as "stdout" with ``is_output``.
+                       authenticated to this repository. Linked as "stdout" with ``is_status``.
         :param stderr: Optional: A blob repository into which to dump the process' standard error, or the constant
                        `pydatatask.task.STDOUT` to indicate that the stream should be interleaved with stdout.
                        Otherwise, the content will be transferred from the target environment on completion, so the
                        target does not need to be authenticated to this repository. Linked as "stderr" with
-                       ``is_output``.
+                       ``is_status``.
         :param ready:  Optional: A repository from which to read task-ready status.
         """
         super().__init__(
@@ -1282,9 +1278,9 @@ class ProcessTask(ShellTask):
         if stdin is not None:
             self.link("stdin", stdin, None, is_input=True)
         if stdout is not None:
-            self.link("stdout", stdout, None, is_output=True)
+            self.link("stdout", stdout, None, is_status=True)
         if isinstance(stderr, repomodule.BlobRepository):
-            self.link("stderr", stderr, None, is_output=True)
+            self.link("stderr", stderr, None, is_status=True)
 
     @property
     def host(self):
@@ -1429,30 +1425,6 @@ class ProcessTask(ShellTask):
                 code = int(await fp1.read())
             success = code == 0 and (not timeout or self.long_running)
 
-            if not success and self.require_success and not self.fail_fast:
-                if self.stdout is not None:
-                    async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr:
-                        stdout = await fpr.read().decode(errors="replace")
-                else:
-                    stdout = "<stdout not captured>"
-                if isinstance(self._stderr, repomodule.BlobRepository):
-                    async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr:
-                        stderr = await fpr.read().decode(errors="replace")
-                else:
-                    stderr = "<stderr not captured or merged with stdout>"
-
-                l.error(
-                    "require_success is set but %s:%s failed. job will be retried. logs follow:\n### stdout:\n%s ### stderr: %s\n",
-                    self.name,
-                    job,
-                    stdout,
-                    stderr,
-                )
-                await self.manager.rmtree(self.basedir / job)
-                await self.pids.delete(job)
-                await self.quota_manager.relinquish(self.job_quota)
-                return
-
             if self.stdout is not None:
                 async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
                     job, "wb"
@@ -1463,6 +1435,19 @@ class ProcessTask(ShellTask):
                     job, "wb"
                 ) as fpw:
                     await async_copyfile(fpr, fpw)
+
+            await self.manager.rmtree(self.basedir / job)
+            await self.pids.delete(job)
+            await self.quota_manager.relinquish(self.job_quota)
+
+            if not success and self.require_success and not self.fail_fast:
+                l.error(
+                    "require_success is set but %s:%s failed. job will be retried.",
+                    self.name,
+                    job,
+                )
+                return
+
             await self.done.dump(
                 job,
                 {
@@ -1473,15 +1458,10 @@ class ProcessTask(ShellTask):
                     "success": success,
                 },
             )
-            await self.manager.rmtree(self.basedir / job)
-            await self.pids.delete(job)
-            await self.quota_manager.relinquish(self.job_quota)
 
             if not success and self.require_success:
                 assert self.fail_fast
-                raise Exception(
-                    f"require_success is set but {self.name}:{job} failed. aborting pipeline. stdout and stderr have been written to appropraite repositories."
-                )
+                raise Exception(f"require_success is set but {self.name}:{job} failed. aborting pipeline.")
 
         except Exception:
             if self.fail_fast:
@@ -1793,7 +1773,7 @@ class KubeFunctionTask(KubeTask):
         :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
                          ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
-                               ``inhibits_start, required_for_output, is_status``.
+                               ``is_status``.
         :param kube_done: A MetadataRepository in which to dump some information about the pod's lifetime and
                           termination on completion. Linked as "done" with
                           ``inhibits_start, required_for_output, is_status``.
@@ -1916,7 +1896,7 @@ class ContainerTask(ShellTask):
                                and termination on completion. Linked as "done" with
                                ``inhibits_start, required_for_output, is_status``.
         :param logs: Optional: A blob repository into which to dump the container's logs. Linked as "logs" with
-                               ``is_output``.
+                               ``is_status``.
         :param ready:  Optional: A repository from which to read task-ready status.
         """
         super().__init__(
@@ -1942,7 +1922,7 @@ class ContainerTask(ShellTask):
         self.quota_manager.register(self._get_load)
 
         if logs is not None:
-            self.link("logs", logs, None, is_output=True)
+            self.link("logs", logs, None, is_status=True)
         self.link(
             "live",
             repomodule.LiveContainerRepository(self),
@@ -1978,25 +1958,23 @@ class ContainerTask(ShellTask):
         for job, (log, done) in reaped.items():
             done["success"] |= done["timeout"] and self.long_running
 
-            if not done["success"] and self.require_success and not self.fail_fast:
-                l.error(
-                    "require_success is set but %s:%s failed. job will be retried. logs follow:\n%s",
-                    self.name,
-                    job,
-                    log,
-                )
-                continue
-
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:
                     await fp.write(log)
+
+            if not done["success"] and self.require_success and not self.fail_fast:
+                l.error(
+                    "require_success is set but %s:%s failed. job will be retried.",
+                    self.name,
+                    job,
+                )
+                continue
+
             await self.done.dump(job, done)
 
             if not done["success"] and self.require_success:
                 assert self.fail_fast
-                raise Exception(
-                    f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting. Logs follow:\n{log}"
-                )
+                raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
         return has_any
 
