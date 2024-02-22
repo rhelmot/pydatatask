@@ -198,9 +198,9 @@ class MetadataRepository(Repository, ABC):
     """A metadata repository has values which are small, structured data, and loads them entirely into memory,
     returning the structured data from the `info` method."""
 
-    def construct_backup_repo(self, path: Path) -> "MetadataRepository":
+    def construct_backup_repo(self, path: Path, force_compress: Optional[bool] = None) -> "MetadataRepository":
         """Construct a repository appropriate for backing up this repository to the given path."""
-        if self.compress_backup:
+        if (self.compress_backup or force_compress is True) and force_compress is not False:
             l.warning("Compressed backups not yet implemented for %s", type(self))
         return YamlMetadataFileRepository(path, extension=".yaml")
 
@@ -427,9 +427,9 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
 class BlobRepository(Repository, ABC):
     """A blob repository has values which are flat data blobs that can be streamed for reading or writing."""
 
-    def construct_backup_repo(self, path: Path) -> "BlobRepository":
+    def construct_backup_repo(self, path: Path, force_compress: Optional[bool] = None) -> "BlobRepository":
         """Construct a repository appropriate for backing up this repository to the given path."""
-        if self.compress_backup:
+        if (self.compress_backup or force_compress is True) and force_compress is not False:
             return CompressedBlobRepository(FileRepository(path, extension=".gz"))
         else:
             return FileRepository(path)
