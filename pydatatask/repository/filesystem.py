@@ -141,27 +141,24 @@ class FilesystemRepository(Repository, abc.ABC):
         await cursor.__anext__()
         async with await aiotarfile.open_rd(stream) as tar:
             async for entry in tar:
-                async with entry:
-                    ty = entry.entry_type()
-                    if ty == aiotarfile.TarfileEntryType.Symlink:
-                        await cursor.asend(
-                            FilesystemEntry(
-                                entry.name().decode(),
-                                FilesystemType.SYMLINK,
-                                entry.mode(),
-                                link_target=entry.link_target().decode(),
-                            )
+                ty = entry.entry_type()
+                if ty == aiotarfile.TarfileEntryType.Symlink:
+                    await cursor.asend(
+                        FilesystemEntry(
+                            entry.name().decode(),
+                            FilesystemType.SYMLINK,
+                            entry.mode(),
+                            link_target=entry.link_target().decode(),
                         )
-                    elif ty == aiotarfile.TarfileEntryType.Directory:
-                        await cursor.asend(
-                            FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode())
-                        )
-                    elif ty == aiotarfile.TarfileEntryType.Regular:
-                        await cursor.asend(
-                            FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
-                        )
-                    else:
-                        l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
+                    )
+                elif ty == aiotarfile.TarfileEntryType.Directory:
+                    await cursor.asend(FilesystemEntry(entry.name().decode(), FilesystemType.DIRECTORY, entry.mode()))
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    await cursor.asend(
+                        FilesystemEntry(entry.name().decode(), FilesystemType.FILE, entry.mode(), data=entry)
+                    )
+                else:
+                    l.warning("Could not dump archive member %s: bad type %s", entry.name(), ty)
         await cursor.aclose()
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
@@ -626,18 +623,17 @@ class TarfileFilesystemRepository(FilesystemRepository):
         members = {}
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    ty = entry.entry_type()
-                    if ty == aiotarfile.TarfileEntryType.Directory:
-                        idx = 0
-                    elif ty == aiotarfile.TarfileEntryType.Regular:
-                        idx = 1
-                    elif ty == aiotarfile.TarfileEntryType.Symlink:
-                        idx = 2
-                    else:
-                        continue
+                ty = entry.entry_type()
+                if ty == aiotarfile.TarfileEntryType.Directory:
+                    idx = 0
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    idx = 1
+                elif ty == aiotarfile.TarfileEntryType.Symlink:
+                    idx = 2
+                else:
+                    continue
 
-                    name = entry.name().decode()
+                name = entry.name().decode()
                 dirname, basename = name.rsplit("/", 1)
                 while not basename:
                     dirname, basename = dirname.rsplit("/", 1)
@@ -652,41 +648,37 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    if entry.name().decode().strip("/") == path.strip("/"):
-                        ty = entry.entry_type()
-                        if ty == aiotarfile.TarfileEntryType.Directory:
-                            return FilesystemType.DIRECTORY
-                        elif ty == aiotarfile.TarfileEntryType.Regular:
-                            return FilesystemType.FILE
-                        elif ty == aiotarfile.TarfileEntryType.Symlink:
-                            return FilesystemType.SYMLINK
-                        else:
-                            return None
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    ty = entry.entry_type()
+                    if ty == aiotarfile.TarfileEntryType.Directory:
+                        return FilesystemType.DIRECTORY
+                    elif ty == aiotarfile.TarfileEntryType.Regular:
+                        return FilesystemType.FILE
+                    elif ty == aiotarfile.TarfileEntryType.Symlink:
+                        return FilesystemType.SYMLINK
+                    else:
+                        return None
         return None
 
     async def get_mode(self, job: str, path: str) -> Optional[int]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    if entry.name().decode().strip("/") == path.strip("/"):
-                        return entry.mode()
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return entry.mode()
         return None
 
     async def readlink(self, job: str, path: str) -> str:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    if entry.name().decode().strip("/") == path.strip("/"):
-                        return entry.link_target().decode()
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return entry.link_target().decode()
         raise ValueError("Member %s not found" % path)
 
     async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    if entry.name().decode().strip("/") == path.strip("/"):
-                        return (entry.size(), None)
+                if entry.name().decode().strip("/") == path.strip("/"):
+                    return (entry.size(), None)
         raise ValueError("Member %s not found" % path)
 
     def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
@@ -696,9 +688,8 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStreamBase]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    if entry.name().decode().strip("/") == str(path).strip("/"):
-                        yield entry
+                if entry.name().decode().strip("/") == str(path).strip("/"):
+                    yield entry
         raise ValueError("Member %s not found" % path)
 
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
@@ -708,21 +699,20 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                async with entry:
-                    ty = entry.entry_type()
-                    link_target = None
-                    if ty == aiotarfile.TarfileEntryType.Directory:
-                        tty = FilesystemType.DIRECTORY
-                    elif ty == aiotarfile.TarfileEntryType.Regular:
-                        tty = FilesystemType.FILE
-                    elif ty == aiotarfile.TarfileEntryType.Symlink:
-                        tty = FilesystemType.SYMLINK
-                        link_target = entry.link_target().decode()
-                    else:
-                        continue
-                    yield FilesystemEntry(
-                        str(entry.name()), tty, entry.mode(), entry, content_size=entry.size(), link_target=link_target
-                    )
+                ty = entry.entry_type()
+                link_target = None
+                if ty == aiotarfile.TarfileEntryType.Directory:
+                    tty = FilesystemType.DIRECTORY
+                elif ty == aiotarfile.TarfileEntryType.Regular:
+                    tty = FilesystemType.FILE
+                elif ty == aiotarfile.TarfileEntryType.Symlink:
+                    tty = FilesystemType.SYMLINK
+                    link_target = entry.link_target().decode()
+                else:
+                    continue
+                yield FilesystemEntry(
+                    str(entry.name()), tty, entry.mode(), entry, content_size=entry.size(), link_target=link_target
+                )
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
         async with await self.inner.open(job, "rb") as fp:
