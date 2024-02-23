@@ -19,10 +19,10 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
         super().__init__(method)
 
     async def test_streaming(self):
-        staging = PipelineStaging(test_root / "content" / "streaming_input.yaml")
+        staging = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.yaml")
         allocated = staging.allocate(default_allocators_temp, Dispatcher("TempLinux", {"app": "test_streaming"}))
-        allocated.save()
-        allocated = PipelineStaging(test_root / "content" / "streaming_input.lock")
+        # allocated.save()
+        # allocated = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.lock")
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task = cast(ProcessTask, pipeline.tasks["task"])
@@ -74,3 +74,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                 assert {v["parent"] for v in allMeta.values()} == {100, 103, 104}
         finally:
             await task.manager.teardown_agent()
+
+
+if __name__ == "__main__":
+    unittest.main()
