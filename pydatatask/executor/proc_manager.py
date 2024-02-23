@@ -260,6 +260,8 @@ class LocalLinuxManager(AbstractProcessManager):
         # lmao, hack
         Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
         with open(f"/tmp/pydatatask-{getpass.getuser()}/agent-stdout", "ab") as fp:
+            env = dict(os.environ)
+            env["PIPELINE_YAML"] = str(pipeline.source_file)
             p = await asyncio.create_subprocess_exec(
                 sys.executable,
                 Path(__file__).parent.parent / "cli" / "main.py",
@@ -268,7 +270,7 @@ class LocalLinuxManager(AbstractProcessManager):
                 stdout=fp,
                 stderr=asyncio.subprocess.STDOUT,
                 close_fds=True,
-                env={"PIPELINE_YAML": pipeline.source_file} | os.environ,
+                env=env,
             )
             fp.write(
                 f"Launched agent version {pipeline.agent_version} pid {p.pid} pipeline {pipeline.source_file} port {pipeline.agent_port}".encode()
