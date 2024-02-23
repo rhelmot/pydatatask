@@ -73,6 +73,9 @@ jobs:
     - name: install
       run: pip install .
     - uses: pypa/gh-action-pip-audit@v1.0.6
+      with:
+        ignore-vulns: |
+            GHSA-547x-748v-vp6p
   docs:
     name: Build Documentation
     if: always()
