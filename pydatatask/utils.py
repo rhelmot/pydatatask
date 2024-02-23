@@ -71,17 +71,6 @@ class AWriteStreamBase(Protocol):
         """Write ``data`` to the stream."""
 
 
-class ReadSyncStreamAsyncWrapper(AReadStream):
-    def __init__(self, inner: ReadStream):
-        self.inner = inner
-
-    async def read(self, n: int = -1, /) -> bytes:
-        return self.inner.read(n)
-
-    def close(self):
-        self.inner.close()
-
-
 class AWriteStreamWrapper:
     """A wrapper that turns an AWriteStreamBase into an AWriteStream by stubbing its close method."""
 
