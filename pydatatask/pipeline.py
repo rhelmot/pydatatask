@@ -401,7 +401,7 @@ class Pipeline:
 
                 for a, b in edges:
                     result.add_edge(a, b, **attrs)
-                    for cokey_name, c in cokeyed.values():
+                    for cokey_name, c in cokeyed.items():
                         attrs["link_name"] = f"{link_name}.{cokey_name}"
                         if a is task:
                             result.add_edge(a, c, **attrs)
