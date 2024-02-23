@@ -80,7 +80,7 @@ def main():
     parser.add_argument("--name", help="The name of the app for automatically generated executors")
     parser.add_argument(
         "--long-running-timeout",
-        help="Cap the execution of long running tasks to the given numberr of minutes",
+        help="Cap the execution of long running tasks to the given number of minutes",
         type=float,
     )
     parsed = parser.parse_args()
