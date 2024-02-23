@@ -1,0 +1,18 @@
+repo_classes:
+  input: MetadataRepository
+  output: MetadataRepository
+  done: MetadataRepository
+tasks:
+  task_1:
+    executable:
+      cls: Process
+      args:
+        template: echo hi
+    done: done
+    links:
+      input:
+        repo: input
+        kind: InputFilepath
+      output:
+        repo: output
+        kind: OutputFilepath
