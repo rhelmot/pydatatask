@@ -214,11 +214,11 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         await self.client.delete_object(Bucket=self.bucket, Key=self.object_name(job))
 
 
-class YamlMetadataS3Repository(YamlMetadataRepository, S3BucketRepository):
+class YamlMetadataS3Repository(YamlMetadataRepository):
     """A metadata repository based on a s3 bucket repository."""
 
     def __init__(self, client, bucket, prefix, suffix=".yaml", mimetype="text/yaml"):
-        super().__init__(client, bucket, prefix, suffix=suffix, mimetype=mimetype)
+        super().__init__(S3BucketRepository(client, bucket, prefix, suffix=suffix, mimetype=mimetype))
 
     @job_getter
     async def info(self, job, /):

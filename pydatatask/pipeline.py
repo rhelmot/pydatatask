@@ -20,7 +20,6 @@ from datetime import timedelta
 from pathlib import Path
 import asyncio
 import logging
-import os
 
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
@@ -384,8 +383,7 @@ class Pipeline:
                 rfollow = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
 
-                # TODO: Figure out how to handle this correctly
-                del attrs["cokeyed"]
+                cokeyed = attrs.pop("cokeyed")
                 del attrs["auto_values"]
 
                 attrs["link_name"] = link_name
@@ -393,12 +391,22 @@ class Pipeline:
                 attrs["rfollow"] = rfollow
                 attrs["multi"] = multi
                 repo = attrs.pop("repo")
+                edges = []
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
-                    result.add_edge(repo, task, **attrs)
+                    edges.append((repo, task))
                     if attrs["is_output"] or attrs["is_status"]:
-                        result.add_edge(task, repo, **attrs)
+                        edges.append((task, repo))
                 else:
-                    result.add_edge(task, repo, **attrs)
+                    edges.append((task, repo))
+
+                for a, b in edges:
+                    result.add_edge(a, b, **attrs)
+                    for cokey_name, c in cokeyed.values():
+                        attrs["link_name"] = f"{link_name}.{cokey_name}"
+                        if a is task:
+                            result.add_edge(a, c, **attrs)
+                        else:
+                            result.add_edge(c, b, **attrs)
 
         self._graph = result
         return result

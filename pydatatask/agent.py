@@ -8,7 +8,12 @@ from __future__ import annotations
 from aiohttp import web
 import yaml
 
-from pydatatask.utils import AReadStreamBase, AWriteStreamBase, async_copyfile
+from pydatatask.utils import (
+    AReadStreamBase,
+    AWriteStreamBase,
+    AWriteStreamBaseIntWrapper,
+    async_copyfile,
+)
 
 from . import repository as repomodule
 from .pipeline import Pipeline
@@ -41,7 +46,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
     async def get(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
         response = web.StreamResponse()
         await response.prepare(request)
-        await cat_data(repo, job, response)
+        await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
         await response.write_eof()
         return response
 
@@ -90,7 +95,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
 
         response = web.StreamResponse()
         await response.prepare(request)
-        await query.format_response(result, response)
+        await query.format_response(result, AWriteStreamBaseIntWrapper(response))
         await response.write_eof()
         return response
 
