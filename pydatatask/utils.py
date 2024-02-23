@@ -88,6 +88,25 @@ class AWriteStreamWrapper:
         """
 
 
+class _AWriteStreamBad(Protocol):
+    """This class exists because you so sucks."""
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> None:
+        """Write ``data`` to the stream."""
+
+
+class AWriteStreamBaseIntWrapper:
+    """A wrapper that turns a bad writestream (returns None instead of int) into a good writestream."""
+
+    def __init__(self, inner: _AWriteStreamBad):
+        self.inner = inner
+
+    async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``data`` to the stream."""
+        await self.inner.write(data)
+        return len(data)
+
+
 class AWriteStream(Protocol):
     """A protocol for writing data to an asynchronous stream."""
 
@@ -118,11 +137,13 @@ class AWriteStreamDrainer:
         self.inner = inner
 
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
+        """Write ``data`` to the stream."""
         self.inner.write(data)
         await self.inner.drain()
         return len(data)
 
     async def close(self) -> None:
+        """Close the stream."""
         self.inner.close()
         # um.
         # await self.inner.wait_closed()
@@ -446,14 +467,14 @@ class QueueStream:
 
 
 class AsyncQueueStream:
-    """A stream queue with asynchronous-blocking reader and asynchronous-nonblocking writer."""
-
-    # TODO FIXME this does not do flow control and thus may buffer data infinitely, causing OOMs
+    """A stream queue with asynchronous-blocking reader and asynchronous-blocking writer."""
 
     def __init__(self) -> None:
         self.buffer: List[Optional[bytes]] = []
         self.readptr = (0, 0)
         self._closed = False
+        self.bufsize = 0
+        self.max_bufsize = 1024 * 16 * 8
 
     def close(self) -> None:
         """Add data to the queue."""
@@ -462,6 +483,9 @@ class AsyncQueueStream:
     async def write(self, data: Buffer, /) -> int:
         """Add data to the queue."""
         b = bytes(data)
+        while self.bufsize >= self.max_bufsize:
+            await asyncio.sleep(0.0001)
+        self.bufsize += len(b)
         self.buffer.append(b)
         return len(b)
 
@@ -483,6 +507,7 @@ class AsyncQueueStream:
 
             if size < 0 or size >= len(buf) - col:
                 outbuf.extend(buf[col:])
+                self.bufsize -= len(buf)
                 self.buffer[line] = None
                 self.readptr = (line + 1, 0)
                 size -= len(buf) - col

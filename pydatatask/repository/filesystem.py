@@ -604,6 +604,11 @@ class ContentAddressedBlobRepository(FilesystemRepository):
 
 
 class TarfileFilesystemRepository(FilesystemRepository):
+    """A filesystem repository which stores its data at-rest as a tarball.
+
+    This makes dump_tarball and get_tarball very fast.
+    """
+
     def __init__(self, inner: BlobRepository):
         super().__init__()
         self.inner = inner
@@ -620,7 +625,7 @@ class TarfileFilesystemRepository(FilesystemRepository):
 
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         # NOTE: does not implement the part where you can manipulate the yielded dir list to skip subtrees
-        members = {}
+        members: Dict[str, Tuple[List[str], List[str], List[str]]] = {}
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
                 ty = entry.entry_type()
@@ -721,7 +726,7 @@ class TarfileFilesystemRepository(FilesystemRepository):
     def unfiltered_iter(self):
         return self.inner.unfiltered_iter()
 
-    def delete(self, job: str):
+    def delete(self, job: str, /):
         return self.inner.delete(job)
 
     async def validate(self):

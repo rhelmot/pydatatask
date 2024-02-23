@@ -459,8 +459,7 @@ def lookup_dotted(
         for i, footprint_repo in enumerate(repo.footprint()):
             if i == footprint_idx:
                 return footprint_repo
-        else:
-            raise KeyError("Implicit dependency " + footprint_idx_str)
+        raise KeyError("Implicit dependency " + footprint_idx_str)
 
     item: Union[repomodule.Repository, taskmodule.Task]
     if "." in ref:
@@ -714,11 +713,14 @@ async def _repo_copy_meta(repo_src: repomodule.MetadataRepository, repo_dst: rep
 
 async def _repo_copy_fs(repo_src: repomodule.FilesystemRepository, repo_dst: repomodule.FilesystemRepository):
     # probably want to specify something about whether to use dump or dump tarball
-    async for ident in repo_src:
-        queue = AsyncQueueStream()
-
+    def make_writer(repo_src, ident, queue):
         async def write_then_close():
             await repo_src.get_tarball(ident, queue)
             queue.close()
 
-        await asyncio.gather(repo_dst.dump_tarball(ident, queue), write_then_close())
+        return write_then_close
+
+    async for ident in repo_src:
+        queue = AsyncQueueStream()
+
+        await asyncio.gather(repo_dst.dump_tarball(ident, queue), make_writer(repo_src, ident, queue)())

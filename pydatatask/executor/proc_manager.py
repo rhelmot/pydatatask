@@ -273,7 +273,8 @@ class LocalLinuxManager(AbstractProcessManager):
                 env=env,
             )
             fp.write(
-                f"Launched agent version {pipeline.agent_version} pid {p.pid} pipeline {pipeline.source_file} port {pipeline.agent_port}".encode()
+                f"Launched agent version {pipeline.agent_version} pid {p.pid} "
+                f"pipeline {pipeline.source_file} port {pipeline.agent_port}".encode()
             )
         agent_path = self.tmp_path / "agent"
         await self.mkdir(self.tmp_path)

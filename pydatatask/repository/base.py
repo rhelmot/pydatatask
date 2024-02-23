@@ -21,7 +21,6 @@ import logging
 import os
 import string
 
-from aiofiles.threadpool.binary import AsyncFileIO
 import aiofiles.os
 import yaml
 
@@ -819,33 +818,49 @@ class BlockingRepository(Repository):
         await self.source.delete(job)
 
 
-class YamlMetadataRepository(BlobRepository, MetadataRepository, ABC):
+class YamlMetadataRepository(MetadataRepository, ABC):
     """A metadata repository based on a blob repository. When info is accessed, it will **load the target file into
     memory**, parse it as yaml, and return the resulting object.
 
     This is a base class, and must be overridden to implement the blob loading portion.
     """
 
+    def __init__(self, blob: BlobRepository):
+        super().__init__()
+        self.blob = blob
+
+    def footprint(self):
+        yield from self.blob.footprint()
+
+    def __getstate__(self):
+        return (self.blob,)
+
+    def unfiltered_iter(self):
+        return self.blob.unfiltered_iter()
+
+    def delete(self, job, /):
+        return self.blob.delete(job)
+
     @job_getter
     async def info(self, job, /):
-        async with await self.open(job, "rb") as fp:
+        async with await self.blob.open(job, "rb") as fp:
             s = await fp.read()
         return yaml.safe_load(s)
 
     @job_getter
     async def dump(self, job, data, /):
-        if not self.is_valid_job_id(job):
+        if not self.blob.is_valid_job_id(job):
             raise KeyError(job)
         s = yaml.safe_dump(data, None)
-        async with await self.open(job, "w") as fp:
+        async with await self.blob.open(job, "w") as fp:
             await fp.write(s)
 
 
-class YamlMetadataFileRepository(YamlMetadataRepository, FileRepository):
+class YamlMetadataFileRepository(YamlMetadataRepository):
     """A metadata repository based on a file blob repository."""
 
     def __init__(self, basedir: Union[str, Path], extension: str = ".yaml", case_insensitive: bool = False):
-        super().__init__(basedir, extension=extension, case_insensitive=case_insensitive)
+        super().__init__(FileRepository(basedir, extension=extension, case_insensitive=case_insensitive))
 
 
 class ExecutorLiveRepo(Repository):
@@ -1106,7 +1121,7 @@ class CompressedBlobRepository(BlobRepository):
             raise NotImplementedError("Take your sensitive ass back to .decode()")
         if mode == "rb":
             # ULTIMATE HACKS
-            proc = await asyncio.subprocess.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 "gzip", "-d", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
             )
             assert proc.stdin is not None
@@ -1118,7 +1133,7 @@ class CompressedBlobRepository(BlobRepository):
             await proc.wait()
         elif mode == "wb":
             # ULTIMATE HACKS II
-            proc = await asyncio.subprocess.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 "gzip", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
             )
             assert proc.stdin is not None
@@ -1141,7 +1156,7 @@ class CompressedBlobRepository(BlobRepository):
     async def validate(self):
         await self.inner.validate()
 
-    def delete(self, job):
+    def delete(self, job, /):
         return self.inner.delete(job)
 
     def unfiltered_iter(self):
