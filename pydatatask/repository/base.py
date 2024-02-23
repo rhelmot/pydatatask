@@ -841,6 +841,9 @@ class YamlMetadataRepository(MetadataRepository, ABC):
     def delete(self, job, /):
         return self.blob.delete(job)
 
+    def validate(self):
+        return self.blob.validate()
+
     @job_getter
     async def info(self, job, /):
         async with await self.blob.open(job, "rb") as fp:
