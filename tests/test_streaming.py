@@ -1,7 +1,6 @@
 from typing import cast
 import asyncio
 import getpass
-import os
 import pathlib
 import subprocess
 import unittest
@@ -21,8 +20,6 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
     async def test_streaming(self):
         staging = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.yaml")
         allocated = staging.allocate(default_allocators_temp, Dispatcher("TempLinux", {"app": "test_streaming"}))
-        # allocated.save()
-        # allocated = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.lock")
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task = cast(ProcessTask, pipeline.tasks["task"])

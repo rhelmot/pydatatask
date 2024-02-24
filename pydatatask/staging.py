@@ -18,6 +18,8 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Union,
+    cast,
     get_args,
     get_origin,
 )
@@ -261,7 +263,7 @@ class PipelineStaging:
 
     def __init__(
         self,
-        filepath: Optional[Path] = None,
+        config: Union[None, Path, PipelineSpec] = None,
         basedir: Optional[Path] = None,
         params: Optional[PipelineChildArgs] = None,
     ):
@@ -272,7 +274,7 @@ class PipelineStaging:
         self.repos_promised_by_parents: Set[str] = set()
         self.executors_promised_by_parents: Set[str] = set()
 
-        if filepath is None:
+        if config is None:
             if basedir is None:
                 raise TypeError("Must provide basedir if you don't provide filepath")
 
@@ -284,13 +286,18 @@ class PipelineStaging:
             if basedir is not None:
                 raise TypeError("Cannot provide basedir if filepath is not None")
 
-            self.basedir = filepath.parent
-            self.filename = filepath.name
+            if isinstance(config, Path):
+                self.basedir = config.parent
+                self.filename = config.name
 
-            with open(filepath, "r", encoding="utf-8") as fp:
-                spec_dict = yaml.safe_load(fp)
-            self.spec = PipelineSpec(**spec_dict)
-            self.spec.desugar()
+                with open(config, "r", encoding="utf-8") as fp:
+                    spec_dict = yaml.safe_load(fp)
+                self.spec = PipelineSpec(**spec_dict)
+                self.spec.desugar()
+            else:
+                self.spec = config
+                self.basedir = Path(".")
+                self.filename = "DOES_NOT_EXIST"  # um.
 
             if params is None:
                 params = PipelineChildArgs()
@@ -469,7 +476,9 @@ class PipelineStaging:
     ) -> "PipelineStaging":
         """Lock a pipeline, generating a new PipelineStaging which imports this one and specifies all of its missing
         dependencies."""
-        spec, repos, executors = self.missing().allocate(repo_allocators, default_executor).specify()
+        missing = self.missing()
+        args = missing.allocate(repo_allocators, default_executor)
+        spec, repos, executors = args.specify()
         for child in self._iter_children():
             if child.spec.lockstep:
                 if (
@@ -484,7 +493,7 @@ class PipelineStaging:
                     )
 
         result = PipelineStaging(basedir=self.basedir)
-        result.children["locked"] = self
+        result.children["locked"] = PipelineStaging(self.spec, params=args)
         result.spec.repos.update(repos)
         result.spec.executors.update(executors)
         result.spec.imports["locked"] = spec

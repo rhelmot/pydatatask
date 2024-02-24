@@ -829,8 +829,9 @@ class YamlMetadataRepository(MetadataRepository, ABC):
         super().__init__()
         self.blob = blob
 
+    # better backup
     def footprint(self):
-        yield from self.blob.footprint()
+        yield self
 
     def __getstate__(self):
         return (self.blob,)
