@@ -1,7 +1,11 @@
+from typing import Any, Dict, List, Optional, Set, Tuple
+from collections.abc import Iterator
 from pathlib import Path
 import argparse
 import asyncio
 import getpass
+import os
+import shutil
 import sys
 import tempfile
 
@@ -57,6 +61,32 @@ async def get_ip() -> str:
             await docker.close()
 
 
+def walk_obj(obj: Any, duplicates: bool = False, seen: Optional[Set[int]] = None) -> Iterator[Tuple[Any, List[Any]]]:
+    if seen is None:
+        seen = set()
+    results: Dict[int, Any] = {}
+    if isinstance(obj, list):
+        results.update({id(x): x for x in obj})
+    if isinstance(obj, dict):
+        results.update({id(x): x for x in obj.keys()})
+        results.update({id(x): x for x in obj.values()})
+    if hasattr(obj, "__dict__"):
+        results.update({id(x): x for x in obj.__dict__.values()})
+    if hasattr(obj, "__slots__"):
+        results.update({id(x): x for x in obj.__slots__})  # type: ignore
+    for ident in seen:
+        results.pop(ident, None)
+    if duplicates:
+        new_seen = seen | set(results)
+    else:
+        new_seen = seen
+        seen.update(results)
+    output = list(results.values())
+    yield obj, output
+    for sub in output:
+        yield from walk_obj(sub, duplicates, new_seen)
+
+
 def main():
     all_allocators = {
         "local": default_allocators_local,
@@ -83,6 +113,11 @@ def main():
         help="Cap the execution of long running tasks to the given number of minutes",
         type=float,
     )
+    parser.add_argument(
+        "--unlock",
+        action="store_true",
+        help="Tear down resources associated with the current lockfile, but don't set up a new lockfile",
+    )
     parsed = parser.parse_args()
 
     allocators = all_allocators[parsed.repo_allocator]
@@ -91,9 +126,31 @@ def main():
     if cfgpath is None:
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
+    lockfile = cfgpath.with_suffix(".lock")
+    if lockfile.exists():
+        locked = PipelineStaging(lockfile)
+        pipeline = locked.instantiate()
+
+        # HACK
+        executor = LocalLinuxManager(cfgpath.name)
+        asyncio.run(executor.teardown_agent())
+
+        # HACK
+        for obj, _ in walk_obj(locked.spec.repos):
+            if isinstance(obj, (str, Path)) and str(obj).startswith("/tmp/pydatatask") and os.path.exists(obj):
+                shutil.rmtree(obj)
+
+        lockfile.unlink()
+        if parsed.unlock:
+            return
+    else:
+        if parsed.unlock:
+            print("Error: no lockfile to unlock")
+            return 1
+
     spec = PipelineStaging(cfgpath)
     locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}))
-    locked.filename = cfgpath.with_suffix(".lock").name
+    locked.filename = lockfile.name
     locked.spec.long_running_timeout = parsed.long_running_timeout
 
     locked.spec.agent_hosts[None] = asyncio.run(get_ip())
@@ -101,6 +158,8 @@ def main():
 
     locked = PipelineStaging(locked.basedir / locked.filename)
     pipeline = locked.instantiate()
+
+    # HACK
     executor = LocalLinuxManager(cfgpath.name)
     asyncio.run(executor.launch_agent(pipeline))
 
