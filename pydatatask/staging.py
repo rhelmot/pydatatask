@@ -19,7 +19,6 @@ from typing import (
     Set,
     Tuple,
     Union,
-    cast,
     get_args,
     get_origin,
 )

@@ -1,5 +1,4 @@
-from typing import Any, Dict, List, Optional, Set, Tuple
-from collections.abc import Iterator
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 from pathlib import Path
 import argparse
 import asyncio
