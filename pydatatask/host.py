@@ -73,6 +73,7 @@ class Host:
             FILENAME="{filename}"
              {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
             ERR_FILENAME=$(mktemp)
+            if ! [ -e "$FILENAME" ]; then echo "mk_http_post target $FILENAME does not exist" && false; fi
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
             wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
                 curl {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
