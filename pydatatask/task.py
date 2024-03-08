@@ -125,7 +125,13 @@ async def render_template(template, template_env: Dict[str, Any]):
     else:
         template_str = template
     templating = j.from_string(template_str)
-    return await templating.render_async(**template_env)
+    try:
+        return await templating.render_async(**template_env)
+    except Exception as e:
+        if await aiofiles.os.path.isfile(template):
+            raise ValueError(template + " generated an exception") from e
+        else:
+            raise ValueError("The following template generated an exception:\n" + template_str) from e
 
 
 class LinkKind(Enum):
