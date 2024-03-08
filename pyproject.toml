@@ -42,6 +42,7 @@ dependencies = [
     "ply",
     "check-jsonschema",
     "uvloop",
+    "jsonschema",
 ]
 
 [project.scripts]
@@ -70,7 +71,8 @@ type = [
     "types-aiofiles",
     "types-psutil",
     "pyfuse3-stubs",
-    "types-python-dateutil"
+    "types-python-dateutil",
+    "types-jsonschema",
 ]
 test = [
     "pytest",

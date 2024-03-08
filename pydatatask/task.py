@@ -130,8 +130,7 @@ async def render_template(template, template_env: Dict[str, Any]):
     except Exception as e:
         if await aiofiles.os.path.isfile(template):
             raise ValueError(template + " generated an exception") from e
-        else:
-            raise ValueError("The following template generated an exception:\n" + template_str) from e
+        raise ValueError("The following template generated an exception:\n" + template_str) from e
 
 
 class LinkKind(Enum):

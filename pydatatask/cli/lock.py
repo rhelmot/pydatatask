@@ -45,6 +45,7 @@ def default_allocators_local(spec: RepoClassSpec) -> Dispatcher:
     else:
         raise ValueError("Cannot allocate repository type %s as local" % spec.cls)
     result.args["compress_backup"] = spec.compress_backup
+    result.args["schema"] = spec.schema
     return result
 
 

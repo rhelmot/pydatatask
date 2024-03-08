@@ -135,21 +135,29 @@ class PipelineChildSpec:
 
 @_dataclass_serial
 class PipelineChildArgs:
-    repos: Dict[str, Optional[Dispatcher]] = field(default_factory=dict)  # {child's name: dispatcher}
+    repos: Dict[str, Union[Dispatcher, "RepoClassSpec"]] = field(default_factory=dict)  # {child's name: dispatcher}
     executors: Dict[str, Optional[Dispatcher]] = field(default_factory=dict)  # {task name: our executor's name}
     imports: Dict[str, "PipelineChildArgs"] = field(default_factory=dict)
 
     def specify(self, prefix: str = "") -> Tuple[PipelineChildSpec, Dict[str, Dispatcher], Dict[str, Dispatcher]]:
         result = PipelineChildSpec()
         result_executors = {f"{prefix}{name}": value for name, value in self.executors.items() if value is not None}
-        result_repos = {f"{prefix}{name}": value for name, value in self.repos.items() if value is not None}
+        result_repos = {f"{prefix}{name}": value for name, value in self.repos.items() if isinstance(value, Dispatcher)}
         result.executors = {f"{name}": f"{prefix}{name}" for name in self.executors}
         result.repos = {f"{name}": f"{prefix}{name}" for name in self.repos}
         for imp_name, imp_args in self.imports.items():
             subresult, subrepos, subexecutors = imp_args.specify(prefix=f"{imp_name}_{prefix}")
             result.imports[imp_name] = subresult
             result_executors.update(subexecutors)
-            result_repos.update(subrepos)
+            for name, dispatcher in subrepos.items():
+                if name in result_repos:
+                    old_dispatcher = result_repos[name]
+                    old_schema = old_dispatcher.args["schema"]
+                    new_schema = dispatcher.args["schema"]
+                    if old_schema is not None and new_schema is not None and old_schema != new_schema:
+                        raise ValueError("Two classes for the same metadata repository have different schemas!")
+                    dispatcher.args["schema"] = old_schema or new_schema
+                result_repos[name] = dispatcher
         return result, result_repos, result_executors
 
 
@@ -165,7 +173,7 @@ class PipelineChildArgsMissing:
     def allocate(
         self, repo_allocators: Callable[["RepoClassSpec"], Dispatcher], default_executor: Optional[Dispatcher]
     ) -> PipelineChildArgs:
-        new_repos: Dict[str, Optional[Dispatcher]] = {}
+        new_repos: Dict[str, Union[Dispatcher, RepoClassSpec]] = {}
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
@@ -201,6 +209,7 @@ class RepoClassSpec:
     cls: str
     compress_backend: bool = False
     compress_backup: bool = False
+    schema: Optional[Dict[str, Any]] = None
 
 
 @_dataclass_serial
@@ -270,7 +279,7 @@ class PipelineStaging:
         self.children: Dict[str, PipelineStaging] = {}
         self.repos_fulfilled_by_parents: Dict[str, Dispatcher] = {}
         self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
-        self.repos_promised_by_parents: Set[str] = set()
+        self.repos_promised_by_parents: Dict[str, RepoClassSpec] = {}
         self.executors_promised_by_parents: Set[str] = set()
 
         if config is None:
@@ -302,10 +311,17 @@ class PipelineStaging:
                 params = PipelineChildArgs()
 
             self.children = {}
-            self.repos_fulfilled_by_parents = {k: v for k, v in params.repos.items() if v is not None}
-            self.repos_promised_by_parents = {k for k, v in params.repos.items() if v is None}
+            self.repos_fulfilled_by_parents = {k: v for k, v in params.repos.items() if isinstance(v, Dispatcher)}
+            self.repos_promised_by_parents = {k: v for k, v in params.repos.items() if isinstance(v, RepoClassSpec)}
             self.executors_fulfilled_by_parents = {k: v for k, v in params.executors.items() if v is not None}
             self.executors_promised_by_parents = {k for k, v in params.executors.items() if v is None}
+
+            for k, v in self.repos_promised_by_parents.items():
+                if k in self.spec.repo_classes:
+                    v2 = self.spec.repo_classes[k]
+                    if v.schema is not None and v2.schema is not None and v.schema != v2.schema:
+                        raise ValueError(f"Disagreement on schema for {k} in {self.filename}")
+                    v2.schema = v.schema = v.schema or v2.schema
 
             unused = (
                 (set(self.repos_fulfilled_by_parents) | set(self.repos_promised_by_parents))
@@ -330,12 +346,16 @@ class PipelineStaging:
 
                 self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
 
-    def _get_repo(self, name: str) -> Optional[Dispatcher]:
+    def _get_repo(self, name: str) -> Union[Dispatcher, RepoClassSpec]:
         if name in self.repos_fulfilled_by_parents:
             return self.repos_fulfilled_by_parents[name]
         if name in self.spec.repos:
             return self.spec.repos[name]
-        return None
+        if name in self.repos_promised_by_parents:
+            return self.repos_promised_by_parents[name]
+        if name in self.spec.repo_classes:
+            return self.spec.repo_classes[name]
+        raise KeyError(name)
 
     def _get_executor(self, name: str) -> Optional[Dispatcher]:
         if name in self.executors_fulfilled_by_parents:

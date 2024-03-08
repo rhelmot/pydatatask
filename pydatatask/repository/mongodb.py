@@ -66,6 +66,7 @@ class MongoMetadataRepository(MetadataRepository):
 
     @job_getter
     async def dump(self, job, data, /):
+        self.schema_validate(data)
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         await self.collection.replace_one({"_id": job}, data, upsert=True)

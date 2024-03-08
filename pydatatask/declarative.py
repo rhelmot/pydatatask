@@ -271,15 +271,19 @@ def make_annotated_constructor(
     def inner_constructor(**kwargs):
         annotations = kwargs.pop("annotations", {})
         compress = kwargs.pop("compress_backup", False)
+        schema = kwargs.pop("schema", None)
         result = constructor(**kwargs)
         result.annotations.update(annotations)  # type: ignore
         # sketchy...
         if compress:
             result.compress_backup = compress  # type: ignore
+        if schema:
+            result.schema = schema  # type: ignore
         return result
 
     schema["annotations"] = lambda x: x
     schema["compress_backup"] = lambda x: x
+    schema["schema"] = lambda x: x
     return make_constructor(name, inner_constructor, schema)
 
 

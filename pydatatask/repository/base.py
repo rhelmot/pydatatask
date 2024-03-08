@@ -22,6 +22,7 @@ import os
 import string
 
 import aiofiles.os
+import jsonschema
 import yaml
 
 from .. import repository as repomodule
@@ -196,6 +197,19 @@ class Repository(ABC):
 class MetadataRepository(Repository, ABC):
     """A metadata repository has values which are small, structured data, and loads them entirely into memory,
     returning the structured data from the `info` method."""
+
+    def __init__(self, schema: Optional[Any] = None):
+        super().__init__()
+        self.schema = schema
+
+    def schema_validate(self, data: Any) -> None:
+        """Check if the given data matches the provided repository schema.
+
+        Will raise an exception if it does not.
+        """
+        if self.schema is None:
+            return
+        jsonschema.validate(data, self.schema)
 
     def construct_backup_repo(self, path: Path, force_compress: Optional[bool] = None) -> "MetadataRepository":
         """Construct a repository appropriate for backing up this repository to the given path."""
@@ -853,6 +867,7 @@ class YamlMetadataRepository(MetadataRepository, ABC):
 
     @job_getter
     async def dump(self, job, data, /):
+        self.schema_validate(data)
         if not self.blob.is_valid_job_id(job):
             raise KeyError(job)
         s = yaml.safe_dump(data, None)
@@ -924,6 +939,7 @@ class InProcessMetadataRepository(MetadataRepository):
 
     @job_getter
     async def dump(self, job, data, /):
+        self.schema_validate(data)
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         self.data[job] = data
