@@ -218,7 +218,10 @@ class DockerContainerManager(AbstractContainerManager):
         self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
     ) -> Tuple[bytes, Dict[str, Any]]:
         log = "".join(line for line in await container.log(stdout=True, stderr=True)).encode()
-        await container.delete()
+        try:
+            await container.delete()
+        except:
+            pass
         info["timed_out"] = timed_out
         now = datetime.now(tz=timezone.utc)
         meta = {
