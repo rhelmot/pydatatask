@@ -268,7 +268,7 @@ class Task(ABC):
             (domainpath,) = splitsies
         else:
             _, domainpath = splitsies
-        domain, path = domainpath.split("/", 1)
+        _, path = domainpath.split("/", 1)
         return self.host.mk_http_get("/dev/stderr", f"{self.agent_url}/errors/{path}", headers)
 
     def mk_http_get(self, filename: str, url: str, headers: Dict[str, str], handle_err: str = "") -> Any:

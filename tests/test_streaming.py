@@ -49,7 +49,6 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
                 await inputBlob.blobdump("103", "done")
                 await inputBlob.blobdump("104", "ho")
                 await asyncio.sleep(0.5)
-                breakpoint()
                 assert await pipeline.update()
                 i = 0
                 while await pipeline.update():
