@@ -5,6 +5,10 @@ This is the only hammer you will ever need, if you are okay with that hammer kin
 
 from __future__ import annotations
 
+from typing import Dict, Tuple
+import time
+import traceback
+
 from aiohttp import web
 import yaml
 
@@ -21,15 +25,24 @@ from .pipeline import Pipeline
 
 def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Application:
     """Given a pipeline, generate an aiohttp web app to serve its repositories."""
-    app = web.Application()
 
-    def authorize(f):
-        async def inner(request: web.Request) -> web.StreamResponse:
-            if request.cookies.get("secret", None) != pipeline.agent_secret:
-                raise web.HTTPForbidden()
-            return await f(request)
+    error_log: Dict[str, Tuple[float, str]] = {}
 
-        return inner
+    @web.middleware
+    async def authorize_middleware(request, handler):
+        if request.cookies.get("secret", None) != pipeline.agent_secret:
+            raise web.HTTPForbidden()
+        return await handler(request)
+
+    @web.middleware
+    async def error_handling_middleware(request: web.Request, handler):
+        try:
+            return await handler(request)
+        except Exception:
+            error_log[request.path] = (time.time(), traceback.format_exc())
+            raise
+
+    app = web.Application(middlewares=[authorize_middleware, error_handling_middleware])
 
     def parse(f):
         async def inner(request: web.Request) -> web.StreamResponse:
@@ -41,7 +54,6 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
 
         return inner
 
-    @authorize
     @parse
     async def get(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
         response = web.StreamResponse()
@@ -50,7 +62,6 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await response.write_eof()
         return response
 
-    @authorize
     async def post(request: web.Request) -> web.StreamResponse:
         try:
             task = pipeline.tasks[request.match_info["task"]]
@@ -65,7 +76,6 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await inject_data(repo, job, content)
         return web.Response(text=job)
 
-    @authorize
     async def stream(request: web.Request) -> web.StreamResponse:
         try:
             task = pipeline.tasks[request.match_info["task"]]
@@ -79,7 +89,6 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await response.write_eof()
         return response
 
-    @authorize
     async def query(request: web.Request) -> web.StreamResponse:
         try:
             task = pipeline.tasks[request.match_info["task"]]
@@ -99,7 +108,6 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await response.write_eof()
         return response
 
-    @authorize
     async def cokey_post(request: web.Request) -> web.StreamResponse:
         try:
             task = pipeline.tasks[request.match_info["task"]]
@@ -115,12 +123,21 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         await inject_data(repo, job, content)
         return web.Response(text=job)
 
+    async def errors(request: web.Request) -> web.StreamResponse:
+        path = "/" + request.match_info["path"]
+        if path not in error_log:
+            return web.Response(text="No logged errors for this endpoint...")
+        else:
+            ts, err = error_log[path]
+            return web.Response(text=f"Error from {time.time() - ts} seconds ago:\n{err}")
+
     app.add_routes([web.get("/data/{task}/{link}/{job}", get), web.post("/data/{task}/{link}/{job}", post)])
     app.add_routes([web.get("/stream/{task}/{link}/{job}", stream)])
     app.add_routes([web.post("/query/{task}/{query}", query)])
     app.add_routes([web.post("/cokeydata/{task}/{link}/{cokey}/{job}", cokey_post)])
+    app.add_routes([web.get("/errors/{path:.*}", errors)])
 
-    async def on_startup(_app):
+    async def on_startup(_app: web.Application):
         await pipeline.open()
 
     async def on_shutdown(_app):

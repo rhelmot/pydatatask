@@ -15,11 +15,19 @@ __all__ = (
     "localhost_docker_manager",
     "SSHLinuxFile",
     "SSHLinuxManager",
+    "InProcessLocalLinuxManager",
 )
 
 from .base import Executor
 from .pod_manager import PodManager
-from .proc_manager import AbstractProcessManager, LocalLinuxManager, localhost_manager, SSHLinuxFile, SSHLinuxManager
+from .proc_manager import (
+    AbstractProcessManager,
+    LocalLinuxManager,
+    localhost_manager,
+    SSHLinuxFile,
+    SSHLinuxManager,
+    InProcessLocalLinuxManager,
+)
 from .container_manager import (
     AbstractContainerManager,
     DockerContainerManager,

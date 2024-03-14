@@ -261,12 +261,22 @@ class Task(ABC):
         """Generate a temporary filepath for the task host system."""
         return self.host.mktemp(identifier)
 
-    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str]) -> Any:
+    def mk_error_handler(self, agent_url, headers):
+        """Generate a script which should handle an error for the given agent URL."""
+        splitsies = agent_url.split("://", 1)
+        if len(splitsies) == 1:
+            (domainpath,) = splitsies
+        else:
+            _, domainpath = splitsies
+        domain, path = domainpath.split("/", 1)
+        return self.host.mk_http_get("/dev/stderr", f"{self.agent_url}/errors/{path}", headers)
+
+    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str], handle_err: str = "") -> Any:
         """Generate logic to perform an http download for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace)
+        return self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace, handle_err=handle_err)
 
     def mk_http_post(
         self, filename: str, url: str, headers: Dict[str, str], output_filename: Optional[str] = None
@@ -284,11 +294,14 @@ class Task(ABC):
         """
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        url = f"{self.agent_url}/data/{self.name}/{link_name}/{job}"
+        headers = {"Cookie": "secret=" + self.agent_secret}
         result = self.host.mk_http_get(
             payload_filename,
-            f"{self.agent_url}/data/{self.name}/{link_name}/{job}",
-            {"Cookie": "secret=" + self.agent_secret},
+            url,
+            headers,
             verbose=self.debug_trace,
+            handle_err=self.mk_error_handler(url, headers),
         )
         if is_filesystem:
             result += self.host.mk_unzip(filename, payload_filename)
@@ -301,12 +314,12 @@ class Task(ABC):
         """
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        url = f"{self.agent_url}/data/{self.name}/{link_name}/{job}" + (
+            f"?hostjob={hostjob}" if hostjob is not None else ""
+        )
+        headers = {"Cookie": "secret=" + self.agent_secret}
         result = self.host.mk_http_post(
-            payload_filename,
-            f"{self.agent_url}/data/{self.name}/{link_name}/{job}"
-            + (f"?hostjob={hostjob}" if hostjob is not None else ""),
-            {"Cookie": "secret=" + self.agent_secret},
-            verbose=self.debug_trace,
+            payload_filename, url, headers, verbose=self.debug_trace, handle_err=self.mk_error_handler(url, headers)
         )
         if is_filesystem:
             result = self.host.mk_zip(payload_filename, filename) + result
@@ -318,6 +331,8 @@ class Task(ABC):
         abstraction leak) for the given query.
         """
         parameters = self.queries[query_name].parameters
+        url = f"{self.agent_url}/query/{self.name}/{query_name}"
+        headers = {"Cookie": "secret=" + self.agent_secret}
         return (
             f"""
         query_{query_name}() {{
@@ -331,8 +346,8 @@ class Task(ABC):
             done
             {self.host.mk_http_post(
                 "$INPUT_FILE",
-                f"{self.agent_url}/query/{self.name}/{query_name}",
-                {"Cookie": "secret=" + self.agent_secret},
+                url,
+                headers,
                 "/dev/stdout",
                 verbose=self.debug_trace,
             )}
@@ -362,11 +377,14 @@ class Task(ABC):
         """Generate logic to upload a cokeyed link."""
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
+        url = f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}" + (
+            f"?hostjob={hostjob}" if hostjob is not None else ""
+        )
+        headers = {"Cookie": "secret=" + self.agent_secret}
         result = self.host.mk_http_post(
             payload_filename,
-            f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}"
-            + (f"?hostjob={hostjob}" if hostjob is not None else ""),
-            {"Cookie": "secret=" + self.agent_secret},
+            url,
+            headers,
             verbose=self.debug_trace,
         )
         if is_filesystem:
@@ -478,7 +496,7 @@ class Task(ABC):
             cd {filepath}
             while true; do
                 sleep 5
-                {self.mk_http_get(download, stream_url, stream_headers)}
+                {self.mk_http_get(download, stream_url, stream_headers, handle_err=self.mk_error_handler(stream_url, stream_headers))}
                 for ID in $(cat {download}); do
                     if ! [ -e "{scratch}/$ID" ]; then
                         {self.mk_repo_get(download, link_name, "$ID")}

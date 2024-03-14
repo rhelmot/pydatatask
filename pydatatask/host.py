@@ -37,7 +37,9 @@ class Host:
         else:
             raise TypeError(self.os)
 
-    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str], verbose: bool = False) -> str:
+    def mk_http_get(
+        self, filename: str, url: str, headers: Dict[str, str], verbose: bool = False, handle_err: str = ""
+    ) -> str:
         """Generate a shell script to perform an http download for the host system."""
         if self.os == HostOS.Linux:
             headers_str = " ".join(f'--header "{key}: {val}"' for key, val in headers.items())
@@ -48,7 +50,9 @@ class Host:
             if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
             wget {'-v' if verbose else '-q'} -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
                 curl {'-v' if verbose else ''} $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
-                (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME && false)
+                (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME
+                {handle_err}
+                false)
             rm $ERR_FILENAME
             cat $FILENAME >"{filename}"
             rm $FILENAME
@@ -63,6 +67,7 @@ class Host:
         headers: Dict[str, str],
         output_filename: Optional[str] = None,
         verbose: bool = False,
+        handle_err: str = "",
     ) -> str:
         """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
@@ -77,8 +82,9 @@ class Host:
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
             wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
                 curl {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
-                (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''} \\
-                    && false)
+                (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}
+                {handle_err}
+                false)
             rm $ERR_FILENAME
             {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
             """

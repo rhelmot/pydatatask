@@ -373,7 +373,8 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
                             fullpath.chmod(entry.mode)
                         except IsADirectoryError as e:
                             raise Exception(
-                                f"Something has gone VERY wrong - the path {ssubpath} purports to be a file but there is already a directory there"
+                                f"Something has gone VERY wrong - the path {ssubpath} "
+                                f"purports to be a file but there is already a directory there"
                             ) from e
                     else:
                         assert entry.link_target is not None

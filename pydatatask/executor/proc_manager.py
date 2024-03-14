@@ -44,7 +44,7 @@ from ..utils import _StderrIsStdout
 if TYPE_CHECKING:
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
 
-__all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager")
+__all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager", "InProcessLocalLinuxManager")
 
 
 class AbstractProcessManager(Executor):

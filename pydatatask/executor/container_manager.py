@@ -220,7 +220,7 @@ class DockerContainerManager(AbstractContainerManager):
         log = "".join(line for line in await container.log(stdout=True, stderr=True)).encode()
         try:
             await container.delete()
-        except:
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
         info["timed_out"] = timed_out
         now = datetime.now(tz=timezone.utc)
