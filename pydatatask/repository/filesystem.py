@@ -352,12 +352,13 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
 
     async def dump(self, job: str) -> AsyncGenerator[None, FilesystemEntry]:
         root = self.fullpath(job)
+        await aioshutil.rmtree(root, ignore_errors=True)
         try:
             while True:
                 entry = yield
                 subpath = Path(entry.name)
                 if subpath.is_absolute():
-                    ssubpath = os.path.join(*subpath.parts[1:])
+                    ssubpath = os.path.join(".", *subpath.parts[1:])
                 else:
                     ssubpath = str(subpath)
                 fullpath = root / ssubpath
@@ -365,10 +366,15 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
                     fullpath.parent.mkdir(exist_ok=True, parents=True)
                     if entry.type == FilesystemType.FILE:
                         assert entry.data is not None
-                        async with aopen(fullpath, "wb") as fp:
-                            await async_copyfile(entry.data, fp)
+                        try:
+                            async with aopen(fullpath, "wb") as fp:
+                                await async_copyfile(entry.data, fp)
 
-                        fullpath.chmod(entry.mode)
+                            fullpath.chmod(entry.mode)
+                        except IsADirectoryError as e:
+                            raise Exception(
+                                f"Something has gone VERY wrong - the path {ssubpath} purports to be a file but there is already a directory there"
+                            ) from e
                     else:
                         assert entry.link_target is not None
                         try:
