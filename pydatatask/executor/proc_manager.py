@@ -160,7 +160,11 @@ class LocalLinuxManager(AbstractProcessManager):
     def to_container_manager(self):
         return DockerContainerManager(self.app)
 
-    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}"):
+    def __init__(
+        self,
+        app: str,
+        local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
+    ):
         super().__init__(Path(local_path) / app)
         self.app = app
 
@@ -258,8 +262,9 @@ class LocalLinuxManager(AbstractProcessManager):
             await self.kill(pid)
 
         # lmao, hack
-        Path(f"/tmp/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
-        with open(f"/tmp/pydatatask-{getpass.getuser()}/agent-stdout", "ab") as fp:
+        tmp = os.environ.get("TEMP", "/tmp")
+        Path(f"{tmp}/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+        with open(f"{tmp}/pydatatask-{getpass.getuser()}/agent-stdout-{pipeline.agent_port}", "ab") as fp:
             env = dict(os.environ)
             env["PIPELINE_YAML"] = str(pipeline.source_file)
             p = await asyncio.create_subprocess_exec(
@@ -426,7 +431,11 @@ localhost_manager = LocalLinuxManager("default")
 class InProcessLocalLinuxManager(LocalLinuxManager):
     """A process manager for the local linux system which can launch an http agent inside the current process."""
 
-    def __init__(self, app: str, local_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}"):
+    def __init__(
+        self,
+        app: str,
+        local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
+    ):
         super().__init__(app, local_path)
 
         self.runner: Optional[web.AppRunner] = None

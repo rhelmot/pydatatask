@@ -25,7 +25,7 @@ def default_allocators_temp(spec: RepoClassSpec) -> Dispatcher:
 
 
 def default_allocators_local(spec: RepoClassSpec) -> Dispatcher:
-    path = Path(f"/tmp/pydatatask-{getpass.getuser()}")
+    path = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}")
     path.mkdir(exist_ok=True)
     basedir = tempfile.mkdtemp(dir=path)
     if spec.cls == "MetadataRepository":
@@ -137,7 +137,11 @@ def main():
 
         # HACK
         for obj, _ in walk_obj(locked.spec.repos):
-            if isinstance(obj, (str, Path)) and str(obj).startswith("/tmp/pydatatask") and os.path.exists(obj):
+            if (
+                isinstance(obj, (str, Path))
+                and str(obj).startswith(f"{os.environ.get('TEMP', '/tmp')}/pydatatask")
+                and os.path.exists(obj)
+            ):
                 shutil.rmtree(obj)
 
         lockfile.unlink()

@@ -1278,7 +1278,9 @@ class ProcessTask(ShellTask):
         )
 
         if pids is None:
-            pids = repomodule.YamlMetadataFileRepository(f"/tmp/pydatatask-{getpass.getuser()}/{name}_pids")
+            pids = repomodule.YamlMetadataFileRepository(
+                f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/{name}_pids"
+            )
 
         self.pids = pids
         setattr(self.pids, "_EXCLUDE_BACKUP", True)
