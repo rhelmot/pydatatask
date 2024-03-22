@@ -106,7 +106,7 @@ class DockerContainerManager(AbstractContainerManager):
 
     def _name_to_id(self, task: str, name: str) -> Optional[str]:
         name = name.strip("/")
-        prefix = f"{self.app}_{task}_"
+        prefix = f"{self.app}_{task}__"
         if name.startswith(prefix):
             return name[len(prefix) :]
         return None
