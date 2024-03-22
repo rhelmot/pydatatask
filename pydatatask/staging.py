@@ -319,6 +319,8 @@ class PipelineStaging:
             for k, v in self.repos_promised_by_parents.items():
                 if k in self.spec.repo_classes:
                     v2 = self.spec.repo_classes[k]
+                    if v.cls != v2.cls:
+                        raise ValueError(f"Disagreement on repo class for {k} in {self.filename}")
                     if v.schema is not None and v2.schema is not None and v.schema != v2.schema:
                         raise ValueError(f"Disagreement on schema for {k} in {self.filename}")
                     v2.schema = v.schema = v.schema or v2.schema
