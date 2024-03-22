@@ -106,13 +106,13 @@ class DockerContainerManager(AbstractContainerManager):
 
     def _name_to_id(self, task: str, name: str) -> Optional[str]:
         name = name.strip("/")
-        prefix = f"{self.app}_{task}___"
+        prefix = f"{self.app}___{task}___"
         if name.startswith(prefix):
             return name[len(prefix) :]
         return None
 
     def _id_to_name(self, task: str, ident: str) -> str:
-        return f"{self.app}_{task}_{ident}"
+        return f"{self.app}___{task}___{ident}"
 
     async def launch(
         self,
