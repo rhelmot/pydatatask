@@ -56,9 +56,19 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
 
     @parse
     async def get(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
+        meta = request.query.getone("meta", None) == "1"
+        subpath = request.query.getone("subpath", None)
         response = web.StreamResponse()
         await response.prepare(request)
-        await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
+        if isinstance(repo, repomodule.FilesystemRepository):
+            if meta:
+                await cat_fs_meta(repo, job, AWriteStreamBaseIntWrapper(response))
+            elif subpath:
+                await cat_fs_entry(repo, job, AWriteStreamBaseIntWrapper(response), subpath)
+            else:
+                await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
+        else:
+            await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
         await response.write_eof()
         return response
 
@@ -165,6 +175,23 @@ async def cat_data(item: repomodule.Repository, job: str, stream: AWriteStreamBa
         await item.get_tarball(job, stream)
     else:
         raise TypeError(type(item))
+
+
+async def cat_fs_meta(item: repomodule.FilesystemRepository, job: str, stream: AWriteStreamBase):
+    """Copy the manifest of one job of a filesystem repository to a stream."""
+    async for directory, dirs, files, links in item.walk(job):
+        for name in dirs:
+            await stream.write(f"{directory}/{name}/\n".encode())
+        for name in files:
+            await stream.write(f"{directory}/{name}\n".encode())
+        for name in links:
+            await stream.write(f"{directory}/{name}\n".encode())
+
+
+async def cat_fs_entry(item: repomodule.FilesystemRepository, job: str, stream: AWriteStreamBase, path: str):
+    """Copy one file of one job on a filesystem repository to a stream."""
+    async with await item.open(job, path) as fp:
+        await async_copyfile(fp, stream)
 
 
 async def inject_data(item: repomodule.Repository, job: str, stream: AReadStreamBase):
