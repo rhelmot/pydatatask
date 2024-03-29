@@ -98,6 +98,13 @@ class LinkSpec:
     cokeyed: Dict[str, str] = field(default_factory=dict)
     auto_meta: Optional[str] = None
     auto_values: Optional[Any] = None
+    required_for_start: Optional[bool] = None
+    required_for_output: Optional[bool] = None
+    inhibits_start: Optional[bool] = None
+    inhibits_output: Optional[bool] = None
+    is_input: Optional[bool] = None
+    is_output: Optional[bool] = None
+    is_status: Optional[bool] = None
 
 
 @_dataclass_serial

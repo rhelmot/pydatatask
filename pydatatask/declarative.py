@@ -69,6 +69,12 @@ def parse_bool(thing: Any) -> bool:
     raise ValueError(f"{type(thing)} is not valid as a bool")
 
 
+def parse_optional_bool(thing: Any) -> Optional[bool]:
+    if thing is None:
+        return None
+    return parse_bool(thing)
+
+
 _E = TypeVar("_E", bound=Enum)
 
 
@@ -571,13 +577,13 @@ def build_task_picker(
             "cokeyed": lambda thing: {x: repos[y] for x, y in thing.items()},
             "auto_meta": lambda thing: str(thing) if thing is not None else None,
             "auto_values": lambda thing: thing,
-            "is_input": parse_bool,
-            "is_output": parse_bool,
-            "is_status": parse_bool,
-            "inhibits_start": parse_bool,
-            "required_for_start": parse_bool,
-            "inhibits_output": parse_bool,
-            "required_for_output": parse_bool,
+            "is_input": parse_optional_bool,
+            "is_output": parse_optional_bool,
+            "is_status": parse_optional_bool,
+            "inhibits_start": parse_optional_bool,
+            "required_for_start": parse_optional_bool,
+            "inhibits_output": parse_optional_bool,
+            "required_for_output": parse_optional_bool,
         },
     )
     links_constructor = make_dict_parser("links", str, link_constructor)

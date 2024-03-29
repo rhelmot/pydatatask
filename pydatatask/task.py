@@ -562,7 +562,7 @@ class Task(ABC):
         auto_values: Optional[Any] = None,
         is_input: Optional[bool] = None,
         is_output: Optional[bool] = None,
-        is_status: bool = False,
+        is_status: Optional[bool] = None,
         inhibits_start: Optional[bool] = None,
         required_for_start: Optional[Union[bool, str]] = None,
         inhibits_output: Optional[bool] = None,
@@ -598,6 +598,8 @@ class Task(ABC):
                 required_for_start = False
         if is_output is None:
             is_output = kind in OUTPUT_KINDS
+        if is_status is None:
+            is_status = False
         if required_for_start is None:
             required_for_start = is_input
         if inhibits_start is None:
