@@ -1,0 +1,32 @@
+repos:
+  filteredInputs:
+    cls: QueryMetadata
+    args:
+      query: inputs.filter[.getworks]()
+      getters:
+       works: Bool
+repo_classes:
+  inputs: MetadataRepository
+  done0: MetadataRepository
+  done1: MetadataRepository
+tasks:
+  task0:
+    done: done0
+    executable:
+      cls: Process
+      args:
+        template: 'false'
+    links:
+      output:
+        repo: inputs
+        kind: OutputFilepath
+  task1:
+    done: done1
+    executable:
+      cls: Process
+      args:
+        template: 'false'
+    links:
+      input:
+        repo: filteredInputs
+        kind: InputMetadata
