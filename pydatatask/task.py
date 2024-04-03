@@ -1905,6 +1905,7 @@ class ContainerTask(ShellTask):
         tty: Optional[bool] = False,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
+        host_mounts: Optional[Dict[str, str]] = None,
     ):
         """
         :param name: The name of this task.
@@ -1946,6 +1947,7 @@ class ContainerTask(ShellTask):
         self.privileged = privileged
         self.tty = tty
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
+        self.host_mounts = host_mounts or {}
 
         self.quota_manager.register(self._get_load)
 
@@ -2050,4 +2052,5 @@ class ContainerTask(ShellTask):
             mounts,
             privileged,
             tty,
+            host_mounts=self.host_mounts,
         )

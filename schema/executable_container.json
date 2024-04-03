@@ -28,6 +28,12 @@
         "privileged": {
           "type": "boolean"
         },
+        "host_mounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "tty": {
           "type": "boolean"
         }

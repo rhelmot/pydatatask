@@ -691,6 +691,7 @@ def build_task_picker(
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,
+                "host_mounts": make_dict_parser("host_mounts", str, str),
                 # fmt: on
             },
         ),

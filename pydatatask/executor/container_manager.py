@@ -38,6 +38,7 @@ class AbstractContainerManager(ABC, Executor):
         mounts: List[Tuple[str, str]],
         privileged: bool,
         tty: bool,
+        host_mounts: Optional[Dict[str, str]] = None,
     ):
         """Launch a container with the given parameters.
 
@@ -126,6 +127,7 @@ class DockerContainerManager(AbstractContainerManager):
         mounts: List[Tuple[str, str]],
         privileged: bool,
         tty: bool,
+        host_mounts: Optional[Dict[str, str]] = None,
     ):
         await self.docker.containers.run(
             {
@@ -139,7 +141,7 @@ class DockerContainerManager(AbstractContainerManager):
                 "Cmd": cmd,
                 "Env": [f"{key}={val}" for key, val in environ.items()],
                 "HostConfig": {
-                    "Binds": [f"{a}:{b}" for a, b in mounts],
+                    "Binds": [f"{a}:{b}" for a, b in mounts] + [f"{a}:{b}" for a, b in (host_mounts or {}).items()],
                     "Privileged": privileged,
                 },
             },
@@ -257,8 +259,9 @@ class KubeContainerManager(AbstractContainerManager):
         mounts: List[Tuple[str, str]],
         privileged: bool,
         tty: bool,
+        host_mounts: Optional[Dict[str, str]] = None,
     ):
-        if mounts:
+        if mounts or host_mounts:
             raise ValueError("Cannot do mounts from a container on a kube cluster")
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
