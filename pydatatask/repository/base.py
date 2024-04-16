@@ -136,7 +136,13 @@ class Repository(ABC):
         raise NotImplementedError
 
     async def template(
-        self, job: str, task: taskmodule.Task, kind: taskmodule.LinkKind, link_name: str, hostjob: Optional[str] = None
+        self,
+        job: str,
+        task: taskmodule.Task,
+        kind: taskmodule.LinkKind,
+        link_name: str,
+        hostjob: Optional[str] = None,
+        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
@@ -163,11 +169,15 @@ class Repository(ABC):
                 filepath, epilogue=task.mk_repo_put(filepath, link_name, job), preamble=preamble
             )
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
-            filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
+            if force_path is None:
+                filepath = task.mktemp(f"streaming-output-{link_name}-{job}")
+            else:
+                filepath = force_path
             preamble, epilogue, extra_dirs = task.mk_watchdir_upload(
                 filepath,
                 link_name,
                 hostjob,
+                mkdir=force_path is None,
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:

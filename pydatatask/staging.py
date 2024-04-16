@@ -105,6 +105,7 @@ class LinkSpec:
     is_input: Optional[bool] = None
     is_output: Optional[bool] = None
     is_status: Optional[bool] = None
+    force_path: Optional[str] = None
 
 
 @_dataclass_serial

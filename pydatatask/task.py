@@ -184,6 +184,7 @@ class Link:
     required_for_start: Union[bool, str] = False
     inhibits_output: bool = False
     required_for_output: bool = False
+    force_path: Optional[str] = None
 
 
 class Task(ABC):
@@ -399,7 +400,12 @@ class Task(ABC):
         return self.host.mk_mkdir(filepath)
 
     def mk_watchdir_upload(
-        self, filepath: str, link_name: str, hostjob: Optional[str]
+        self,
+        filepath: str,
+        link_name: str,
+        hostjob: Optional[str],
+        force_upload_dir: Optional[str] = None,
+        mkdir: bool = True,
     ) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
@@ -408,7 +414,7 @@ class Task(ABC):
         # leaky abstraction!
         if self.host.os != HostOS.Linux:
             raise ValueError("Not sure how to do this off of linux")
-        upload = self.host.mktemp("upload")
+        upload = self.host.mktemp("upload") if force_upload_dir is None else force_upload_dir
         scratch = self.host.mktemp("scratch")
         finished = self.host.mktemp("finished")
         lock = self.host.mktemp("lock")
@@ -426,7 +432,7 @@ class Task(ABC):
 
         return (
             f"""
-        {self.host.mk_mkdir(filepath)}
+        {self.host.mk_mkdir(filepath) if mkdir else ""}
         {self.host.mk_mkdir(scratch)}
         {self.host.mk_mkdir(lock)}
         {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
@@ -442,6 +448,9 @@ class Task(ABC):
         }}
         watcher() {{
           WATCHER_LAST=
+          while ! [ -d {filepath} ]; do
+            sleep 1
+          done
           cd {filepath}
           while [ -z "$WATCHER_LAST" ]; do
             sleep 5
@@ -567,6 +576,7 @@ class Task(ABC):
         required_for_start: Optional[Union[bool, str]] = None,
         inhibits_output: Optional[bool] = None,
         required_for_output: Optional[bool] = None,
+        force_path: Optional[str] = None,
     ):
         """Create a link between this task and a repository.
 
@@ -625,6 +635,7 @@ class Task(ABC):
             required_for_start=required_for_start,
             inhibits_output=inhibits_output,
             required_for_output=required_for_output,
+            force_path=force_path,
         )
 
     def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":
@@ -834,7 +845,9 @@ class Task(ABC):
                         continue
 
             arg = self.instrument_arg(
-                orig_job, await link.repo.template(subjob, self, link.kind, env_name, orig_job), link.kind
+                orig_job,
+                await link.repo.template(subjob, self, link.kind, env_name, orig_job, link.force_path),
+                link.kind,
             )
             result[env_name] = arg.arg
             if arg.preamble is not None:
@@ -847,7 +860,9 @@ class Task(ABC):
                     assert link.kind is not None
                     subjob = subkey(link.key.split("."))
                     arg = self.instrument_arg(
-                        orig_job, await link.repo.template(subjob, self, link.kind, env_name2, orig_job), link.kind
+                        orig_job,
+                        await link.repo.template(subjob, self, link.kind, env_name2, orig_job, link.force_path),
+                        link.kind,
                     )
                     result[env_name2] = arg.arg
                     if arg.preamble is not None:

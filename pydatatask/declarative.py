@@ -584,6 +584,7 @@ def build_task_picker(
             "required_for_start": parse_optional_bool,
             "inhibits_output": parse_optional_bool,
             "required_for_output": parse_optional_bool,
+            "force_path": lambda thing: str(thing) if thing is not None else None,
         },
     )
     links_constructor = make_dict_parser("links", str, link_constructor)
