@@ -234,9 +234,10 @@ class MetadataRepository(Repository, ABC):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
+        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind, link_name, hostjob)
+            return await super().template(job, task, kind, link_name, hostjob, force_path)
         info = await self.info(job)
         return taskmodule.TemplateInfo(info)
 
@@ -321,6 +322,7 @@ class MapRepository(MetadataRepository):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
+        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 
@@ -395,6 +397,7 @@ class FilterRepository(Repository):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
+        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 

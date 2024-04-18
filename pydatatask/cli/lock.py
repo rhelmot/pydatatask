@@ -118,6 +118,22 @@ def main():
         action="store_true",
         help="Tear down resources associated with the current lockfile, but don't set up a new lockfile",
     )
+    parser.add_argument(
+        "--no-launch-agent",
+        action="store_true",
+        help="Inhibit launching the HTTP agent on localhost",
+    )
+    parser.add_argument(
+        "--no-lockstep",
+        action="store_true",
+        help="Inhibit running lockstep tasks specified in pipeline files",
+    )
+    parser.add_argument(
+        "--global-template-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
+    )
     parsed = parser.parse_args()
 
     allocators = all_allocators[parsed.repo_allocator]
@@ -153,19 +169,24 @@ def main():
             return 1
 
     spec = PipelineStaging(cfgpath)
-    locked = spec.allocate(allocators, Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}))
+    locked = spec.allocate(
+        allocators,
+        Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}),
+        run_lockstep=not parsed.no_lockstep,
+    )
     locked.filename = lockfile.name
     locked.spec.long_running_timeout = parsed.long_running_timeout
-
     locked.spec.agent_hosts[None] = asyncio.run(get_ip())
+    locked.spec.global_template_env = {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
     locked.save()
 
     locked = PipelineStaging(locked.basedir / locked.filename)
     pipeline = locked.instantiate()
 
     # HACK
-    executor = LocalLinuxManager(cfgpath.name)
-    asyncio.run(executor.launch_agent(pipeline))
+    if not parsed.no_launch_agent:
+        executor = LocalLinuxManager(cfgpath.name)
+        asyncio.run(executor.launch_agent(pipeline))
 
     print(locked.basedir / locked.filename)
 

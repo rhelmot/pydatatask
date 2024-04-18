@@ -36,7 +36,7 @@ tasks:
         stdout: logs
         stderr: STDOUT
         template: |
-          echo hoo >/tmp/hoo
+          echo hoo >/tmp/hoo {{ bwahhhhhh | default("") }}
           BROKEN=
           while [ -z "$BROKEN" ]; do
             for f in $(ls {{ input | shquote }}); do

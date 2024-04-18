@@ -213,6 +213,7 @@ class Task(ABC):
         self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
+        self.global_template_env = {}
         self.annotations: Dict[str, str] = {}
         self.fail_fast = False
         self.timeout = timeout
@@ -821,7 +822,7 @@ class Task(ABC):
         preamble = []
         epilogue = []
 
-        result = {}
+        result = dict(self.global_template_env)
         pending: DefaultDict[str, List[Tuple[str, Link]]] = defaultdict(list)
         for env_name, link in env_src.items():
             if not isinstance(link, Link):

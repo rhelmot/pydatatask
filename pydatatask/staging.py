@@ -238,6 +238,7 @@ class PipelineSpec:
     agent_version: str = "unversioned"
     agent_secret: str = "insecure"
     long_running_timeout: Optional[float] = None
+    global_template_env: Dict[str, str] = field(default_factory=dict)
 
     def desugar(self):
         query_repo_classes = {
@@ -439,7 +440,10 @@ class PipelineStaging:
         all_tasks = []
         all_quotas: List[QuotaManager] = []
         session = Session()
+        global_template_env = {}
         for staging in self._iter_children():
+            global_template_env.update(staging.spec.global_template_env)
+
             ephemerals = {
                 name: session.ephemeral(ephemeral_constructor(asdict(value)))
                 for name, value in staging.spec.ephemerals.items()
@@ -498,10 +502,14 @@ class PipelineStaging:
                 if self.spec.long_running_timeout is not None
                 else None
             ),
+            global_template_env=global_template_env,
         )
 
     def allocate(
-        self, repo_allocators: Callable[[RepoClassSpec], Dispatcher], default_executor: Dispatcher
+        self,
+        repo_allocators: Callable[[RepoClassSpec], Dispatcher],
+        default_executor: Dispatcher,
+        run_lockstep: bool = True,
     ) -> "PipelineStaging":
         """Lock a pipeline, generating a new PipelineStaging which imports this one and specifies all of its missing
         dependencies."""
@@ -509,7 +517,7 @@ class PipelineStaging:
         args = missing.allocate(repo_allocators, default_executor)
         spec, repos, executors = args.specify()
         for child in self._iter_children():
-            if child.spec.lockstep:
+            if run_lockstep and child.spec.lockstep:
                 if (
                     subprocess.run(
                         "set -e\n" + child.spec.lockstep, shell=True, cwd=child.basedir, check=False

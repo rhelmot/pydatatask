@@ -52,6 +52,7 @@ class Pipeline:
         agent_hosts: Optional[Dict[Optional[Host], str]] = None,
         source_file: Optional[Path] = None,
         long_running_timeout: Optional[timedelta] = None,
+        global_template_env: Optional[Dict[str, str]] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
@@ -74,6 +75,7 @@ class Pipeline:
         self.source_file = source_file
         self.fail_fast = False
         self.long_running_timeout = long_running_timeout
+        self.global_template_env = global_template_env or {}
 
         for task in tasks:
             if task is not self.tasks[task.name]:
@@ -147,6 +149,7 @@ class Pipeline:
         for task in self.tasks.values():
             task.agent_secret = self.agent_secret
             task.agent_url = f"http://{self.agent_hosts.get(task.host, self.agent_hosts[None])}:{self.agent_port}"
+            task.global_template_env = self.global_template_env
             if (
                 self.long_running_timeout is not None
                 and task.long_running
