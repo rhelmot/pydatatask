@@ -1934,7 +1934,7 @@ class ContainerTask(ShellTask):
     ):
         """
         :param name: The name of this task.
-        :param image: The name of the docker image to use to run this task.
+        :param image: The name of the docker image to use to run this task. Can be a jinja template.
         :param executor: The executor to use for this task.
         :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied
                                  if they would break the quota.
@@ -2043,6 +2043,7 @@ class ContainerTask(ShellTask):
 
         template_env, preamble, epilogue = await self.build_template_env(job)
         exe_txt = await render_template(self.template, template_env)
+        image = await render_template(self.image, template_env)
         exe_txt = "\n".join(
             [
                 "set -e",
@@ -2069,7 +2070,7 @@ class ContainerTask(ShellTask):
         await self.manager.launch(
             self.name,
             job,
-            self.image,
+            image,
             list(self.entrypoint),
             exe_txt,
             self.environ,
