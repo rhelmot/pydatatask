@@ -1,8 +1,21 @@
 """High-level interfaces for accessing query results in the form of repositories."""
 
-from typing import Any, Dict, Optional
+from typing import (
+    Any,
+    AsyncContextManager,
+    AsyncGenerator,
+    AsyncIterator,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
+from pathlib import Path
 
 from pydatatask.repository import FilesystemRepository, MetadataRepository, Repository
+from pydatatask.repository.filesystem import FilesystemEntry, FilesystemType
+from pydatatask.utils import AReadStreamBase
 
 from .parser import QueryValueType
 from .query import Query
@@ -75,3 +88,31 @@ class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
         result = await super()._resolve()
         assert isinstance(result, FilesystemRepository)
         return result
+
+    async def dump(self, job: str):
+        thing = (await self._resolve()).dump(job)
+        try:
+            while True:
+                entry = yield
+                await thing.asend(entry)
+        except StopAsyncIteration:
+            pass
+
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
+        return await (await self._resolve()).get_mode(job, path)
+
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
+        return await (await self._resolve()).get_regular_meta(job, path)
+
+    async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
+        return await (await self._resolve()).get_type(job, path)
+
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStreamBase]:
+        return await (await self._resolve()).open(job, path)
+
+    async def readlink(self, job: str, path: str) -> str:
+        return await (await self._resolve()).readlink(job, path)
+
+    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
+        async for a, b, c, d in (await self._resolve()).walk(job):
+            yield a, b, c, d
