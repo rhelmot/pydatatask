@@ -953,7 +953,8 @@ class ShellTask(Task):
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\nexport PDT_AGENT_SECRET='{self.agent_secret}'\n")
-        preamble.insert(0, "set -x\n")
+        if self.debug_trace:
+            preamble.insert(0, "set -x\n")
         return env, preamble, epilogue
 
 
