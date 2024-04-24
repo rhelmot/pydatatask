@@ -955,6 +955,15 @@ class ShellTask(Task):
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\nexport PDT_AGENT_SECRET='{self.agent_secret}'\n")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
+        # HACK FOREVER AND ALWAYS
+        preamble.insert(
+            0,
+            """
+if ! mountpoint -q /tmp; then
+    mount -t tmpfs none /tmp
+fi
+""",
+        )
         return env, preamble, epilogue
 
 
