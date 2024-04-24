@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional
 
-from pydatatask.repository import MetadataRepository, Repository
+from pydatatask.repository import FilesystemRepository, MetadataRepository, Repository
 
 from .parser import QueryValueType
 from .query import Query
@@ -66,3 +66,12 @@ class QueryMetadataRepository(QueryRepository, MetadataRepository):
 
     async def dump(self, key: str, data: Any, /):
         return await (await self._resolve()).dump(key, data)
+
+
+class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
+    """A QueryMetadataRepository is just a QueryRepository but additionally a FilesystemRepository."""
+
+    async def _resolve(self) -> FilesystemRepository:
+        result = await super()._resolve()
+        assert isinstance(result, FilesystemRepository)
+        return result

@@ -4,7 +4,7 @@ repos:
     args:
       query: inputs.filter[.getworks]()
       getters:
-       works: Bool
+        works: Bool
 repo_classes:
   inputs: MetadataRepository
   done0: MetadataRepository
