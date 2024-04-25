@@ -185,6 +185,7 @@ class PipelineChildArgsMissing:
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
+            repo_spec.name = repo_name
             new_repos[repo_name] = repo_allocators(repo_spec)
 
         for task_name in self.executors:
@@ -218,6 +219,9 @@ class RepoClassSpec:
     compress_backend: bool = False
     compress_backup: bool = False
     schema: Optional[Dict[str, Any]] = None
+    suffix: str = ""
+    mimetype: str = "application/octet-stream"
+    name: Optional[str] = None
 
 
 @_dataclass_serial

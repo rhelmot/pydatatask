@@ -4,49 +4,149 @@ import argparse
 import asyncio
 import getpass
 import os
+import random
 import shutil
+import string
 import sys
 import tempfile
+import urllib.parse
 
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
 from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
 
+LOCK_ID = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
 
-def default_allocators_temp(spec: RepoClassSpec) -> Dispatcher:
-    if spec.cls == "MetadataRepository":
-        return Dispatcher("InProcessMetadata", {})
-    if spec.cls == "BlobRepository":
-        return Dispatcher("InProcessBlob", {})
-    if spec.cls == "FilesystemRepository":
-        return Dispatcher("Tarfile", {"inner": {"cls": "InProcessBlob", "args": {}}})
-    raise ValueError("Cannot allocate repository type %s as temporary" % spec.cls)
+EPHEMERALS = {}
 
 
-def default_allocators_local(spec: RepoClassSpec) -> Dispatcher:
-    path = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}")
-    path.mkdir(exist_ok=True)
-    basedir = tempfile.mkdtemp(dir=path)
-    if spec.cls == "MetadataRepository":
-        result = Dispatcher("YamlFile", {"basedir": basedir})
-    elif spec.cls == "BlobRepository":
-        if spec.compress_backend:
-            result = Dispatcher(
-                "CompressedBlob", {"inner": {"cls": "File", "args": {"basedir": basedir, "extension": ".gz"}}}
+class Allocator:
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        raise NotImplementedError
+
+
+class TempAllocator(Allocator):
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        if spec.cls == "MetadataRepository":
+            return Dispatcher("InProcessMetadata", {})
+        if spec.cls == "BlobRepository":
+            return Dispatcher("InProcessBlob", {})
+        if spec.cls == "FilesystemRepository":
+            return Dispatcher("Tarfile", {"inner": {"cls": "InProcessBlob", "args": {}}})
+        return None
+
+
+class LocalAllocator(Allocator):
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        path = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/lock-{LOCK_ID}")
+        path.mkdir(exist_ok=True)
+        basedir = tempfile.mkdtemp(dir=path)
+        if spec.cls == "MetadataRepository":
+            result = Dispatcher("YamlFile", {"basedir": basedir})
+        elif spec.cls == "BlobRepository":
+            if spec.compress_backend:
+                result = Dispatcher(
+                    "CompressedBlob", {"inner": {"cls": "File", "args": {"basedir": basedir, "extension": ".gz"}}}
+                )
+            else:
+                result = Dispatcher("File", {"basedir": basedir})
+        elif spec.cls == "FilesystemRepository":
+            if spec.compress_backend:
+                result = Dispatcher("Tarfile", {"inner": {"cls": "File", "args": {"basedir": basedir}}})
+            else:
+                result = Dispatcher("Directory", {"basedir": basedir})
+        else:
+            return None
+        result.args["compress_backup"] = spec.compress_backup
+        result.args["schema"] = spec.schema
+        return result
+
+
+class S3BlobAllocator(Allocator):
+    def __init__(self, url: str):
+        self.url = url
+        try:
+            self.scheme, rest = self.url.split("://", 1)
+            self.username, rest = rest.split(":", 1)
+            self.password, rest = rest.split("@", 1)
+            self.host, rest = rest.split("/", 1)
+            if "/" in rest:
+                self.bucket, self.prefix = rest.split("/", 1)
+            else:
+                self.bucket = rest
+                self.prefix = ""
+        except ValueError as e:
+            raise ValueError("Failed to parse s3 bucket url: see --help for expected format") from e
+
+    def make_ephemeral(self):
+        client_key = (self.scheme, self.username, self.password, self.host)
+        if client_key not in EPHEMERALS:
+            # could maybe do with a better name than just host...
+            EPHEMERALS[client_key] = (
+                self.host,
+                Dispatcher(
+                    "S3Connection",
+                    {"endpoint": f"{self.scheme}://{self.host}", "username": self.username, "password": self.password},
+                ),
             )
-        else:
-            result = Dispatcher("File", {"basedir": basedir})
-    elif spec.cls == "FilesystemRepository":
-        if spec.compress_backend:
-            result = Dispatcher("Tarfile", {"inner": {"cls": "File", "args": {"basedir": basedir}}})
-        else:
-            result = Dispatcher("Directory", {"basedir": basedir})
-    else:
-        raise ValueError("Cannot allocate repository type %s as local" % spec.cls)
-    result.args["compress_backup"] = spec.compress_backup
-    result.args["schema"] = spec.schema
-    return result
+        return EPHEMERALS[client_key][0]
+
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        if spec.cls != "BlobRepository":
+            return None
+        return self._allocate_blob(spec)
+
+    def _allocate_blob(self, spec: RepoClassSpec) -> Dispatcher:
+        return Dispatcher(
+            "S3Bucket",
+            {
+                "client": self.make_ephemeral(),
+                "bucket": self.bucket,
+                "prefix": f"{self.prefix}lock-{LOCK_ID}/{spec.name}/",
+                "suffix": spec.suffix,
+                "mimetype": spec.mimetype,
+            },
+        )
+
+
+class S3FsAllocator(S3BlobAllocator):
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        if spec.cls != "FilesystemRepository":
+            return None
+
+        return Dispatcher(
+            "Tarfile",
+            {
+                "inner": self._allocate_blob(spec),
+            },
+        )
+
+
+class MongoMetaAllocator(Allocator):
+    def __init__(self, url: str):
+        self.url, self.database = url.split(":::", 1)
+
+    def make_ephemeral(self):
+        client_key = (self.url, self.database)
+        if client_key not in EPHEMERALS:
+            # see above
+            EPHEMERALS[client_key] = (
+                urllib.parse.urlparse(self.url).hostname,
+                Dispatcher("MongoDatabase", {"url": self.url, "database": self.database}),
+            )
+        return EPHEMERALS[client_key][1]
+
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        if spec.cls != "MetadataRepository":
+            return None
+        return Dispatcher(
+            "MongoMetadata",
+            {
+                "database": self.make_ephemeral(),
+                "collection": f"lock-{LOCK_ID}.{spec.name}",
+            },
+        )
 
 
 async def get_ip() -> str:
@@ -88,24 +188,50 @@ def walk_obj(obj: Any, duplicates: bool = False, seen: Optional[Set[int]] = None
 
 
 def main():
-    all_allocators = {
-        "local": default_allocators_local,
-        "temp": default_allocators_temp,
-    }
-
     parser = argparse.ArgumentParser(
         description="Produce a lockfile allocating executors and repositories for a given pipeline"
     )
     parser.add_argument(
         "--repo-local",
-        action="store_const",
+        action="append_const",
         dest="repo_allocator",
-        const="local",
-        default="local",
+        const=LocalAllocator(),
+        default=[],
         help="Allocate repositories on local filesystem",
     )
     parser.add_argument(
-        "--repo-temp", action="store_const", dest="repo_allocator", const="temp", help="Allocate repositories in-memory"
+        "--repo-blob-s3",
+        nargs=1,
+        action="append",
+        dest="repo_allocator",
+        default=[],
+        type=S3BlobAllocator,
+        help="Allocate blob repositories on an s3 bucket. Expects url in format scheme://username:password@host/bucket/prefix",
+    )
+    parser.add_argument(
+        "--repo-fs-s3",
+        nargs=1,
+        action="append",
+        dest="repo_allocator",
+        default=[],
+        type=S3FsAllocator,
+        help="Allocate filesystem repositories as a tarball in an s3 bucket. Expects url in format scheme://username:password@host/bucket/prefix",
+    )
+    parser.add_argument(
+        "--repo-meta-mongo",
+        nargs=1,
+        action="append",
+        dest="repo_allocator",
+        default=[],
+        type=MongoMetaAllocator,
+        help="Allocate metadata repositories as a tarball in a mongodb collection. Expects url in format MONGO_URL:::database",
+    )
+    parser.add_argument(
+        "--repo-temp",
+        action="store_const",
+        dest="repo_allocator",
+        const=TempAllocator(),
+        help="Allocate repositories in-memory",
     )
     parser.add_argument("--name", help="The name of the app for automatically generated executors")
     parser.add_argument(
@@ -136,7 +262,15 @@ def main():
     )
     parsed = parser.parse_args()
 
-    allocators = all_allocators[parsed.repo_allocator]
+    if not parsed.repo_allocator:
+        parsed.repo_allocator = [LocalAllocator()]
+
+    def allocators(spec: RepoClassSpec) -> Dispatcher:
+        for allocator in parsed.repo_allocator:
+            result = allocator.allocate(spec)
+            if result is not None:
+                return result
+        raise ValueError("Could not allocate %s: tried %s" % (spec, parsed.repo_allocator))
 
     cfgpath = find_config()
     if cfgpath is None:
@@ -178,6 +312,7 @@ def main():
     locked.spec.long_running_timeout = parsed.long_running_timeout
     locked.spec.agent_hosts[None] = asyncio.run(get_ip())
     locked.spec.global_template_env = {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
+    locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.save()
 
     locked = PipelineStaging(locked.basedir / locked.filename)
