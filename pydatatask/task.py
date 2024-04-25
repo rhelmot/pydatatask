@@ -959,8 +959,8 @@ class ShellTask(Task):
         preamble.insert(
             0,
             """
-if ! mountpoint -q /tmp; then
-    mount -t tmpfs none /tmp
+if ! mountpoint -q /tmp &>/dev/null; then
+    mount -t tmpfs none /tmp &>/dev/null || true
 fi
 """,
         )
