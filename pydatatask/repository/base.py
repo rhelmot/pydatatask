@@ -537,7 +537,6 @@ class FileRepositoryBase(Repository, ABC):
                 yield name[: -len(self.extension) if self.extension else None]
 
     async def validate(self):
-        print("WE R MAKING", self.basedir, file=__import__("sys").stderr)
         self.basedir.mkdir(exist_ok=True, parents=True)
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")

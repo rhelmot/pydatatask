@@ -955,15 +955,6 @@ class ShellTask(Task):
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\nexport PDT_AGENT_SECRET='{self.agent_secret}'\n")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
-        # HACK FOREVER AND ALWAYS
-        preamble.insert(
-            0,
-            """
-if ! mountpoint -q /tmp &>/dev/null; then
-    mount -t tmpfs none /tmp &>/dev/null || true
-fi
-""",
-        )
         return env, preamble, epilogue
 
 
@@ -2085,3 +2076,20 @@ class ContainerTask(ShellTask):
             tty,
             host_mounts=self.host_mounts,
         )
+
+    async def build_template_env(
+        self,
+        orig_job: str,
+        env_src: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
+        env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
+        # HACK FOREVER AND ALWAYS
+        preamble.insert(
+            0,
+            """
+if ! mountpoint -q /tmp &>/dev/null; then
+    mount -t tmpfs none /tmp &>/dev/null || true
+fi
+""",
+        )
+        return env, preamble, epilogue
