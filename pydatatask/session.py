@@ -30,7 +30,7 @@ Sessions cannot be opened more than once. But this doesn't have to be the way! I
 GitHub issue, and I'll see what can be done.
 """
 
-from typing import AsyncIterable, Callable, TypeVar
+from typing import AsyncIterable, Callable, Optional, TypeVar
 
 __all__ = ("Session", "Ephemeral")
 
@@ -48,18 +48,19 @@ class Session:
         self._ephemeral_defs = {}
         self.ephemerals = {}
 
-    def ephemeral(self, manager: Callable[[], AsyncIterable[T]]) -> Ephemeral[T]:
+    def ephemeral(self, manager: Callable[[], AsyncIterable[T]], name: Optional[str] = None) -> Ephemeral[T]:
         """Decorator for ephemeral resource managers.
 
         Should be called with an async function that will yield exactly one object, the live constructed resource, and
         then tear that resource down on completion.
         """
-        self._ephemeral_defs[manager.__name__] = manager()
+        name = name or manager.__name__
+        self._ephemeral_defs[name] = manager()
 
         def inner():
-            if manager.__name__ not in self.ephemerals:
+            if name not in self.ephemerals:
                 raise Exception("Session is not open")
-            return self.ephemerals[manager.__name__]
+            return self.ephemerals[name]
 
         return inner
 

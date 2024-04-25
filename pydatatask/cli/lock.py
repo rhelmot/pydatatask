@@ -77,10 +77,10 @@ class S3BlobAllocator(Allocator):
                 self.bucket = rest
                 self.prefix = ""
         except ValueError as e:
-            raise ValueError("Failed to parse s3 bucket url: see --help for expected format") from e
+            raise Exception("Failed to parse s3 bucket url: see --help for expected format") from e
 
     def make_ephemeral(self):
-        client_key = (self.scheme, self.username, self.password, self.host)
+        client_key = ("s3", self.scheme, self.username, self.password, self.host)
         if client_key not in EPHEMERALS:
             # could maybe do with a better name than just host...
             EPHEMERALS[client_key] = (
@@ -128,14 +128,14 @@ class MongoMetaAllocator(Allocator):
         self.url, self.database = url.split(":::", 1)
 
     def make_ephemeral(self):
-        client_key = (self.url, self.database)
+        client_key = ("mongo", self.url, self.database)
         if client_key not in EPHEMERALS:
             # see above
             EPHEMERALS[client_key] = (
                 urllib.parse.urlparse(self.url).hostname,
                 Dispatcher("MongoDatabase", {"url": self.url, "database": self.database}),
             )
-        return EPHEMERALS[client_key][1]
+        return EPHEMERALS[client_key][0]
 
     def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
         if spec.cls != "MetadataRepository":
@@ -196,39 +196,32 @@ def main():
         action="append_const",
         dest="repo_allocator",
         const=LocalAllocator(),
-        default=[],
         help="Allocate repositories on local filesystem",
     )
     parser.add_argument(
         "--repo-blob-s3",
-        nargs=1,
         action="append",
         dest="repo_allocator",
-        default=[],
         type=S3BlobAllocator,
         help="Allocate blob repositories on an s3 bucket. Expects url in format scheme://username:password@host/bucket/prefix",
     )
     parser.add_argument(
         "--repo-fs-s3",
-        nargs=1,
         action="append",
         dest="repo_allocator",
-        default=[],
         type=S3FsAllocator,
         help="Allocate filesystem repositories as a tarball in an s3 bucket. Expects url in format scheme://username:password@host/bucket/prefix",
     )
     parser.add_argument(
         "--repo-meta-mongo",
-        nargs=1,
         action="append",
         dest="repo_allocator",
-        default=[],
         type=MongoMetaAllocator,
         help="Allocate metadata repositories as a tarball in a mongodb collection. Expects url in format MONGO_URL:::database",
     )
     parser.add_argument(
         "--repo-temp",
-        action="store_const",
+        action="append_const",
         dest="repo_allocator",
         const=TempAllocator(),
         help="Allocate repositories in-memory",

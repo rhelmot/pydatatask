@@ -449,7 +449,7 @@ class PipelineStaging:
             global_template_env.update(staging.spec.global_template_env)
 
             ephemerals = {
-                name: session.ephemeral(ephemeral_constructor(asdict(value)))
+                name: session.ephemeral(ephemeral_constructor(asdict(value)), name=name)
                 for name, value in staging.spec.ephemerals.items()
             }
             ephemeral_cache[staging] = ephemerals
