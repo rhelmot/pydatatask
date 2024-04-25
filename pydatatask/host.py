@@ -95,7 +95,7 @@ class Host:
         """Generate a shell script to unpack an archive for the host system."""
         if self.os == HostOS.Linux:
             return f"""
-            mkdir {output_filename}
+            mkdir -p {output_filename}
             cd {output_filename}
             tar -xf {input_filename}
             cd -

@@ -282,7 +282,7 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
     async def mkdir(self, job: str) -> None:
         """Create an empty directory root for the given key."""
         try:
-            await aiofiles.os.mkdir(self.fullpath(job))
+            await aiofiles.os.makedirs(self.fullpath(job), exist_ok=True)
         except FileExistsError:
             pass
 

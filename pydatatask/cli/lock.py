@@ -40,7 +40,7 @@ class TempAllocator(Allocator):
 class LocalAllocator(Allocator):
     def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
         path = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/lock-{LOCK_ID}")
-        path.mkdir(exist_ok=True)
+        path.mkdir(exist_ok=True, parents=True)
         basedir = tempfile.mkdtemp(dir=path)
         if spec.cls == "MetadataRepository":
             result = Dispatcher("YamlFile", {"basedir": basedir})

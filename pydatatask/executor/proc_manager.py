@@ -263,7 +263,7 @@ class LocalLinuxManager(AbstractProcessManager):
 
         # lmao, hack
         tmp = os.environ.get("TEMP", "/tmp")
-        Path(f"{tmp}/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True)
+        Path(f"{tmp}/pydatatask-{getpass.getuser()}").mkdir(exist_ok=True, parents=True)
         with open(f"{tmp}/pydatatask-{getpass.getuser()}/agent-stdout-{pipeline.agent_port}", "ab") as fp:
             env = dict(os.environ)
             env["PIPELINE_YAML"] = str(pipeline.source_file)
