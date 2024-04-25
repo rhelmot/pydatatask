@@ -1580,6 +1580,7 @@ class InProcessSyncTask(Task):
     async def validate(self):
         if self.func is None:
             raise ValueError("InProcessSyncTask.func is None")
+        await super().validate()
 
         # sig = inspect.signature(self.func, follow_wrapped=True)
         # for name in sig.parameters.keys():
@@ -1729,6 +1730,8 @@ class ExecutorTask(Task):
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
+        await super().validate()
+
     async def launch(self, job):
         l.info("Launching %s:%s with %s...", self.name, job, self.executor)
         args, preamble, epilogue = await self.build_template_env(job)
@@ -1868,6 +1871,8 @@ class KubeFunctionTask(KubeTask):
                 self._func_env[name] = self.links[name].repo
             else:
                 raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
+
+        await super().validate()
 
     async def launch(self, job: str):
         if self.synchronous:

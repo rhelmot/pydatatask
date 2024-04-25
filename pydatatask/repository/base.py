@@ -541,6 +541,8 @@ class FileRepositoryBase(Repository, ABC):
         if not os.access(self.basedir, os.W_OK):
             raise PermissionError(f"Cannot write to {self.basedir}")
 
+        await super().validate()
+
     def fullpath(self, job) -> Path:
         """Construct the full local path of the file corresponding to ``job``."""
         return self.basedir / (job + self.extension)
@@ -869,8 +871,9 @@ class YamlMetadataRepository(MetadataRepository, ABC):
     def delete(self, job, /):
         return self.blob.delete(job)
 
-    def validate(self):
-        return self.blob.validate()
+    async def validate(self):
+        await self.blob.validate()
+        await super().validate()
 
     @job_getter
     async def info(self, job, /):
@@ -1188,6 +1191,7 @@ class CompressedBlobRepository(BlobRepository):
 
     async def validate(self):
         await self.inner.validate()
+        await super().validate()
 
     def delete(self, job, /):
         return self.inner.delete(job)

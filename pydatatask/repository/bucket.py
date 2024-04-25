@@ -169,6 +169,7 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
             await self.client.create_bucket(Bucket=self.bucket)
         except self.client.exceptions.BucketAlreadyOwnedByYou as e:
             pass
+        await super().validate()
 
     def object_name(self, job):
         """Return the object name for the given job."""

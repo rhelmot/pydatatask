@@ -738,3 +738,4 @@ class TarfileFilesystemRepository(FilesystemRepository):
 
     async def validate(self):
         await self.inner.validate()
+        await super().validate()
