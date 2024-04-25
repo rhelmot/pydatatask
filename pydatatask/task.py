@@ -1335,6 +1335,9 @@ class ProcessTask(ShellTask):
         if isinstance(stderr, repomodule.BlobRepository):
             self.link("stderr", stderr, None, is_status=True)
 
+    async def validate(self):
+        await self.pids.validate()
+
     @property
     def host(self):
         return self.manager.host
