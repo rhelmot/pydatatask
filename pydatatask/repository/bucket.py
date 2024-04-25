@@ -3,7 +3,7 @@
 from typing import Dict, Literal, Optional, overload
 import io
 
-from types_aiobotocore_s3.client import S3Client
+from types_aiobotocore_s3.client import Exceptions, S3Client
 import botocore.exceptions
 
 from pydatatask.host import LOCAL_HOST, Host
@@ -166,12 +166,9 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
 
     async def validate(self):
         try:
-            await self.client.head_bucket(Bucket=self.bucket)
-        except botocore.exceptions.ClientError as e:
-            if "404" in str(e):
-                await self.client.create_bucket(Bucket=self.bucket)
-            else:
-                raise
+            await self.client.create_bucket(Bucket=self.bucket)
+        except Exceptions.BucketAlreadyOwnedByYou as e:
+            pass
 
     def object_name(self, job):
         """Return the object name for the given job."""
