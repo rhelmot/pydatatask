@@ -167,7 +167,7 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
     async def validate(self):
         try:
             await self.client.create_bucket(Bucket=self.bucket)
-        except Exceptions.BucketAlreadyOwnedByYou as e:
+        except self.client.exceptions.BucketAlreadyOwnedByYou as e:
             pass
 
     def object_name(self, job):
