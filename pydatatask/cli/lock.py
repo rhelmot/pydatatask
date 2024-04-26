@@ -253,6 +253,15 @@ def main():
         default=[],
         help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
     )
+    parser.add_argument(
+        "--agent-host",
+        help="Specify the default hostname the agent will be running at",
+    )
+    parser.add_argument(
+        "--agent-port",
+        type=int,
+        help="Specify the port the agent will be running at",
+    )
     parsed = parser.parse_args()
 
     if not parsed.repo_allocator:
@@ -303,7 +312,9 @@ def main():
     )
     locked.filename = lockfile.name
     locked.spec.long_running_timeout = parsed.long_running_timeout
-    locked.spec.agent_hosts[None] = asyncio.run(get_ip())
+    locked.spec.agent_hosts[None] = asyncio.run(get_ip()) if parsed.agent_host is None else parsed.agent_host
+    if parsed.agent_port is not None:
+        locked.spec.agent_port = parsed.agent_port
     locked.spec.global_template_env = {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.save()
