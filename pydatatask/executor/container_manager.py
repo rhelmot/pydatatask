@@ -1,10 +1,12 @@
 """This module houses the container manager executors."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+import os
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 import asyncio
+import aiofiles.ospath
 
 from aiodocker import DockerError
 from kubernetes_asyncio.client import V1Pod
@@ -93,6 +95,7 @@ class DockerContainerManager(AbstractContainerManager):
         self._docker: Optional[aiodocker.Docker] = None
         self.app = app
         self._host = host
+        self._net = None
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -129,24 +132,37 @@ class DockerContainerManager(AbstractContainerManager):
         tty: bool,
         host_mounts: Optional[Dict[str, str]] = None,
     ):
-        await self.docker.containers.run(
-            {
-                "Image": image,
-                "AttachStdout": False,
-                "AttachStderr": False,
-                "AttachStdin": False,
-                "OpenStdin": False,
-                "Tty": tty,
-                "Entrypoint": entrypoint,
-                "Cmd": cmd,
-                "Env": [f"{key}={val}" for key, val in environ.items()],
-                "HostConfig": {
-                    "Binds": [f"{a}:{b}" for a, b in mounts] + [f"{a}:{b}" for a, b in (host_mounts or {}).items()],
-                    "Privileged": privileged,
-                },
+        if self._net is None:
+            if await aiofiles.ospath.exists('/.dockerenv'):
+                try:
+                    hostname = cast(str, os.getenv('HOSTNAME'))
+                    bytes.fromhex(hostname)
+                except:  # pylint: disable=broad-except
+                    pass
+                else:
+                    self_container = await self.docker.containers.get(hostname)
+                    config = await self_container.show()
+                    self._net = config['HostConfig']['NetworkMode']
+
+        config = {
+            "Image": image,
+            "AttachStdout": False,
+            "AttachStderr": False,
+            "AttachStdin": False,
+            "OpenStdin": False,
+            "Tty": tty,
+            "Entrypoint": entrypoint,
+            "Cmd": cmd,
+            "Env": [f"{key}={val}" for key, val in environ.items()],
+            "HostConfig": {
+                "Binds": [f"{a}:{b}" for a, b in mounts] + [f"{a}:{b}" for a, b in (host_mounts or {}).items()],
+                "Privileged": privileged,
             },
-            name=self._id_to_name(task, job),
-        )
+        }
+        if self._net is not None:
+            config['HostConfig']['NetworkMode'] = self._net
+
+        await self.docker.containers.run(config, name=self._id_to_name(task, job))
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
         containers = await self.docker.containers.list(all=1)
