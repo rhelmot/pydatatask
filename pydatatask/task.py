@@ -2087,8 +2087,8 @@ class ContainerTask(ShellTask):
         preamble.insert(
             0,
             """
-if ! mountpoint -q /tmp &>/dev/null; then
-    mount -t tmpfs none /tmp &>/dev/null || true
+if ! mountpoint -q /tmp 2>&1 >/dev/null; then
+    mount -t tmpfs none /tmp 2>&1 >/dev/null || true
 fi
 """,
         )
