@@ -47,7 +47,7 @@ echo weh | cat {{input}} -
 echo bye >&2
         """
 
-        manager = InProcessLocalLinuxManager("tests")
+        manager = InProcessLocalLinuxManager(app="tests")
         task = pydatatask.ProcessTask(
             "task",
             template,

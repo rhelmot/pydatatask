@@ -5,7 +5,7 @@ import pathlib
 import subprocess
 import unittest
 
-from pydatatask.cli.lock import default_allocators_temp
+from pydatatask.cli.lock import TempAllocator
 from pydatatask.repository.base import BlobRepository, MetadataRepository
 from pydatatask.staging import Dispatcher, PipelineStaging
 from pydatatask.task import ProcessTask
@@ -19,7 +19,7 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming(self):
         staging = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.yaml")
-        allocated = staging.allocate(default_allocators_temp, Dispatcher("TempLinux", {"app": "test_streaming"}))
+        allocated = staging.allocate(TempAllocator().allocate, Dispatcher("TempLinux", {"app": "test_streaming"}))
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task = cast(ProcessTask, pipeline.tasks["task"])

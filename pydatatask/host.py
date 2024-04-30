@@ -49,7 +49,7 @@ class Host:
             ERR_FILENAME=$(mktemp)
             if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
             wget {'-v' if verbose else '-q'} -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
-                curl {'-v' if verbose else ''} $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
+                curl -f {'-v' if verbose else ''} $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
                 (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME
                 {handle_err}
                 false)
@@ -81,7 +81,7 @@ class Host:
             if ! [ -e "$FILENAME" ]; then echo "mk_http_post target $FILENAME does not exist" && false; fi
             if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
             wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
-                curl {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
+                curl -f {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
                 (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}
                 {handle_err}
                 false)

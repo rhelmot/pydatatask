@@ -2,7 +2,7 @@ from typing import cast
 import pathlib
 import unittest
 
-from pydatatask.cli.lock import default_allocators_temp
+from pydatatask.cli.lock import TempAllocator
 from pydatatask.repository.base import MetadataRepository
 from pydatatask.staging import Dispatcher, PipelineStaging
 from pydatatask.task import ProcessTask
@@ -13,7 +13,7 @@ test_root = pathlib.Path(__file__).parent
 class TestQuery(unittest.IsolatedAsyncioTestCase):
     async def test_query(self):
         staging = PipelineStaging(test_root / "content" / "query" / "pipeline.yaml")
-        allocated = staging.allocate(default_allocators_temp, Dispatcher("TempLinux", {"app": "test_streaming"}))
+        allocated = staging.allocate(TempAllocator().allocate, Dispatcher("TempLinux", {"app": "test_streaming"}))
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task0 = cast(ProcessTask, pipeline.tasks["task0"])

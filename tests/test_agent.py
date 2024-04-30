@@ -6,9 +6,9 @@ import aiohttp
 import pydatatask
 
 
-class TestImport(unittest.IsolatedAsyncioTestCase):
+class TestAgent(unittest.IsolatedAsyncioTestCase):
     async def test_errors(self):
-        manager = pydatatask.InProcessLocalLinuxManager("test_agent")
+        manager = pydatatask.InProcessLocalLinuxManager(app="test_agent")
         task = pydatatask.ProcessTask("task", "", pydatatask.InProcessMetadataRepository(), executor=manager)
         pipeline = pydatatask.Pipeline([task], pydatatask.Session(), [])
         await pipeline.open()

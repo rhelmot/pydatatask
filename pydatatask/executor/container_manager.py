@@ -27,6 +27,9 @@ class AbstractContainerManager(ABC, Executor):
     Members of this class should be able to manage containers, including being able to track their lifecycles.
     """
 
+    def __init__(self, *, image_prefix: str = ""):
+        self._image_prefix = image_prefix
+
     @abstractmethod
     async def launch(
         self,
@@ -90,11 +93,14 @@ class DockerContainerManager(AbstractContainerManager):
     somewhere other than localhost, don't forget to specify the host parameter.
     """
 
-    def __init__(self, app, url: Optional[str] = None, host: Host = LOCAL_HOST):
+    def __init__(
+        self, *, app: str = "pydatatask", url: Optional[str] = None, host: Host = LOCAL_HOST, image_prefix: str = ""
+    ):
         self._url = url
         self._docker: Optional[aiodocker.Docker] = None
         self.app = app
         self._host = host
+        super().__init__(image_prefix=image_prefix)
         self._net = None
 
     @property
@@ -145,7 +151,7 @@ class DockerContainerManager(AbstractContainerManager):
                     self._net = config['HostConfig']['NetworkMode']
 
         config = {
-            "Image": image,
+            "Image": self._image_prefix + image,
             "AttachStdout": False,
             "AttachStderr": False,
             "AttachStdin": False,
@@ -256,8 +262,9 @@ class DockerContainerManager(AbstractContainerManager):
 class KubeContainerManager(AbstractContainerManager):
     """An executor that runs containers on a kubernetes cluster."""
 
-    def __init__(self, cluster: "pod_manager.PodManager"):
+    def __init__(self, *, cluster: "pod_manager.PodManager", image_prefix: str = ""):
         self.cluster = cluster
+        super().__init__(image_prefix=image_prefix)
 
     @property
     def host(self):
@@ -291,7 +298,7 @@ class KubeContainerManager(AbstractContainerManager):
                     "containers": [
                         {
                             "name": "main",
-                            "image": image,
+                            "image": self._image_prefix + image,
                             "imagePullPolicy": "always",
                             "entrypoint": entrypoint,
                             "command": [cmd],
@@ -359,4 +366,4 @@ class KubeContainerManager(AbstractContainerManager):
         )
 
 
-localhost_docker_manager = DockerContainerManager("pydatatask")
+localhost_docker_manager = DockerContainerManager()

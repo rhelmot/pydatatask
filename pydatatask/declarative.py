@@ -453,6 +453,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
             {
                 "app": str,
                 "local_path": str,
+                "image_prefix": str,
             },
         ),
         "SSHLinux": make_constructor(
@@ -482,6 +483,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
                 "host": make_picker("Host", hosts),
                 "app": str,
                 "url": str,
+                "image_prefix": str,
             },
         ),
     }

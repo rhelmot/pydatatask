@@ -158,15 +158,18 @@ class LocalLinuxManager(AbstractProcessManager):
     """
 
     def to_container_manager(self):
-        return DockerContainerManager(self.app)
+        return DockerContainerManager(app=self.app, image_prefix=self._image_prefix)
 
     def __init__(
         self,
+        *,
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
+        image_prefix: str = "",
     ):
         super().__init__(Path(local_path) / app)
         self.app = app
+        self._image_prefix = image_prefix
 
     @property
     def host(self) -> Host:
@@ -425,7 +428,7 @@ class SSHLinuxManager(AbstractProcessManager):
         return pid.strip()
 
 
-localhost_manager = LocalLinuxManager("default")
+localhost_manager = LocalLinuxManager(app="default")
 
 
 class InProcessLocalLinuxManager(LocalLinuxManager):
@@ -436,7 +439,7 @@ class InProcessLocalLinuxManager(LocalLinuxManager):
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
     ):
-        super().__init__(app, local_path)
+        super().__init__(app=app, local_path=local_path)
 
         self.runner: Optional[web.AppRunner] = None
 

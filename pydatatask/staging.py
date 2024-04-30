@@ -179,14 +179,17 @@ class PipelineChildArgsMissing:
         return not self.repos and not self.executors and all(child.ready() for child in self.imports.values())
 
     def allocate(
-        self, repo_allocators: Callable[["RepoClassSpec"], Dispatcher], default_executor: Optional[Dispatcher]
+        self, repo_allocators: Callable[["RepoClassSpec"], Optional[Dispatcher]], default_executor: Optional[Dispatcher]
     ) -> PipelineChildArgs:
         new_repos: Dict[str, Union[Dispatcher, RepoClassSpec]] = {}
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
             repo_spec.name = repo_name
-            new_repos[repo_name] = repo_allocators(repo_spec)
+            result = repo_allocators(repo_spec)
+            if result is None:
+                raise ValueError("Repo allocators failed")
+            new_repos[repo_name] = result
 
         for task_name in self.executors:
             if default_executor is None:
@@ -511,7 +514,7 @@ class PipelineStaging:
 
     def allocate(
         self,
-        repo_allocators: Callable[[RepoClassSpec], Dispatcher],
+        repo_allocators: Callable[[RepoClassSpec], Optional[Dispatcher]],
         default_executor: Dispatcher,
         run_lockstep: bool = True,
     ) -> "PipelineStaging":

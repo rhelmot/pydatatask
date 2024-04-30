@@ -233,6 +233,12 @@ def main():
         type=float,
     )
     parser.add_argument(
+        "--image-prefix",
+        help="Force container executors to schedule containers with images that are prefixed with this string.",
+        type=str,
+        default="",
+    )
+    parser.add_argument(
         "--unlock",
         action="store_true",
         help="Tear down resources associated with the current lockfile, but don't set up a new lockfile",
@@ -284,7 +290,7 @@ def main():
         pipeline = locked.instantiate()
 
         # HACK
-        executor = LocalLinuxManager(cfgpath.name)
+        executor = LocalLinuxManager(app=cfgpath.name, image_prefix=parsed.image_prefix)
         asyncio.run(executor.teardown_agent())
 
         # HACK
@@ -307,7 +313,7 @@ def main():
     spec = PipelineStaging(cfgpath)
     locked = spec.allocate(
         allocators,
-        Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name}),
+        Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name, "image_prefix": parsed.image_prefix}),
         run_lockstep=not parsed.no_lockstep,
     )
     locked.filename = lockfile.name
@@ -315,7 +321,9 @@ def main():
     locked.spec.agent_hosts[None] = asyncio.run(get_ip()) if parsed.agent_host is None else parsed.agent_host
     if parsed.agent_port is not None:
         locked.spec.agent_port = parsed.agent_port
-    locked.spec.global_template_env = {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
+    locked.spec.global_template_env.update(
+        {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
+    )
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.save()
 
@@ -324,7 +332,7 @@ def main():
 
     # HACK
     if not parsed.no_launch_agent:
-        executor = LocalLinuxManager(cfgpath.name)
+        executor = LocalLinuxManager(app=cfgpath.name, image_prefix=parsed.image_prefix)
         asyncio.run(executor.launch_agent(pipeline))
 
     print(locked.basedir / locked.filename)
