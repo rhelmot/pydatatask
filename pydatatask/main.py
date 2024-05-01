@@ -504,6 +504,7 @@ async def list_data(pipeline: Pipeline, data: List[str]):
     for token in tokens:
         if token.count(".") == 2:
             task, repo, cokey = token.split(".")
+            await namespace[task]._consume(cokey)
             await getattr(namespace[task], repo)._consume(cokey)
     result = eval(input_text, {}, namespace)  # pylint: disable=eval-used
 
