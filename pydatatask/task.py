@@ -422,6 +422,7 @@ class Task(ABC):
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
         dict_result = dict(cokeyed)
         dict_result["lock"] = lock
+        dict_result["uploaded"] = scratch
         # auto_values = self.links[link_name].auto_values is not None
         auto_cokey = self.links[link_name].auto_meta
 
