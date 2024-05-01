@@ -377,7 +377,7 @@ class Task(ABC):
         self, filename: str, link_name: str, cokey_name: str, job: str, hostjob: Optional[str] = None
     ) -> Any:
         """Generate logic to upload a cokeyed link."""
-        is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
+        is_filesystem = isinstance(self.links[link_name].cokeyed[cokey_name], repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
         url = f"{self.agent_url}/cokeydata/{self.name}/{link_name}/{cokey_name}/{job}" + (
             f"?hostjob={hostjob}" if hostjob is not None else ""
