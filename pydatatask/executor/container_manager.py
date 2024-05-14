@@ -214,13 +214,8 @@ class DockerContainerManager(AbstractContainerManager):
         self, task: str, timeout: Optional[timedelta] = None
     ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
         containers = await self.docker.containers.list(all=1)
-        infos = []
-        for container in containers:
-            try:
-                infos.append(await container.show())
-            except DockerError:
-                continue
-        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos]
+        infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
+        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos if not isinstance(info, Exception)]
         activity = any(name is not None for name, _ in infos_and_names)
         dead = [
             (info, container, name)
