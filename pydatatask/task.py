@@ -841,7 +841,7 @@ class Task(ABC):
                 else:
                     items = link.key.split(".")
                     if items[0] in result:
-                        subjob = subkey(items)
+                        subjob = str(subkey(items))
                     else:
                         pending[items[0]].append((env_name, link))
                         continue
@@ -860,7 +860,7 @@ class Task(ABC):
                 for env_name2, link in pending[env_name]:
                     assert isinstance(link.key, str)
                     assert link.kind is not None
-                    subjob = subkey(link.key.split("."))
+                    subjob = str(subkey(link.key.split(".")))
                     arg = self.instrument_arg(
                         orig_job,
                         await link.repo.template(subjob, self, link.kind, env_name2, orig_job, link.force_path),
