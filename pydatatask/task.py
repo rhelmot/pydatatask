@@ -428,7 +428,7 @@ class Task(ABC):
 
         def prep_upload(cokey, cokeydir):
             if auto_cokey == cokey:
-                return f'(test -e "{cokeydir}/$f" && ln -s "{cokeydir}/$f" {upload} || ln -s /dev/null {upload}) && '
+                return f'(test -e "{cokeydir}/$f" && ln -s "{cokeydir}/$f" {upload} || touch {upload}) && '
             else:
                 return f"ln -s {cokeydir}/$f {upload}"
 
