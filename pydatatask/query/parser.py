@@ -51,6 +51,7 @@ tokens = (
     "ARROW",
     "COLON",
     "ASSIGN",
+    "QUESTION",
 )
 
 # Regular expressions for tokens
@@ -88,6 +89,7 @@ t_SEMI = r";"
 t_ARROW = r"->"
 t_COLON = r":"
 t_ASSIGN = r"="
+t_QUESTION = r"\?"
 t_ignore = " \t"
 
 reserved = {
@@ -129,6 +131,7 @@ precedence = (
     ("left", "PLUS", "MINUS"),
     ("left", "TIMES", "DIVIDE", "MODULUS"),
     ("right", "UMINUS", "NOT", "TILDE"),
+    ("right", "COLON", "QUESTION"),
     ("left", "LBRACKET", "RBRACKET"),
     ("left", "DOT"),
 )
@@ -318,6 +321,11 @@ def p_expr_method_call(p):
     p[0] = FunctionCall(p[2], [p[1]] + p[4])
 
 
+def p_expr_ternary(p):
+    "expr : expr QUESTION expr COLON expr"
+    p[0] = TernaryExpr(p[1], p[3], p[5])
+
+
 def p_funcexpr_template(p):
     "funcexpr : DOT IDENTIFIER LBRACKET tempargs RBRACKET"
     p[0] = FuncExpr(p[2], p[4])
@@ -439,6 +447,13 @@ class FuncExpr:
 class FunctionCall(Expression):
     function: FuncExpr
     args: List[Expression]
+
+
+@dataclass
+class TernaryExpr(Expression):
+    condition: Expression
+    iftrue: Expression
+    iffalse: Expression
 
 
 @dataclass

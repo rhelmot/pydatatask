@@ -313,6 +313,13 @@ class Executor(Visitor):
         scope, defn = funcexpr.resolve(args).make_scope(self.scope, args)
         return await defn.impl(scope)
 
+    async def visit_TernaryExpr(self, obj) -> QueryValue:
+        cond: QueryValue = await self.visit(obj.condition)
+        if cond.unwrap():
+            return await self.visit(obj.iftrue)
+        else:
+            return await self.visit(obj.iffalse)
+
     async def visit_ScopedExpression(self, obj) -> QueryValue:
         newscope = self.scope.copy()
         newvis = Executor(newscope)
