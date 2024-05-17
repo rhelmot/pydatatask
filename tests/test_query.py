@@ -24,7 +24,7 @@ class TestQuery(unittest.IsolatedAsyncioTestCase):
         async with pipeline:
             await inputs.dump("1", {"works": False, "is": "one"})
             await inputs.dump("2", {"works": True, "is": "two"})
-            assert await filtered.info_all() == {"2": {"works": True, "is": "two"}}
+            assert await filtered.info_all() == {"1": {"works": False, "is": "one"}}
 
 
 if __name__ == "__main__":

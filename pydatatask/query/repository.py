@@ -29,9 +29,10 @@ class QueryRepository(Repository):
         query: str,
         getters: Optional[Dict[str, QueryValueType]] = None,
         repos: Optional[Dict[str, Repository]] = None,
+        jq: Optional[Dict[str, str]] = None,
     ):
         super().__init__()
-        self.query = Query(QueryValueType.Repository, query, {}, getters or {}, repos or {})
+        self.query = Query(QueryValueType.Repository, query, {}, getters or {}, repos or {}, jq or {})
         self._cached: Optional[Repository] = None
 
     def footprint(self):

@@ -2,6 +2,7 @@
 
 from typing import Any, Dict
 
+import jq as jq_module
 import yaml
 
 from pydatatask import repository as repomodule
@@ -22,12 +23,14 @@ class Query:
         parameters: Dict[str, QueryValueType],
         getters: Dict[str, QueryValueType],
         repos: Dict[str, "repomodule.Repository"],
+        jq_args: Dict[str, str],
     ):
         self.result_type = result_type
         self.expr: Expression = expr_parser.parse(query)
         self.parameters = parameters
         self.getters = getters
         self.repos = repos
+        self.jq = {k: jq_module.compile(v) for k, v in jq_args.items()}
 
     def _checked_incast(self, ty: QueryValueType, val: Any, reason: str) -> QueryValue:
         if ty == QueryValueType.String and isinstance(val, int):
@@ -43,6 +46,17 @@ class Query:
 
         return FunctionDefinition([], ["arg"], FunctionType((), (QueryValueType.RepositoryData,), ty), inner)
 
+    def _make_query(self, name: str, query) -> FunctionDefinition:
+        async def inner(scope: Scope):
+            gotten = scope.lookup_value("arg").unwrap()
+            if not isinstance(gotten, (dict, list, str, int, float, bool)):
+                raise TypeError(f"Can only run {name} on json types, got {gotten}")
+            return QueryValue.wrap(query.input_value(gotten).first())
+
+        return FunctionDefinition(
+            [], ["arg"], FunctionType((), (QueryValueType.RepositoryData,), QueryValueType.RepositoryData), inner
+        )
+
     def _make_scope(self, parameters: Dict[str, Any]) -> Scope:
         values = {}
         functions = dict(builtins)
@@ -54,6 +68,8 @@ class Query:
             values[name] = QueryValue.wrap(repo)
         for name, ty in self.parameters.items():
             values[name] = self._checked_incast(ty, parameters[name], f"Parameter {name} to Query")
+        for name, query in self.jq.items():
+            functions[name] = [self._make_query(name, query)]
         return Scope.base_scope(values, functions)
 
     async def execute(self, parameters: Dict[str, Any]) -> QueryValue:

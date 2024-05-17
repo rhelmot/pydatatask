@@ -2,9 +2,13 @@ repos:
   filteredInputs:
     cls: QueryMetadata
     args:
-      query: inputs.filter[.getworks]()
+      query: |
+        fn myfilter(data: Data) -> Bool: .invert(.getworks(data));
+        inputs.filter[.myfilter]()
       getters:
-        works: Bool
+        works: Data
+      jq:
+        invert: ". | not"
 repo_classes:
   inputs: MetadataRepository
   done0: MetadataRepository

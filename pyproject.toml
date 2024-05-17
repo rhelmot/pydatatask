@@ -43,6 +43,7 @@ dependencies = [
     "check-jsonschema",
     "uvloop",
     "jsonschema",
+    "jq",
 ]
 
 [project.scripts]

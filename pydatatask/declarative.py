@@ -404,6 +404,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 {
                     "query": str,
                     "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                    "jq": make_dict_parser("jq", str, str),
                 },
             ),
             "QueryMetadata": make_annotated_constructor(
@@ -412,6 +413,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 {
                     "query": str,
                     "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                    "jq": make_dict_parser("jq", str, str),
                 },
             ),
             "QueryFilesystem": make_annotated_constructor(
@@ -420,6 +422,7 @@ def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callabl
                 {
                     "query": str,
                     "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                    "jq": make_dict_parser("jq", str, str),
                 },
             ),
         }
@@ -608,8 +611,9 @@ def build_task_picker(
         query: str,
         parameters: Dict[str, QueryValueType],
         getters: Dict[str, QueryValueType],
+        jq: Dict[str, str],
     ) -> Any:
-        return Query(result_type, query, parameters, getters, repos)
+        return Query(result_type, query, parameters, getters, repos, jq)
 
     query_constructor = make_constructor(
         "Query",
@@ -619,6 +623,7 @@ def build_task_picker(
             "query": str,
             "parameters": make_dict_parser("parameters", str, tyexpr_basic_to_type),
             "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+            "jq": make_dict_parser("jq", str, str),
         },
     )
     queries_constructor = make_dict_parser("queries", str, query_constructor)

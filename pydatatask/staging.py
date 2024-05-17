@@ -114,6 +114,7 @@ class QuerySpec:
     query: str
     parameters: Dict[str, str] = field(default_factory=dict)
     getters: Dict[str, str] = field(default_factory=dict)
+    jq: Dict[str, str] = field(default_factory=dict)
 
 
 @_dataclass_serial
@@ -214,6 +215,7 @@ class RepoQuerySpec:
     cls: str
     query: str
     getters: Dict[str, str] = field(default_factory=dict)
+    jq: Dict[str, str] = field(default_factory=dict)
 
 
 @_dataclass_serial
@@ -259,6 +261,7 @@ class PipelineSpec:
                     {
                         "query": query_spec.query,
                         "getters": query_spec.getters,
+                        "jq": query_spec.jq,
                     },
                 )
                 for name, query_spec in self.repo_queries.items()
