@@ -577,6 +577,16 @@ async def list_get(a: List, b: int, c: object) -> object:
         return c
 
 
+@_builtin("contains")
+async def list_contains(a: List, b: object) -> bool:
+    return b in a
+
+
+@_builtin("contains")
+async def dict_contains_key(a: Dict, b: object) -> bool:
+    return b in a
+
+
 # HACKS BELOW THIS POINT
 @_builtin("asData")
 async def list_as_data(a: List) -> object:
