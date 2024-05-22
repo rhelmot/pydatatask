@@ -10,6 +10,8 @@ from pydatafs.files import Directory, File, RWBufferedFile, Symlink
 from pydatafs.filesystem import PyDataFS
 import yaml
 
+from pydatatask.utils import safe_load
+
 from . import repository as repomodule
 from . import task as taskmodule
 from .pipeline import Pipeline
@@ -100,7 +102,7 @@ class RepoDir(Directory):
                 # we are PROBABLY doing open(x, O_TRUNC)
                 # do not sync this. nobody wants the empty string to be valid yaml. fuck you
                 return
-            data = yaml.safe_load(bytes(data_bytes))
+            data = safe_load(bytes(data_bytes))
             await self.repo.dump(job, data)
 
         async def size():

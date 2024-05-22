@@ -37,6 +37,7 @@ from ..utils import (
     async_copyfile_close,
     asyncasynccontextmanager,
     roundrobin,
+    safe_load,
 )
 
 l = logging.getLogger(__name__)
@@ -888,7 +889,7 @@ class YamlMetadataRepository(MetadataRepository, ABC):
     async def info(self, job, /):
         async with await self.blob.open(job, "rb") as fp:
             s = await fp.read()
-        return yaml.safe_load(s)
+        return safe_load(s)
 
     @job_getter
     async def dump(self, job, data, /):

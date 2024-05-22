@@ -1,6 +1,7 @@
 """Various utility classes and functions that are used throughout the codebase but don't belong anywhere in
 particular."""
 
+import io
 from typing import (
     Any,
     AsyncContextManager,
@@ -21,7 +22,9 @@ import codecs
 import pickle
 import struct
 import time
+import json
 
+import yaml
 from typing_extensions import Buffer, ParamSpec
 
 _T = TypeVar("_T")
@@ -545,3 +548,15 @@ def crypto_hash(x: Any) -> int:
     You weep.
     """
     return _hash_unpacker.unpack(md5(pickle.dumps(x)).digest())[0]
+
+def safe_load(x: Union[str, bytes, io.TextIOBase]) -> Any:
+    """
+    Work around bugs parsing large json documents as yaml
+    """
+    try:
+        if isinstance(x, (str, bytes, bytearray, memoryview)):
+            return json.loads(x)
+        else:
+            return json.load(x)
+    except json.JSONDecodeError:
+        return yaml.safe_load(x)

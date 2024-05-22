@@ -17,6 +17,7 @@ from pydatatask.utils import (
     AWriteStreamBase,
     AWriteStreamBaseIntWrapper,
     async_copyfile,
+    safe_load,
 )
 
 from . import repository as repomodule
@@ -106,7 +107,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         except KeyError as e:
             raise web.HTTPNotFound() from e
         try:
-            params = yaml.safe_load(await request.read())
+            params = safe_load(await request.read())
         except yaml.error.YAMLError as e:
             raise web.HTTPBadRequest() from e
 
@@ -202,7 +203,7 @@ async def inject_data(item: repomodule.Repository, job: str, stream: AReadStream
     elif isinstance(item, repomodule.MetadataRepository):
         data = await stream.read()
         try:
-            data_obj = yaml.safe_load(data)
+            data_obj = safe_load(data)
         except yaml.YAMLError as e:
             raise ValueError(e.args[0]) from e
         await item.dump(job, data_obj)

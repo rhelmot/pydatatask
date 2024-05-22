@@ -39,7 +39,7 @@ from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.session import Ephemeral
 
-from ..utils import _StderrIsStdout
+from ..utils import _StderrIsStdout, safe_load
 
 if TYPE_CHECKING:
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
@@ -239,7 +239,7 @@ class LocalLinuxManager(AbstractProcessManager):
         try:
             async with await self.open(agent_path, "r") as fp:
                 bdata = await fp.read()
-            data = yaml.safe_load(bdata)
+            data = safe_load(bdata)
             pid = data["pid"]
             live_version = data["version"]
             if pid in await self.get_live_pids(set()):

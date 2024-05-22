@@ -65,6 +65,7 @@ from .utils import (
     _StderrIsStdout,
     async_copyfile,
     crypto_hash,
+    safe_load,
     supergetattr,
     supergetattr_path,
 )
@@ -903,7 +904,7 @@ class Task(ABC):
         if self.links[link].auto_meta == cokey and self.links[link].auto_values is not None and hostjob is not None:
             # just assume it's yaml. this is fine.
             data_str = await content.read()
-            data = yaml.safe_load(data_str)
+            data = safe_load(data_str)
             env, _, _ = await self.build_template_env(hostjob)
             rendered = await self._render_auto_values(env, self.links[link].auto_values)
             if isinstance(rendered, dict):
@@ -935,7 +936,7 @@ class Task(ABC):
 
     async def _render_auto_values(self, template_env: Dict[str, Any], template: Any) -> Any:
         if isinstance(template, str):
-            return yaml.safe_load(await render_template(template, template_env))
+            return safe_load(await render_template(template, template_env))
         elif isinstance(template, dict):
             return {k: await self._render_auto_values(template_env, v) for k, v in template.items()}
         elif isinstance(template, list):
@@ -1103,7 +1104,7 @@ class KubeTask(ShellTask):
 
     async def launch(self, job):
         template_env, preamble, epilogue = await self.build_template_env(job)
-        manifest = yaml.safe_load(await render_template(self.template, template_env))
+        manifest = safe_load(await render_template(self.template, template_env))
         for item in template_env.values():
             if asyncio.iscoroutine(item):
                 item.close()

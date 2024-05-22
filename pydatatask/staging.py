@@ -44,6 +44,7 @@ from pydatatask.query.repository import QueryRepository
 from pydatatask.quota import Quota, QuotaManager
 from pydatatask.repository import Repository
 from pydatatask.session import Ephemeral, Session
+from pydatatask.utils import safe_load
 
 if TYPE_CHECKING:
     from dataclasses import dataclass as _dataclass_serial  # pylint: disable=reimported
@@ -318,7 +319,7 @@ class PipelineStaging:
                 self.filename = config.name
 
                 with open(config, "r", encoding="utf-8") as fp:
-                    spec_dict = yaml.safe_load(fp)
+                    spec_dict = safe_load(fp)
                 self.spec = PipelineSpec(**spec_dict)
                 self.spec.desugar()
             else:
