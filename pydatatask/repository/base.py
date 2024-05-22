@@ -156,10 +156,16 @@ class Repository(ABC):
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
             return taskmodule.TemplateInfo(FixedItemRepository(self, job))
         if kind == taskmodule.LinkKind.InputFilepath:
-            filepath = task.mktemp(f"input-{link_name}-{job}")
+            if force_path is None:
+                filepath = task.mktemp(f"input-{link_name}-{job}")
+            else:
+                filepath = force_path
             return taskmodule.TemplateInfo(filepath, preamble=task.mk_repo_get(filepath, link_name, job))
         if kind == taskmodule.LinkKind.OutputFilepath:
-            filepath = task.mktemp(f"output-{link_name}-{job}")
+            if force_path is None:
+                filepath = task.mktemp(f"output-{link_name}-{job}")
+            else:
+                filepath = force_path
             preamble = (
                 task.mk_mkdir(filepath)
                 if isinstance(task.links[link_name].repo, repomodule.FilesystemRepository)
@@ -181,7 +187,10 @@ class Repository(ABC):
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
-            filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
+            if force_path is None:
+                filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
+            else:
+                filepath = force_path
             preamble = task.mk_watchdir_download(filepath, link_name, job)
             return taskmodule.TemplateInfo(filepath, preamble=preamble)
         if kind == taskmodule.LinkKind.RequestedInput:
