@@ -10,6 +10,7 @@ Tasks are related to Repositories by Links. Links are created by
 
 from __future__ import annotations
 
+import json
 from typing import (
     Any,
     Awaitable,
@@ -119,6 +120,7 @@ async def render_template(template, template_env: Dict[str, Any]):
 
     j.filters["shquote"] = shquote
     j.filters["to_yaml"] = yaml.safe_dump
+    j.filters["to_json"] = json.dumps
     j.code_generator_class = ParanoidAsyncGenerator
     if await aiofiles.os.path.isfile(template):
         async with aiofiles.open(template, "r") as fp:

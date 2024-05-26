@@ -184,7 +184,7 @@ def make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], Optiona
         if not isinstance(thing, str):
             raise ValueError(f"When picking a {name}, must provide a str")
         if thing not in options:
-            raise ValueError(f"{thing} is not a valid option for {options}, you want e.g. {next(iter(options))}")
+            raise ValueError(f"{name}: {thing} is not a valid option for {options}, you want e.g. {next(iter(options))}")
         return options[thing]
 
     return inner
@@ -731,7 +731,12 @@ def build_task_picker(
         links = links_constructor(executable["args"].pop("links", {}) or {})
         task = dispatcher(executable)
         for linkname, link in links.items():
-            task.link(linkname, **link)
+            try:
+                task.link(linkname, **link)
+            except Exception as e:
+                print(f"Error linking {linkname} to {name}: {e}")
+                raise
+
         return task
 
     return constructor
