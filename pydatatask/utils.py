@@ -553,10 +553,10 @@ def safe_load(x: Union[str, bytes, io.TextIOBase]) -> Any:
     """
     Work around bugs parsing large json documents as yaml
     """
+    # import ipdb; ipdb.set_trace()
+    if not isinstance(x, (str, bytes, bytearray, memoryview)):
+        x = x.read()
     try:
-        if isinstance(x, (str, bytes, bytearray, memoryview)):
-            return json.loads(x)
-        else:
-            return json.load(x)
+        return json.loads(x)
     except json.JSONDecodeError:
         return yaml.safe_load(x)
