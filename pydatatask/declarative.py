@@ -728,8 +728,12 @@ def build_task_picker(
         executable = thing.pop("executable")
         executable["args"].update(thing)
         executable["args"]["name"] = name
-        links = links_constructor(executable["args"].pop("links", {}) or {})
-        task = dispatcher(executable)
+        try:
+            links = links_constructor(executable["args"].pop("links", {}) or {})
+            task = dispatcher(executable)
+        except Exception as e:
+            print(f"Error constructing {name}: {e}")
+            raise
         for linkname, link in links.items():
             try:
                 task.link(linkname, **link)
