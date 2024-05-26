@@ -734,7 +734,7 @@ def build_task_picker(
             for linkname, link in links.items():
                 task.link(linkname, **link)
         except Exception as e:
-            print(f"### Error constructing task {name}: ")
+            print(f"### Error constructing task {name}: ", file=sys.stderr)
             raise
 
         return task
