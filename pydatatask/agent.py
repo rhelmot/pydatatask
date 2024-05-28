@@ -175,7 +175,7 @@ async def cat_data(item: repomodule.Repository, job: str, stream: AWriteStreamBa
     elif isinstance(item, repomodule.FilesystemRepository):
         await item.get_tarball(job, stream)
     else:
-        raise TypeError(type(item))
+        raise TypeError(f"Unknown repository type: {type(item)=!r}, {item=!r}, {job=!r}")
 
 
 async def cat_fs_meta(item: repomodule.FilesystemRepository, job: str, stream: AWriteStreamBase):
@@ -205,9 +205,10 @@ async def inject_data(item: repomodule.Repository, job: str, stream: AReadStream
         try:
             data_obj = safe_load(data)
         except yaml.YAMLError as e:
-            raise ValueError(e.args[0]) from e
+            # raise ValueError(e.args[0]) from e
+            raise ValueError(f"Error parsing YAML: {e}, {e.args[0]} when parsing {item=!r} {job=!r}: {data}") from e
         await item.dump(job, data_obj)
     elif isinstance(item, repomodule.FilesystemRepository):
         await item.dump_tarball(job, stream)
     else:
-        raise TypeError(type(item))
+        raise TypeError(f"Unknown repository type: {type(item)=!r}, {item=!r}, {job=!r}")
