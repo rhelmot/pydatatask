@@ -695,8 +695,10 @@ class Task(ABC):
         link = self.links[linkname]
         if link.kind != LinkKind.StreamingInputFilepath:
             raise TypeError("Cannot automatically produce a filtered repo unless it's StreamingInput")
-        if link.key is None or link.key == "ALLOC" or callable(link.key):
-            raise TypeError("Bad key for repository filter")
+        if link.key is None:
+            return link.repo
+        if link.key == "ALLOC" or callable(link.key):
+            raise TypeError(f"Bad key for repository filter: {link.key=!r} for {linkname=!r} in {self.name!r} for {job!r}")
 
         splitkey = link.key.split(".")
         related = self._repo_related(splitkey[0])
