@@ -192,8 +192,8 @@ class Repository(ABC):
                 filepath = task.mktemp(f"streaming-input-{link_name}-{job}")
             else:
                 filepath = force_path
-            preamble = task.mk_watchdir_download(filepath, link_name, job)
-            return taskmodule.TemplateInfo(filepath, preamble=preamble)
+            preamble, extra_dirs = task.mk_watchdir_download(filepath, link_name, job)
+            return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble)
         if kind == taskmodule.LinkKind.RequestedInput:
             preamble, func = task.mk_download_function(link_name)
             return taskmodule.TemplateInfo(func, preamble=preamble)

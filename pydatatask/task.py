@@ -424,8 +424,10 @@ class Task(ABC):
         lock = self.host.mktemp("lock")
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
         dict_result = dict(cokeyed)
+        dict_result["main"] = filepath
         dict_result["lock"] = lock
         dict_result["uploaded"] = scratch
+        dict_result["cokeyed"] = cokeyed
         # auto_values = self.links[link_name].auto_values is not None
         auto_cokey = self.links[link_name].auto_meta
 
@@ -435,8 +437,7 @@ class Task(ABC):
             else:
                 return f"ln -s {cokeydir}/$f {upload}"
 
-        return (
-            f"""
+        templated_preamble = f"""
         {self.host.mk_mkdir(filepath) if mkdir else ""}
         {self.host.mk_mkdir(scratch)}
         {self.host.mk_mkdir(lock)}
@@ -481,14 +482,15 @@ class Task(ABC):
         }}
         watcher &
         WATCHER_PID=$!
-        """,
-            f"""
+        """
+
+        templated_epilogue = f"""
         echo "Finishing up"
         echo 1 >{finished}
         wait $WATCHER_PID
-        """,
-            dict_result,
-        )
+        """
+
+        return templated_preamble, templated_epilogue, dict_result
 
     def mk_watchdir_download(self, filepath: str, link_name: str, job: str) -> Any:
         """Misery and woe.
@@ -500,12 +502,14 @@ class Task(ABC):
             raise ValueError("Not sure how to do this off of linux")
         scratch = self.host.mktemp("scratch")
         download = self.host.mktemp("download")
+        lock = self.host.mktemp("lock")
         stream_url = f"{self.agent_url}/stream/{self.name}/{link_name}/{job}"
         stream_headers = {"Cookie": f"secret={self.agent_secret}"}
 
-        return f"""
+        templated_preamble = f"""
         {self.host.mk_mkdir(filepath)}
         {self.host.mk_mkdir(scratch)}
+        {self.host.mk_mkdir(lock)}
         watcher() {{
             cd {filepath}
             while true; do
@@ -513,15 +517,22 @@ class Task(ABC):
                 {self.mk_http_get(download, stream_url, stream_headers, handle_err=self.mk_error_handler(stream_url, stream_headers))}
                 for ID in $(cat {download}); do
                     if ! [ -e "{scratch}/$ID" ]; then
+                        touch {lock}/$ID
                         {self.mk_repo_get(download, link_name, "$ID")}
                         mv {download} $ID
                         echo >{scratch}/$ID
+                        rm {lock}/$ID
                     fi
                 done
             done
         }}
         watcher &
         """
+
+        return templated_preamble, {
+            'main': filepath,
+            'lock': lock,
+        }
 
     def _make_ready(self):
         """Return the repository whose job membership is used to determine whether a task instance should be
