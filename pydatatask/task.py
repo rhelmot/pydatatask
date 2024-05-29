@@ -424,10 +424,10 @@ class Task(ABC):
         lock = self.host.mktemp("lock")
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
         dict_result = dict(cokeyed)
-        dict_result["main"] = filepath
-        dict_result["lock"] = lock
-        dict_result["uploaded"] = scratch
-        dict_result["cokeyed"] = cokeyed
+        dict_result["main_dir"] = filepath
+        dict_result["lock_dir"] = lock
+        dict_result["uploaded_dir"] = scratch
+        dict_result["cokeyed_dirs"] = cokeyed
         # auto_values = self.links[link_name].auto_values is not None
         auto_cokey = self.links[link_name].auto_meta
 
@@ -530,8 +530,8 @@ class Task(ABC):
         """
 
         return templated_preamble, {
-            'main': filepath,
-            'lock': lock,
+            'main_dir': filepath,
+            'lock_dir': lock,
         }
 
     def _make_ready(self):
