@@ -423,7 +423,7 @@ class Task(ABC):
         finished = self.host.mktemp("finished")
         lock = self.host.mktemp("lock")
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
-        dict_result = dict(cokeyed)
+        dict_result = {}
         dict_result["main_dir"] = filepath
         dict_result["lock_dir"] = lock
         dict_result["uploaded_dir"] = scratch
