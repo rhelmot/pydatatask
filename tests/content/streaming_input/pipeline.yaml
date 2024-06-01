@@ -10,15 +10,18 @@ tasks:
   task:
     done: done
     links:
+      # scope and the task itself are keyed alike
       scope:
         repo: scope
         kind: InputMetadata
+      # input and inputScope are keyed alike but not on the task key
       inputScope:
         repo: inputScope
         kind: null
       input:
         repo: input
         kind: StreamingInputFilepath
+        # this indicates that only inputs such that the same key in inputScope has .target == task key should be downloaded
         key: inputScope.target
       output:
         repo: output
