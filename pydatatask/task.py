@@ -10,7 +10,6 @@ Tasks are related to Repositories by Links. Links are created by
 
 from __future__ import annotations
 
-import json
 from typing import (
     Any,
     Awaitable,
@@ -39,6 +38,7 @@ import asyncio
 import copy
 import getpass
 import inspect
+import json
 import logging
 import os
 import shlex
@@ -530,8 +530,8 @@ class Task(ABC):
         """
 
         return templated_preamble, {
-            'main_dir': filepath,
-            'lock_dir': lock,
+            "main_dir": filepath,
+            "lock_dir": lock,
         }
 
     def _make_ready(self):
@@ -709,7 +709,9 @@ class Task(ABC):
         if link.key is None:
             return link.repo
         if link.key == "ALLOC" or callable(link.key):
-            raise TypeError(f"Bad key for repository filter: {link.key=!r} for {linkname=!r} in {self.name!r} for {job!r}")
+            raise TypeError(
+                f"Bad key for repository filter: {link.key=!r} for {linkname=!r} in {self.name!r} for {job!r}"
+            )
 
         splitkey = link.key.split(".")
         related = self._repo_related(splitkey[0])
@@ -2100,13 +2102,4 @@ class ContainerTask(ShellTask):
         env_src: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
-        # HACK FOREVER AND ALWAYS
-        preamble.insert(
-            0,
-            """
-if ! mountpoint -q /tmp 2>&1 >/dev/null; then
-    mount -t tmpfs none /tmp 2>&1 >/dev/null || true
-fi
-""",
-        )
         return env, preamble, epilogue
