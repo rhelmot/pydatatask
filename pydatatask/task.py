@@ -668,13 +668,14 @@ class Task(ABC):
 
         if link.key == "ALLOC":
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
-                lambda job: self.derived_hash(job, linkname), repomodule.AggregateAndRepository(**self.input)
+                lambda job: self.derived_hash(job, linkname),
+                repomodule.AggregateAndRepository(**self.required_for_start_basic),
             )
             prefetch_lookup = False
 
         elif callable(link.key):
             mapped = repomodule.FunctionCallMetadataRepository(
-                link.key, repomodule.AggregateAndRepository(**self.input)
+                link.key, repomodule.AggregateAndRepository(**self.required_for_start_basic)
             )
             prefetch_lookup = False
         else:
@@ -776,6 +777,10 @@ class Task(ABC):
             for name, link in self.links.items()
             if link.required_for_start
         }
+
+    @property
+    def required_for_start_basic(self):
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_start is True}
 
     @property
     def inhibits_output(self):

@@ -10,7 +10,7 @@ from typing import (
     Callable,
 )
 from typing import Counter as TypedCounter
-from typing import Dict, Literal, Optional, Set, Union, overload
+from typing import Dict, List, Literal, Optional, Set, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
@@ -122,6 +122,9 @@ class Repository(ABC):
 
     def __aiter__(self) -> AsyncIterator[str]:
         return self.filter_jobs(self.unfiltered_iter())
+
+    async def keys(self) -> List[str]:
+        return [x async for x in self]
 
     @abstractmethod
     def __getstate__(self) -> Any:
