@@ -517,6 +517,8 @@ class PipelineStaging:
                 dict_spec = asdict(task_spec)
                 if task_name in staging.executors_fulfilled_by_parents:
                     dict_spec["executor"] = task_name
+                for link in dict_spec["links"].values():
+                    link.pop("jq_filter")
                 all_tasks.append(task_constructor(task_name, dict_spec))
 
         root_hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in self.spec.hosts.items()}
