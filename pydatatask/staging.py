@@ -96,6 +96,7 @@ class LinkSpec:
     repo: str
     kind: str
     key: Optional[str] = None
+    jq_filter: Optional[str] = None
     cokeyed: Dict[str, str] = field(default_factory=dict)
     auto_meta: Optional[str] = None
     auto_values: Optional[Any] = None
@@ -268,10 +269,33 @@ class PipelineSpec:
                 for name, query_spec in self.repo_queries.items()
             }
         )
+        self.repo_queries.clear()
+
         for k, v in self.repo_classes.items():
             if isinstance(v, str):
                 self.repo_classes[k] = RepoClassSpec(v)
-        self.repo_queries.clear()
+
+        for taskname, task in self.tasks.items():
+            for linkname, link in task.links.items():
+                if link.jq_filter is not None:
+                    repo_type = self._get_repo_type(link.repo)
+                    if "Metadata" not in repo_type:  # guh
+                        raise ValueError(f"Cannot use jq_filter with {repo_type}")
+                    self.repos[f"autogen_{taskname}_{linkname}"] = Dispatcher(
+                        "QueryMetadata",
+                        {
+                            "query": f"{link.repo}.filter[.jq]()",
+                            "jq": {"jq": link.jq_filter},
+                        },
+                    )
+                link.jq_filter = None
+
+    def _get_repo_type(self, name: str) -> str:
+        if name in self.repos:
+            return self.repos[name].cls
+        if name in self.repo_classes:
+            return self.repo_classes[name].cls
+        raise KeyError(name)
 
 
 @_dataclass_serial
