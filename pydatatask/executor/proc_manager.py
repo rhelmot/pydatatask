@@ -24,6 +24,7 @@ import getpass
 import os
 import shlex
 import signal
+import subprocess
 import sys
 
 from aiohttp import web
@@ -201,7 +202,7 @@ class LocalLinuxManager(AbstractProcessManager):
         if "/" in args[0]:
             os.chmod(args[0], 0o755)
         return_code = shlex.quote(return_code)
-        p = await asyncio.create_subprocess_shell(
+        p = subprocess.Popen(
             f"""
             {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
             PID=$!
@@ -209,13 +210,14 @@ class LocalLinuxManager(AbstractProcessManager):
             wait $PID >/dev/null 2>/dev/null
             echo $? >{return_code} 2>/dev/null
             """,
-            stdout=asyncio.subprocess.PIPE,
+            shell=True,
+            stdout=subprocess.PIPE,
             close_fds=True,
             cwd=cwd,
             env=environ,
         )
         assert p.stdout is not None
-        pid = await p.stdout.readline()
+        pid = p.stdout.readline()
         return pid.decode().strip()
 
     async def kill(self, pid: str):
@@ -255,6 +257,7 @@ class LocalLinuxManager(AbstractProcessManager):
             await self.kill(pid)
 
     async def launch_agent(self, pipeline):
+        asyncio.get_event_loop().set_debug(True)
         if pipeline.source_file is None:
             raise ValueError("Cannot start a pipeline without a source_file")
             # if you really need this look into forking instead of subprocessing
@@ -270,10 +273,12 @@ class LocalLinuxManager(AbstractProcessManager):
         with open(f"{tmp}/pydatatask-{getpass.getuser()}/agent-stdout-{pipeline.agent_port}", "ab") as fp:
             env = dict(os.environ)
             env["PIPELINE_YAML"] = str(pipeline.source_file)
-            p = await asyncio.create_subprocess_exec(
-                sys.executable,
-                Path(__file__).parent.parent / "cli" / "main.py",
-                "agent-http",
+            p = subprocess.Popen(
+                [
+                    sys.executable,
+                    Path(__file__).parent.parent / "cli" / "main.py",
+                    "agent-http",
+                ],
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=fp,
                 stderr=asyncio.subprocess.STDOUT,
