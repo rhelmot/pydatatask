@@ -122,7 +122,7 @@ class QuerySpec:
 @_dataclass_serial
 class TaskSpec:
     executable: Dispatcher
-    done: str
+    done: Optional[str] = None
     annotations: Dict[str, Any] = field(default_factory=dict)
     executor: Optional[str] = None
     ready: Optional[str] = None
@@ -289,6 +289,11 @@ class PipelineSpec:
                         },
                     )
                 link.jq_filter = None
+
+            if task.done is None:
+                reponame = f"autodone_{taskname}"
+                self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository")
+                task.done = reponame
 
     def _get_repo_type(self, name: str) -> str:
         if name in self.repos:
