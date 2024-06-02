@@ -956,6 +956,11 @@ class Task(ABC):
             return result
         return content
 
+    async def _test_auto_values(self, template_env: Dict[str, Any]):
+        for link in self.links.values():
+            if link.auto_values is not None:
+                await self._render_auto_values(template_env, link.auto_values)
+
     async def _render_auto_values(self, template_env: Dict[str, Any], template: Any) -> Any:
         if isinstance(template, str):
             return safe_load(await render_template(template, template_env))
@@ -1127,6 +1132,7 @@ class KubeTask(ShellTask):
     async def launch(self, job):
         template_env, preamble, epilogue = await self.build_template_env(job)
         manifest = safe_load(await render_template(self.template, template_env))
+        await self._test_auto_values(template_env)
         for item in template_env.values():
             if asyncio.iscoroutine(item):
                 item.close()
@@ -1452,6 +1458,7 @@ class ProcessTask(ShellTask):
             template_env, preamble, epilogue = await self.build_template_env(job)
             exe_path = self.basedir / job / "exe"
             exe_txt = await render_template(self.template, template_env)
+            await self._test_auto_values(template_env)
             for item in template_env.values():
                 if asyncio.iscoroutine(item):
                     item.close()
@@ -2064,6 +2071,7 @@ class ContainerTask(ShellTask):
         template_env, preamble, epilogue = await self.build_template_env(job)
         exe_txt = await render_template(self.template, template_env)
         image = await render_template(self.image, template_env)
+        await self._test_auto_values(template_env)
         exe_txt = "\n".join(
             [
                 "set -e",
