@@ -80,7 +80,7 @@ class LiveContainerRepository(Repository):
         return item in await self.task.manager.live(self.task.name)
 
     def __repr__(self):
-        return f"<LiveKubeRepository task={self.task.name}>"
+        return f"<LiveContainerRepository task={self.task.name}>"
 
     async def delete(self, job, /):
         """Deleting a job from this repository will delete the pod."""
