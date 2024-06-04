@@ -41,6 +41,7 @@ import inspect
 import json
 import logging
 import os
+import random
 import shlex
 import string
 import sys
@@ -430,6 +431,7 @@ class Task(ABC):
         dict_result["cokeyed_dirs"] = cokeyed
         # auto_values = self.links[link_name].auto_values is not None
         auto_cokey = self.links[link_name].auto_meta
+        nonce = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
 
         def prep_upload(cokey, cokeydir):
             if auto_cokey == cokey:
@@ -481,13 +483,13 @@ class Task(ABC):
           done
         }}
         watcher &
-        WATCHER_PID=$!
+        WATCHER_PID_{nonce}=$!
         """
 
         templated_epilogue = f"""
         echo "Finishing up"
         echo 1 >{finished}
-        wait $WATCHER_PID
+        wait $WATCHER_PID_{nonce}
         """
 
         return templated_preamble, templated_epilogue, dict_result
