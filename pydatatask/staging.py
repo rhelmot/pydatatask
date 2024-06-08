@@ -298,6 +298,17 @@ class PipelineSpec:
                 reponame = f"autodone_{taskname}"
                 self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository")
                 task.done = reponame
+            # horrid abstraction leak. that's sugar babey!
+            if task.executable.cls == "Container" and "logs" not in task.executable.args:
+                reponame = f"autologs_{taskname}"
+                self.repo_classes[reponame] = RepoClassSpec(cls="BlobRepository")
+                task.executable.args["logs"] = reponame
+            if task.executable.cls == "Process" and "stdout" not in task.executable.args:
+                reponame = f"autostdout_{taskname}"
+                self.repo_classes[reponame] = RepoClassSpec(cls="BlobRepository")
+                task.executable.args["stdout"] = reponame
+                if "stderr" not in task.executable.args:
+                    task.executable.args["stderr"] = "STDOUT"
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":
