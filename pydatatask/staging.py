@@ -223,8 +223,8 @@ class RepoQuerySpec:
 @_dataclass_serial
 class RepoClassSpec:
     cls: str
-    compress_backend: bool = False
-    compress_backup: bool = False
+    compress_backend: Optional[bool] = None
+    compress_backup: Optional[bool] = None
     schema: Optional[Dict[str, Any]] = None
     suffix: str = ""
     mimetype: str = "application/octet-stream"
@@ -273,7 +273,11 @@ class PipelineSpec:
 
         for k, v in self.repo_classes.items():
             if isinstance(v, str):
-                self.repo_classes[k] = RepoClassSpec(v)
+                v = self.repo_classes[k] = RepoClassSpec(v)
+            if v.compress_backend is None:
+                v.compress_backend = v.cls == "FilesystemRepository"
+            if v.compress_backup is None:
+                v.compress_backup = v.cls == "FilesystemRepository"
 
         for taskname, task in self.tasks.items():
             for linkname, link in task.links.items():
