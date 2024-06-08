@@ -729,10 +729,12 @@ class Task(ABC):
         async def filterer(subjob: str) -> bool:
             return await mapped.info(subjob) == job
 
-        if not isinstance(link.repo, repomodule.MetadataRepository):
-            result = repomodule.FilterRepository(link.repo, filterer)
-        else:
+        if isinstance(link.repo, repomodule.MetadataRepository):
             result = repomodule.FilterMetadataRepository(link.repo, filterer)
+        elif isinstance(link.repo, repomodule.FilesystemRepository):
+            result = repomodule.FilterFilesystemRepository(link.repo, filterer)
+        else:
+            result = repomodule.FilterRepository(link.repo, filterer)
 
         return result
 

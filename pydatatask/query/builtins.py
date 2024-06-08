@@ -423,6 +423,8 @@ async def filter_repo_keys(a: repomodule.Repository, b: Callable[[Key], Awaitabl
                     yield k
 
         return repomodule.FilterMetadataRepository(a, filt=inner, filter_all=inner_all)
+    elif isinstance(a, repomodule.FilesystemRepository):
+        return repomodule.FilterFilesystemRepository(a, inner)
     else:
         return repomodule.FilterRepository(a, inner)
 

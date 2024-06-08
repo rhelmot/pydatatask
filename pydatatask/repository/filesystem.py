@@ -5,6 +5,8 @@ from typing import (
     AsyncContextManager,
     AsyncGenerator,
     AsyncIterator,
+    Awaitable,
+    Callable,
     Dict,
     List,
     Optional,
@@ -30,6 +32,7 @@ from pydatatask.repository import FileRepositoryBase
 from pydatatask.repository.base import (
     BlobRepository,
     FileRepository,
+    FilterRepository,
     MetadataRepository,
     Repository,
     job_getter,
@@ -51,6 +54,7 @@ __all__ = (
     "DirectoryRepository",
     "ContentAddressedBlobRepository",
     "TarfileFilesystemRepository",
+    "FilterFilesystemRepository",
 )
 
 
@@ -739,3 +743,45 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def validate(self):
         await self.inner.validate()
         await super().validate()
+
+
+class FilterFilesystemRepository(FilterRepository, FilesystemRepository):
+    """A filter repository that is also a filesystem repository."""
+
+    base: FilesystemRepository
+
+    def __init__(
+        self,
+        base: FilesystemRepository,
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        allow_deletes=False,
+    ):
+        super().__init__(base, filt, allow_deletes)
+
+    async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
+        async for a, b, c, d in self.base.walk(job):
+            yield a, b, c, d
+
+    async def dump(self, job: str):
+        thing = self.base.dump(job)
+        try:
+            while True:
+                entry = yield
+                await thing.asend(entry)
+        except StopAsyncIteration:
+            pass
+
+    async def get_mode(self, job: str, path: str) -> Optional[int]:
+        return await self.base.get_mode(job, path)
+
+    async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
+        return await self.base.get_regular_meta(job, path)
+
+    async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
+        return await self.base.get_type(job, path)
+
+    async def open(self, job: str, path: Union[str, Path]) -> AsyncContextManager[AReadStreamBase]:
+        return await self.base.open(job, path)
+
+    async def readlink(self, job: str, path: str) -> str:
+        return await self.base.readlink(job, path)
