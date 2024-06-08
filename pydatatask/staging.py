@@ -188,6 +188,8 @@ class PipelineChildArgsMissing:
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
+            if repo_spec.required:
+                raise ValueError(f"{repo_name} is manually marked as required but is not fulfilled")
             repo_spec.name = repo_name
             result = repo_allocators(repo_spec)
             if result is None:
@@ -228,6 +230,7 @@ class RepoClassSpec:
     schema: Optional[Dict[str, Any]] = None
     suffix: str = ""
     mimetype: str = "application/octet-stream"
+    required: bool = False
     name: Optional[str] = None
 
 
