@@ -295,6 +295,30 @@ class PipelineSpec:
                 self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository")
                 task.done = reponame
 
+        for reponame, repo in self.repos.items():
+            if repo.cls == "CokeyedJqFilterRepository":
+                query = repo.args["jq_filter"]
+                source = repo.args["source"]
+                filter_source = repo.args["filter_source"]
+                source_defn = self._get_repo_type(source)
+                if "Metadata" in source_defn:
+                    query_cls = "QueryMetadata"
+                elif "Filesystem" in source_defn:
+                    query_cls = "QueryFilesystem"
+                else:
+                    query_cls = "QueryRepository"
+                self.repos[reponame] = Dispatcher(
+                    query_cls,
+                    {
+                        "query": f"""
+                        let filtered = {filter_source}.filter[.jq_filter]();
+                        fn my_filter(key: Key) -> Bool: filtered.contains(key);
+                        {source}.filter[.my_filter]()
+                    """,
+                        "jq": {"jq_filter": query},
+                    },
+                )
+
     def _get_repo_type(self, name: str) -> str:
         if name in self.repos:
             return self.repos[name].cls
