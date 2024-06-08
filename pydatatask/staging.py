@@ -329,7 +329,7 @@ class PipelineSpec:
                     query_cls,
                     {
                         "query": f"""
-                        fn jq_filter_bool(data: Data) -> Bool: .jq_filter(data)
+                        fn jq_filter_bool(data: Data) -> Bool: .jq_filter(data);
                         let filtered = {filter_source}.filter[.jq_filter_bool]();
                         fn my_filter(key: Key) -> Bool: filtered.contains(key);
                         {source}.filter[.my_filter]()
