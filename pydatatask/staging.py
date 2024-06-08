@@ -312,7 +312,7 @@ class PipelineSpec:
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":
-                query = repo.args["jq_filter"]
+                query = repo.args["filter_query"]
                 source = repo.args["source"]
                 filter_source = repo.args["filter_source"]
                 source_defn = self._get_repo_type(source)
