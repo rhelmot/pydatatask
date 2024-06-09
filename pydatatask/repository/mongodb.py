@@ -1,6 +1,6 @@
 """This module contains repositories for interacting with MongoDB as a data store."""
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import motor.core
 import motor.motor_asyncio
@@ -13,7 +13,7 @@ class MongoMetadataRepository(MetadataRepository):
 
     def __init__(
         self,
-        database: Callable[[], motor.core.AgnosticCollection],
+        database: Callable[[], Union[motor.core.AgnosticCollection, motor.core.AgnosticDatabase]],
         collection: str,
     ):
         """

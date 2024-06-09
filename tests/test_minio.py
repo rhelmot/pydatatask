@@ -1,3 +1,4 @@
+from typing import TYPE_CHECKING, List
 import asyncio
 import os
 import random
@@ -9,6 +10,9 @@ import aiobotocore.session
 
 from pydatatask.host import LOCAL_HOST
 import pydatatask
+
+if TYPE_CHECKING:
+    from types_aiobotocore_s3.type_defs import ObjectIdentifierTypeDef
 
 
 def rid(n=6):
@@ -104,8 +108,9 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         if self.client is not None:
-            objects = [
-                {"Key": obj["Key"]} for obj in (await self.client.list_objects(Bucket=self.bucket)).get("Contents", [])
+            objects: List[ObjectIdentifierTypeDef] = [
+                {"Key": obj.get("Key", "")}
+                for obj in (await self.client.list_objects(Bucket=self.bucket)).get("Contents", [])
             ]
             if objects:
                 await self.client.delete_objects(

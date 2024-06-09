@@ -76,7 +76,9 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
         await repo.dump("foo", {"weh": 1})
         assert len([x async for x in repo]) == 1
         assert (await repo.info("foo"))["weh"] == 1
-        assert (await self.client.get_database(self.database).test.find_one({"_id": "foo"}))["weh"] == 1
+        thingy = await self.client.get_database(self.database).test.find_one({"_id": "foo"})
+        assert thingy is not None
+        assert thingy["weh"] == 1
         assert await repo.contains("foo")
         assert not await repo.contains("bar")
         all_things = await repo.info_all()

@@ -22,10 +22,15 @@ def rid(n=6):
 class TestDockerHub(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
-        self.client = None
+        self._client = None
+
+    @property
+    def client(self):
+        assert self._client is not None
+        return self._client
 
     async def asyncSetUp(self):
-        self.client = docker_registry_client_async.DockerRegistryClientAsync(
+        self._client = docker_registry_client_async.DockerRegistryClientAsync(
             client_session_kwargs={"connector_owner": True}, tcp_connector_kwargs={"family": socket.AF_INET}
         )
 
@@ -48,18 +53,29 @@ class TestDockerHub(unittest.IsolatedAsyncioTestCase):
 class TestDockerLocal(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
-        self.client: Optional[docker_registry_client_async.DockerRegistryClientAsync] = None
-        self.docker_path = shutil.which("docker")
+        self._client: Optional[docker_registry_client_async.DockerRegistryClientAsync] = None
+        docker_path = shutil.which("docker")
         self.docker_name = None
         self.test_id = rid()
-        self.endpoint = None
+        self._endpoint = None
+
+        if docker_path is None:
+            raise unittest.SkipTest("Docker is not installed")
+        self.docker_path = docker_path
+
+    @property
+    def client(self):
+        assert self._client is not None
+        return self._client
+
+    @property
+    def endpoint(self):
+        assert self._endpoint is not None
+        return self._endpoint
 
     async def asyncSetUp(self):
-        if self.docker_path is None:
-            raise unittest.SkipTest("Docker is not installed")
-
         docker_registry_client_async.DockerRegistryClientAsync.DEFAULT_PROTOCOL = "http"
-        self.client = docker_registry_client_async.DockerRegistryClientAsync(
+        self._client = docker_registry_client_async.DockerRegistryClientAsync(
             client_session_kwargs={"connector_owner": True}, tcp_connector_kwargs={"family": socket.AF_INET}, ssl=False
         )
 
@@ -107,7 +123,7 @@ class TestDockerLocal(unittest.IsolatedAsyncioTestCase):
         password = [line for line in stderr.split() if b"password=" in line][0].split(b"=")[1].decode().strip('"')
 
         self.docker_name = docker_name
-        self.endpoint = f"localhost:{port}"
+        self._endpoint = f"localhost:{port}"
         await self.client.add_credentials(
             credentials=base64.b64encode(f"{user}:{password}".encode()).decode(), endpoint=self.endpoint
         )

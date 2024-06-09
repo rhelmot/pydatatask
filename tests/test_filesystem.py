@@ -11,10 +11,15 @@ class TestFilesystem(unittest.IsolatedAsyncioTestCase):
     def __init__(self, method):
         super().__init__(method)
 
-        self.dir = None
+        self._dir = None
 
     async def asyncSetUp(self):
-        self.dir = tempfile.mkdtemp()
+        self._dir = tempfile.mkdtemp()
+
+    @property
+    def dir(self):
+        assert self._dir is not None
+        return self._dir
 
     async def test_filesystem(self):
         assert self.dir is not None
