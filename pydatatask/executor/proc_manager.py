@@ -188,28 +188,29 @@ class LocalLinuxManager(AbstractProcessManager):
         if stdin is None:
             stdin = "/dev/null"
         else:
-            stdin = shlex.quote(stdin)
+            stdin = shlex.quote(str(stdin))
         if stdout is None:
             stdout = "/dev/null"
         else:
-            stdout = shlex.quote(stdout)
+            stdout = shlex.quote(str(stdout))
         if stderr is None:
             stderr = "/dev/null"
         elif isinstance(stderr, _StderrIsStdout):
             stderr = "&1"
         else:
-            stderr = shlex.quote(stderr)
+            stderr = shlex.quote(str(stderr))
         if "/" in args[0]:
             os.chmod(args[0], 0o755)
-        return_code = shlex.quote(return_code)
+        return_code = shlex.quote(str(return_code))
+        cmd = f"""
+        {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
+        PID=$!
+        echo $PID
+        wait $PID >/dev/null 2>/dev/null
+        echo $? >{return_code} 2>/dev/null
+        """
         p = subprocess.Popen(
-            f"""
-            {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
-            PID=$!
-            echo $PID
-            wait $PID >/dev/null 2>/dev/null
-            echo $? >{return_code} 2>/dev/null
-            """,
+            cmd,
             shell=True,
             stdout=subprocess.PIPE,
             close_fds=True,
@@ -393,24 +394,24 @@ class SSHLinuxManager(AbstractProcessManager):
     async def get_live_pids(self, hint):
         p = await self.ssh.run("ls /proc")
         assert p.stdout is not None
-        return {x for x in p.stdout.split() if x.isdigit()}
+        return {cast(str, x) for x in p.stdout.split() if x.isdigit()}
 
     async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
         await self.mkdir(self.tmp_path)
         if stdin is None:
             stdin = "/dev/null"
         else:
-            stdin = shlex.quote(stdin)
+            stdin = shlex.quote(str(stdin))
         if stdout is None:
             stdout = "/dev/null"
         else:
-            stdout = shlex.quote(stdout)
+            stdout = shlex.quote(str(stdout))
         if stderr is None:
             stderr = "/dev/null"
         elif isinstance(stderr, _StderrIsStdout):
             stderr = "&1"
         else:
-            stderr = shlex.quote(stderr)
+            stderr = shlex.quote(str(stderr))
         if "/" in args[0]:
             async with self.ssh.start_sftp_client() as sftp:
                 await sftp.chmod(args[0], 0o755)
@@ -430,7 +431,7 @@ class SSHLinuxManager(AbstractProcessManager):
             ),
         )
         pid = await p.stdout.readline()
-        return pid.strip()
+        return pid.strip().decode()
 
 
 localhost_manager = LocalLinuxManager(app="default")

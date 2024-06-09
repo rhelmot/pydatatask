@@ -49,10 +49,10 @@ class Executor:
         """The host that this executor's tasks will run on."""
         raise NotImplementedError
 
-    async def launch_agent(self, pipeline: "Pipeline"):
+    async def launch_agent(self, pipeline: "Pipeline") -> None:
         """Spawn the pydatatask http agent using this executor."""
         raise TypeError("Not supported, yikes")
 
-    async def teardown_agent(self):
+    async def teardown_agent(self) -> None:
         """Kill the pydatatask http agent that was spawned using this executor."""
         raise TypeError("Not supported, yikes")
