@@ -589,6 +589,11 @@ async def dict_contains_key(a: Dict, b: object) -> bool:
     return b in a
 
 
+@_builtin("contains")
+async def repo_contains_key(a: repomodule.Repository, b: Key) -> bool:
+    return await a.contains(b)
+
+
 # HACKS BELOW THIS POINT
 @_builtin("asData")
 async def list_as_data(a: List) -> object:

@@ -27,6 +27,7 @@ class Query:
     ):
         self.result_type = result_type
         self.expr: Expression = expr_parser.parse(query)
+        self.query = query
         self.parameters = parameters
         self.getters = getters
         self.repos = repos
