@@ -544,10 +544,11 @@ class PipelineStaging:
 
         for staging in self._iter_children():
             all_repos = {name: repo_cache[id(dispatch)] for name, dispatch in staging.spec.repos.items()}
+            all_local_repos = dict(all_repos)
             all_repos.update(
                 {name: repo_cache[id(dispatch)] for name, dispatch in staging.repos_fulfilled_by_parents.items()}
             )
-            for repo in all_repos.values():
+            for repo in all_local_repos.values():
                 if isinstance(repo, QueryRepository):
                     repo.query.repos.update(all_repos)
 
