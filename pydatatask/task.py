@@ -1280,12 +1280,12 @@ class ProcessTask(ShellTask):
         name: str,
         template: str,
         done: "repomodule.MetadataRepository",
+        pids: "repomodule.MetadataRepository",
         executor: Optional[execmodule.Executor] = None,
         quota_manager: Optional["QuotaManager"] = None,
         job_quota: Optional["Quota"] = None,
         timeout: Optional[timedelta] = None,
         window: timedelta = timedelta(minutes=1),
-        pids: Optional["repomodule.MetadataRepository"] = None,
         environ: Optional[Dict[str, str]] = None,
         long_running: bool = False,
         stdin: Optional["repomodule.BlobRepository"] = None,
@@ -1329,11 +1329,6 @@ class ProcessTask(ShellTask):
         super().__init__(
             name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
         )
-
-        if pids is None:
-            pids = repomodule.YamlMetadataFileRepository(
-                f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/{name}_pids"
-            )
 
         self.pids = pids
         setattr(self.pids, "_EXCLUDE_BACKUP", True)

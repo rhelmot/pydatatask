@@ -312,6 +312,10 @@ class PipelineSpec:
                 task.executable.args["stdout"] = reponame
                 if "stderr" not in task.executable.args:
                     task.executable.args["stderr"] = "STDOUT"
+            if task.executable.cls == "Process" and "pids" not in task.executable.args:
+                reponame = f"autopids_{taskname}"
+                self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository")
+                task.executable.args["pids"] = reponame
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":
