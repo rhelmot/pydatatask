@@ -3,7 +3,7 @@
 from typing import Any, Dict, Literal, Optional, overload
 import io
 
-from types_aiobotocore_s3.client import Exceptions, S3Client
+from types_aiobotocore_s3.client import S3Client
 import botocore.exceptions
 
 from pydatatask.host import LOCAL_HOST, Host
@@ -167,7 +167,7 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
     async def validate(self):
         try:
             await self.client.create_bucket(Bucket=self.bucket)
-        except self.client.exceptions.BucketAlreadyOwnedByYou as e:
+        except self.client.exceptions.BucketAlreadyOwnedByYou:
             pass
         await super().validate()
 

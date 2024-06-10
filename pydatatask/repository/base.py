@@ -127,6 +127,7 @@ class Repository(ABC):
         return self.filter_jobs(self.unfiltered_iter())
 
     async def keys(self) -> List[str]:
+        """Return a list of all keys in the repository."""
         return [x async for x in self]
 
     @abstractmethod

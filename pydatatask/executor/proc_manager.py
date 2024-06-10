@@ -214,7 +214,7 @@ class LocalLinuxManager(AbstractProcessManager):
         wait $PID >/dev/null 2>/dev/null
         echo $? >{return_code} 2>/dev/null
         """
-        p = subprocess.Popen(
+        p = subprocess.Popen(  # pylint: disable=consider-using-with
             cmd,
             shell=True,
             stdout=subprocess.PIPE,
@@ -279,7 +279,7 @@ class LocalLinuxManager(AbstractProcessManager):
         with open(f"{tmp}/pydatatask-{getpass.getuser()}/agent-stdout-{pipeline.agent_port}", "ab") as fp:
             env = dict(os.environ)
             env["PIPELINE_YAML"] = str(pipeline.source_file)
-            p = subprocess.Popen(
+            p = subprocess.Popen(  # pylint: disable=consider-using-with
                 [
                     sys.executable,
                     Path(__file__).parent.parent / "cli" / "main.py",
@@ -312,41 +312,41 @@ class SSHLinuxFile:
         self.path = Path(path)
         self.mode = mode
         self.ssh = ssh
-        self._sftp_mgr = None
-        self._sftp = None
-        self._fp_mgr = None
-        self._fp = None
+        self.__sftp_mgr = None
+        self.__sftp = None
+        self.__fp_mgr = None
+        self.__fp = None
 
     @property
-    def sftp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClient]:
-        assert self._sftp_mgr is not None
-        return self._sftp_mgr
+    def _sftp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClient]:
+        assert self.__sftp_mgr is not None
+        return self.__sftp_mgr
 
     @property
-    def sftp(self) -> asyncssh.SFTPClient:
-        assert self._sftp is not None
-        return self._sftp
+    def _sftp(self) -> asyncssh.SFTPClient:
+        assert self.__sftp is not None
+        return self.__sftp
 
     @property
-    def fp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClientFile]:
-        assert self._fp_mgr is not None
-        return self._fp_mgr
+    def _fp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClientFile]:
+        assert self.__fp_mgr is not None
+        return self.__fp_mgr
 
     @property
-    def fp(self) -> asyncssh.SFTPClientFile:
-        assert self._fp is not None
-        return self._fp
+    def _fp(self) -> asyncssh.SFTPClientFile:
+        assert self.__fp is not None
+        return self.__fp
 
     async def __aenter__(self):
-        self._sftp_mgr = self.ssh.start_sftp_client()
-        self._sftp = await self.sftp_mgr.__aenter__()
-        self._fp_mgr = self._sftp.open(self.path, self.mode)
-        self._fp = await self.fp_mgr.__aenter__()
-        return self.fp
+        self.__sftp_mgr = self.ssh.start_sftp_client()
+        self.__sftp = await self._sftp_mgr.__aenter__()
+        self.__fp_mgr = self._sftp.open(self.path, self.mode)
+        self.__fp = await self._fp_mgr.__aenter__()
+        return self._fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
-        await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
+        await self._fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
+        await self._sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
 
 class SSHLinuxManager(AbstractProcessManager):

@@ -29,6 +29,9 @@ import yaml
 
 _T = TypeVar("_T")
 
+# pylint: disable=unnecessary-ellipsis
+# pyright doesn't work right without them
+
 
 class ReadStream(Protocol):
     """A protocol for reading data from a stream."""

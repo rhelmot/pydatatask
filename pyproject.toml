@@ -144,6 +144,11 @@ ignore_missing_imports = true
 module = "pydatafs.*"
 ignore_missing_imports = true
 
+# https://github.com/mwilliamson/jq.py/pull/108
+[[tool.mypy.overrides]]
+module = "jq.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=pydatatask --cov-report=xml -ra --log-level INFO"
@@ -185,6 +190,7 @@ disable = [
     "unidiomatic-typecheck",
     "consider-using-f-string",
     "cyclic-import",
+    "c-extension-no-member",
     "broad-exception-raised",  # TODO fix
     "invalid-overridden-method",  # complains about the sync/async problem with abstract methods
     "duplicate-code",  # thinks a bunch of abstractmethod notimplementederrors are duplicate

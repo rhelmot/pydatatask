@@ -9,7 +9,13 @@ import pydatatask
 class TestAgent(unittest.IsolatedAsyncioTestCase):
     async def test_errors(self):
         manager = pydatatask.InProcessLocalLinuxManager(app="test_agent")
-        task = pydatatask.ProcessTask("task", "", pydatatask.InProcessMetadataRepository(), executor=manager)
+        task = pydatatask.ProcessTask(
+            "task",
+            "",
+            pydatatask.InProcessMetadataRepository(),
+            pydatatask.InProcessMetadataRepository(),
+            executor=manager,
+        )
         pipeline = pydatatask.Pipeline([task], pydatatask.Session(), [])
         await pipeline.open()
         await manager.launch_agent(pipeline)

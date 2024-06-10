@@ -36,7 +36,6 @@ from enum import Enum, auto
 from pathlib import Path
 import asyncio
 import copy
-import getpass
 import inspect
 import json
 import logging
@@ -784,6 +783,8 @@ class Task(ABC):
 
     @property
     def required_for_start_basic(self):
+        """A mapping from link name to repository for all links which must be populated in order to start the
+        task."""
         return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_start is True}
 
     @property

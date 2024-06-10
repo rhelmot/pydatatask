@@ -3,7 +3,6 @@
 from typing import (
     Any,
     AsyncContextManager,
-    AsyncGenerator,
     AsyncIterator,
     Dict,
     List,
@@ -14,7 +13,7 @@ from typing import (
 from pathlib import Path
 
 from pydatatask.repository import FilesystemRepository, MetadataRepository, Repository
-from pydatatask.repository.filesystem import FilesystemEntry, FilesystemType
+from pydatatask.repository.filesystem import FilesystemType
 from pydatatask.utils import AReadStreamBase
 
 from .parser import QueryValueType

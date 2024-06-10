@@ -13,8 +13,6 @@ import sys
 import traceback
 
 from importlib_metadata import entry_points
-from motor.core import AgnosticClient
-from pymongo.database import Database
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async
@@ -74,6 +72,7 @@ def parse_bool(thing: Any) -> bool:
 
 
 def parse_optional_bool(thing: Any) -> Optional[bool]:
+    """Parse a string, int, bool, or None into a bool or None."""
     if thing is None:
         return None
     return parse_bool(thing)
@@ -735,7 +734,7 @@ def build_task_picker(
             task = dispatcher(executable)
             for linkname, link in links.items():
                 task.link(linkname, **link)
-        except Exception as e:
+        except Exception:
             print(f"### Error constructing task {name}: ", file=sys.stderr)
             raise
 

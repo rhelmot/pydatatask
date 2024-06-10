@@ -142,7 +142,7 @@ class DockerContainerManager(AbstractContainerManager):
                 try:
                     hostname = cast(str, os.getenv("HOSTNAME"))
                     bytes.fromhex(hostname)
-                except:  # pylint: disable=broad-except
+                except:  # pylint: disable=broad-except,bare-except
                     pass
                 else:
                     self_container = await self.docker.containers.get(hostname)
