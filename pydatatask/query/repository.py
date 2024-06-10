@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydatatask.repository import FilesystemRepository, MetadataRepository, Repository
 from pydatatask.repository.filesystem import FilesystemType
-from pydatatask.utils import AReadStreamBase
+from pydatatask.utils import AReadStreamBase, AWriteStreamBase
 
 from .parser import QueryValueType
 from .query import Query
@@ -116,3 +116,9 @@ class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         async for a, b, c, d in (await self._resolve()).walk(job):
             yield a, b, c, d
+
+    async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
+        return await (await self._resolve()).dump_tarball(job, stream)
+
+    async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
+        return await (await self._resolve()).get_tarball(job, dest)
