@@ -178,7 +178,7 @@ class Pipeline:
                         cokeyed=None,
                         auto_meta=None,
                         auto_values=None,
-                        **link_attrs,
+                        **link_attrs,  # type: ignore[arg-type]
                     )
 
         await self.session.open()

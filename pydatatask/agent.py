@@ -206,7 +206,7 @@ async def inject_data(item: repomodule.Repository, job: str, stream: AReadStream
             data_obj = safe_load(data)
         except yaml.YAMLError as e:
             # raise ValueError(e.args[0]) from e
-            raise ValueError(f"Error parsing YAML: {e}, {e.args[0]} when parsing {item=!r} {job=!r}: {data}") from e
+            raise ValueError(f"Error parsing YAML: {e}, {e.args[0]} when parsing {item=!r} {job=!r}: {data=!r}") from e
         await item.dump(job, data_obj)
     elif isinstance(item, repomodule.FilesystemRepository):
         await item.dump_tarball(job, stream)

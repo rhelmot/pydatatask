@@ -312,10 +312,10 @@ class SSHLinuxFile:
         self.path = Path(path)
         self.mode = mode
         self.ssh = ssh
-        self.__sftp_mgr = None
-        self.__sftp = None
-        self.__fp_mgr = None
-        self.__fp = None
+        self.__sftp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClient]] = None
+        self.__sftp: Optional[asyncssh.SFTPClient] = None
+        self.__fp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClientFile]] = None
+        self.__fp: Optional[asyncssh.SFTPClientFile] = None
 
     @property
     def _sftp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClient]:

@@ -18,7 +18,7 @@ from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_
 
 LOCK_ID = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
 
-EPHEMERALS = {}
+EPHEMERALS: Dict[Any, Tuple[str, Dispatcher]] = {}
 
 
 class Allocator:
@@ -132,7 +132,7 @@ class MongoMetaAllocator(Allocator):
         if client_key not in EPHEMERALS:
             # see above
             EPHEMERALS[client_key] = (
-                urllib.parse.urlparse(self.url).hostname,
+                urllib.parse.urlparse(self.url).hostname or "",
                 Dispatcher("MongoDatabase", {"url": self.url, "database": self.database}),
             )
         return EPHEMERALS[client_key][0]

@@ -216,7 +216,7 @@ class Task(ABC):
         self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
         self.long_running = long_running
-        self.global_template_env = {}
+        self.global_template_env: Dict[str, Any] = {}
         self.annotations: Dict[str, str] = {}
         self.fail_fast = False
         self.timeout = timeout
@@ -423,7 +423,7 @@ class Task(ABC):
         finished = self.host.mktemp("finished")
         lock = self.host.mktemp("lock")
         cokeyed = {name: self.host.mktemp(name) for name in self.links[link_name].cokeyed}
-        dict_result = {}
+        dict_result: Dict[str, Any] = {}
         dict_result["main_dir"] = filepath
         dict_result["lock_dir"] = lock
         dict_result["uploaded_dir"] = scratch
@@ -729,13 +729,11 @@ class Task(ABC):
             return await mapped.info(subjob) == job
 
         if isinstance(link.repo, repomodule.MetadataRepository):
-            result = repomodule.FilterMetadataRepository(link.repo, filterer)
+            return repomodule.FilterMetadataRepository(link.repo, filterer)
         elif isinstance(link.repo, repomodule.FilesystemRepository):
-            result = repomodule.FilterFilesystemRepository(link.repo, filterer)
+            return repomodule.FilterFilesystemRepository(link.repo, filterer)
         else:
-            result = repomodule.FilterRepository(link.repo, filterer)
-
-        return result
+            return repomodule.FilterRepository(link.repo, filterer)
 
     @property
     def ready(self):
