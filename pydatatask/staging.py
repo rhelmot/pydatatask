@@ -174,6 +174,7 @@ class PipelineChildArgs:
 
 @_dataclass_serial
 class PipelineChildArgsMissing:
+    is_top: bool
     repos: Dict[str, "RepoClassSpec"] = field(default_factory=dict)  # {child's name: class spec}
     executors: Set[str] = field(default_factory=set)  # {task name}
     imports: Dict[str, "PipelineChildArgsMissing"] = field(default_factory=dict)
@@ -188,7 +189,7 @@ class PipelineChildArgsMissing:
         new_executors: Dict[str, Optional[Dispatcher]] = {}
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
-            if repo_spec.required:
+            if repo_spec.required and not self.is_top:
                 raise ValueError(f"{repo_name} is manually marked as required but is not fulfilled")
             repo_spec.name = repo_name
             result = repo_allocators(repo_spec)
@@ -370,6 +371,7 @@ class PipelineStaging:
         config: Union[None, Path, PipelineSpec] = None,
         basedir: Optional[Path] = None,
         params: Optional[PipelineChildArgs] = None,
+        is_top: bool = True,
     ):
         """The basedir and params parameters are for internal use only."""
         self.children: Dict[str, PipelineStaging] = {}
@@ -377,6 +379,7 @@ class PipelineStaging:
         self.executors_fulfilled_by_parents: Dict[str, Dispatcher] = {}
         self.repos_promised_by_parents: Dict[str, RepoClassSpec] = {}
         self.executors_promised_by_parents: Set[str] = set()
+        self.is_top = is_top
 
         if config is None:
             if basedir is None:
@@ -442,7 +445,7 @@ class PipelineStaging:
                     child_params.repos.update(params.imports[imp_name].repos)
                     child_params.imports.update(params.imports[imp_name].imports)
 
-                self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params)
+                self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params, is_top=False)
 
     def _get_repo(self, name: str) -> Union[Dispatcher, RepoClassSpec]:
         if name in self.repos_fulfilled_by_parents:
@@ -487,6 +490,7 @@ class PipelineStaging:
         .ready() function to get a boolean for whether it is properly ready.
         """
         return PipelineChildArgsMissing(
+            is_top=self.is_top,
             repos={
                 name: cls
                 for name, cls in self.spec.repo_classes.items()
@@ -620,7 +624,7 @@ class PipelineStaging:
                     )
 
         result = PipelineStaging(basedir=self.basedir)
-        result.children["locked"] = PipelineStaging(self.spec, params=args)
+        result.children["locked"] = PipelineStaging(self.spec, params=args, is_top=False)
         result.spec.repos.update(repos)
         result.spec.executors.update(executors)
         result.spec.imports["locked"] = spec
