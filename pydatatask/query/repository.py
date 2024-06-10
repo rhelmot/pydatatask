@@ -35,8 +35,10 @@ class QueryRepository(Repository):
         self._cached: Optional[Repository] = None
 
     def footprint(self):
-        for repo in self.query.repos.values():
-            yield from repo.footprint()
+        # HACK LMAO
+        for reponame, repo in self.query.repos.items():
+            if reponame in self.query.query:
+                yield from repo.footprint()
 
     def cache_flush(self):
         self._cached = None
