@@ -91,6 +91,8 @@ def checked_incast(ty: QueryValueType, value: IntoQueryValue, reason: str) -> Qu
     """
     if ty == QueryValueType.RepositoryData:
         return QueryValue(ty, data_value=value)
+    if ty == QueryValueType.Key and isinstance(value, (int, str)):
+        value = Key(value)
     result = QueryValue.wrap(value)
     if result.type != ty:
         raise TypeError(f"Incast failed: expected a {ty}, got {result} ({reason})")
