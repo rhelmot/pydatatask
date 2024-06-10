@@ -1,6 +1,6 @@
 """This module contains repositories and other classes for interacting with S3-compatible bucket stores."""
 
-from typing import Dict, Literal, Optional, overload
+from typing import Any, Dict, Literal, Optional, overload
 import io
 
 from types_aiobotocore_s3.client import Exceptions, S3Client
@@ -88,7 +88,7 @@ class S3BucketRepositoryBase(Repository):
     def footprint(self):
         yield self
 
-    def __getstate__(self):
+    def __getstate__(self) -> Any:
         return (self.endpoints, self.bucket)
 
     @property
@@ -161,8 +161,8 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         paginator = self.client.get_paginator("list_objects")
         async for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
             for obj in page.get("Contents", []):
-                if obj["Key"].endswith(self.suffix):
-                    yield obj["Key"][len(self.prefix) : -len(self.suffix) if self.suffix else None]
+                if obj.get("Key", "").endswith(self.suffix):
+                    yield obj.get("Key", "")[len(self.prefix) : -len(self.suffix) if self.suffix else None]
 
     async def validate(self):
         try:

@@ -40,7 +40,14 @@ from pydatatask.executor.container_manager import DockerContainerManager
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.session import Ephemeral
 
-from ..utils import _StderrIsStdout, safe_load
+from ..utils import (
+    AReadStream,
+    AReadTextProto,
+    AWriteStream,
+    AWriteTextProto,
+    _StderrIsStdout,
+    safe_load,
+)
 
 if TYPE_CHECKING:
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
@@ -112,28 +119,26 @@ class AbstractProcessManager(Executor):
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["r"]) -> "AReadText":
+    async def open(self, path: Union[Path, str], mode: Literal["r"]) -> AsyncContextManager["AReadTextProto"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["w"]) -> "AWriteText":
+    async def open(self, path: Union[Path, str], mode: Literal["w"]) -> AsyncContextManager["AWriteTextProto"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> "AReadStreamManager":
+    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> AsyncContextManager["AReadStream"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> "AWriteStreamManager":
+    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> AsyncContextManager["AWriteStream"]:
         ...
 
     @abstractmethod
-    async def open(
-        self, path: Union[Path, str], mode: Literal["r", "rb", "w", "wb"]
-    ) -> Union["AReadText", "AWriteText", "AReadStreamManager", "AWriteStreamManager"]:
+    async def open(self, path, mode):
         """Open the file on the target system for reading or writing according to the given mode."""
         raise NotImplementedError
 
@@ -307,21 +312,39 @@ class SSHLinuxFile:
         self.path = Path(path)
         self.mode = mode
         self.ssh = ssh
-        self.sftp_mgr: Optional[AsyncContextManager] = None
-        self.sftp: Optional[asyncssh.SFTPClient] = None
-        self.fp_mgr: Optional[AsyncContextManager] = None
-        self.fp: Optional[asyncssh.SFTPClientFile] = None
+        self._sftp_mgr = None
+        self._sftp = None
+        self._fp_mgr = None
+        self._fp = None
 
-    async def __aenter__(self) -> asyncssh.SFTPClientFile:
-        self.sftp_mgr = self.ssh.start_sftp_client()
-        self.sftp = await self.sftp_mgr.__aenter__()
-        self.fp_mgr = self.sftp.open(self.path, self.mode)
-        self.fp = await self.fp_mgr.__aenter__()
+    @property
+    def sftp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClient]:
+        assert self._sftp_mgr is not None
+        return self._sftp_mgr
+
+    @property
+    def sftp(self) -> asyncssh.SFTPClient:
+        assert self._sftp is not None
+        return self._sftp
+
+    @property
+    def fp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClientFile]:
+        assert self._fp_mgr is not None
+        return self._fp_mgr
+
+    @property
+    def fp(self) -> asyncssh.SFTPClientFile:
+        assert self._fp is not None
+        return self._fp
+
+    async def __aenter__(self):
+        self._sftp_mgr = self.ssh.start_sftp_client()
+        self._sftp = await self.sftp_mgr.__aenter__()
+        self._fp_mgr = self._sftp.open(self.path, self.mode)
+        self._fp = await self.fp_mgr.__aenter__()
         return self.fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        assert self.fp_mgr is not None
-        assert self.sftp_mgr is not None
         await self.fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
         await self.sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
@@ -377,7 +400,7 @@ class SSHLinuxManager(AbstractProcessManager):
     def basedir(self) -> Path:
         return self.tmp_path
 
-    async def open(self, path, mode):
+    async def open(self, path, mode):  # type: ignore
         return SSHLinuxFile(path, mode, self.ssh)
 
     async def rmtree(self, path: Path):

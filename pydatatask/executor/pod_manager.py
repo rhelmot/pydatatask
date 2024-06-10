@@ -4,10 +4,10 @@ needs several resource references.
 the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
-from typing import AsyncIterator, Callable, List, Optional
+from typing import Any, AsyncIterator, Callable, List, Optional
 import logging
 
-from kubernetes_asyncio.client import ApiClient, CoreV1Api, V1Pod
+from kubernetes_asyncio.client import ApiClient, CoreV1Api
 from kubernetes_asyncio.config import load_kube_config
 from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
@@ -72,7 +72,7 @@ class PodManager(Executor):
         return self
 
     def to_container_manager(self):
-        return KubeContainerManager(self)
+        return KubeContainerManager(cluster=self)
 
     def __init__(
         self,
@@ -106,22 +106,22 @@ class PodManager(Executor):
         return self._connection()
 
     @property
-    def api(self) -> ApiClient:
+    def api(self) -> Any:
         """The current API client."""
         return self.connection.api
 
     @property
-    def api_ws(self) -> WsApiClient:
+    def api_ws(self) -> Any:
         """The current websocket-aware API client."""
         return self.connection.api_ws
 
     @property
-    def v1(self) -> CoreV1Api:
+    def v1(self) -> Any:
         """A CoreV1Api instance associated with the current API client."""
         return self.connection.v1
 
     @property
-    def v1_ws(self) -> CoreV1Api:
+    def v1_ws(self) -> Any:
         """A CoreV1Api instance associated with the current websocket-aware API client."""
         return self.connection.v1_ws
 
@@ -146,7 +146,7 @@ class PodManager(Executor):
         l.info("Creating task %s for job %s", task, job)
         await self.v1.create_namespaced_pod(self.namespace, manifest)
 
-    async def query(self, job=None, task=None) -> List[V1Pod]:
+    async def query(self, job=None, task=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
         selectors = ["app=" + self.app]
         if job is not None:
@@ -156,10 +156,10 @@ class PodManager(Executor):
         selector = ",".join(selectors)
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 
-    async def delete(self, pod: V1Pod):
+    async def delete(self, pod: Any):
         """Destroy the given pod."""
         await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
 
-    async def logs(self, pod: V1Pod, timeout=10) -> str:
+    async def logs(self, pod: Any, timeout=10) -> str:
         """Retrieve the logs for the given pod."""
         return await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)

@@ -3,11 +3,11 @@ as a data store."""
 
 from typing import TYPE_CHECKING, List
 
-from kubernetes_asyncio.client import V1Pod
-
 from .base import Repository
 
 if TYPE_CHECKING:
+    from kubernetes_asyncio.client.models.v1_pod import V1Pod
+
     from ..task import ContainerTask, KubeTask
 
 
@@ -32,7 +32,7 @@ class LiveKubeRepository(Repository):
 
     async def unfiltered_iter(self):
         for pod in await self.pods():
-            yield pod.metadata.labels["job"]
+            yield pod.metadata.labels["job"]  # type: ignore
 
     async def contains(self, item, /):
         return bool(await self.task.podman.query(task=self.task.name, job=item))
@@ -40,7 +40,7 @@ class LiveKubeRepository(Repository):
     def __repr__(self):
         return f"<LiveKubeRepository task={self.task.name}>"
 
-    async def pods(self) -> List[V1Pod]:
+    async def pods(self) -> List["V1Pod"]:
         """A list of live pod objects corresponding to this repository."""
         return await self.task.podman.query(task=self.task.name)
 

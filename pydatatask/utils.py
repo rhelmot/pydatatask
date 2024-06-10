@@ -1,7 +1,6 @@
 """Various utility classes and functions that are used throughout the codebase but don't belong anywhere in
 particular."""
 
-import io
 from typing import (
     Any,
     AsyncContextManager,
@@ -19,13 +18,14 @@ from typing import (
 from hashlib import md5
 import asyncio
 import codecs
+import io
+import json
 import pickle
 import struct
 import time
-import json
 
-import yaml
 from typing_extensions import Buffer, ParamSpec
+import yaml
 
 _T = TypeVar("_T")
 
@@ -35,9 +35,11 @@ class ReadStream(Protocol):
 
     def read(self, n: int = -1, /) -> bytes:
         """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+        ...
 
     def close(self) -> Any:
         """Close and release the stream."""
+        ...
 
 
 class WriteStream(Protocol):
@@ -45,9 +47,11 @@ class WriteStream(Protocol):
 
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
+        ...
 
     def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
+        ...
 
 
 class AReadStreamBase(Protocol):
@@ -55,6 +59,7 @@ class AReadStreamBase(Protocol):
 
     async def read(self, n: int = -1, /) -> bytes:
         """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+        ...
 
 
 class AReadStream(Protocol):
@@ -62,9 +67,23 @@ class AReadStream(Protocol):
 
     async def read(self, n: int = -1, /) -> bytes:
         """Read and return up to ``n`` bytes, or if unspecified, the rest of the stream."""
+        ...
 
     def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
+        ...
+
+
+class AReadTextProto(Protocol):
+    """A protocol for reading data from an asynchronous stream."""
+
+    async def read(self, n: int = -1, /) -> str:
+        """Read and return up to ``n`` chars, or if unspecified, the rest of the stream."""
+        ...
+
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
+        ...
 
 
 class AWriteStreamBase(Protocol):
@@ -72,6 +91,7 @@ class AWriteStreamBase(Protocol):
 
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
+        ...
 
 
 class AWriteStreamWrapper:
@@ -96,6 +116,7 @@ class _AWriteStreamBad(Protocol):
 
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> None:
         """Write ``data`` to the stream."""
+        ...
 
 
 class AWriteStreamBaseIntWrapper:
@@ -115,9 +136,23 @@ class AWriteStream(Protocol):
 
     async def write(self, data: Union[bytes, bytearray, memoryview], /) -> int:
         """Write ``data`` to the stream."""
+        ...
 
     def close(self) -> Awaitable[Any]:
         """Close and release the stream."""
+        ...
+
+
+class AWriteTextProto(Protocol):
+    """A protocol for writing text data to an asynchronous stream."""
+
+    async def write(self, data: str, /) -> int:
+        """Write ``data`` to the stream."""
+        ...
+
+    def close(self) -> Awaitable[Any]:
+        """Close and release the stream."""
+        ...
 
 
 class AReadStreamManager(AReadStream, AsyncContextManager, Protocol):
@@ -286,7 +321,7 @@ def asyncasynccontextmanager(
 ) -> Callable[P, Coroutine[Any, Any, AsyncContextManager[_T]]]:
     """Like asynccontextmanager but needs to be awaited first."""
 
-    async def inner(*args, **kwargs):
+    async def inner(*args: P.args, **kwargs: P.kwargs):
         return _AACM(f(*args, **kwargs))
 
     return inner
@@ -549,10 +584,9 @@ def crypto_hash(x: Any) -> int:
     """
     return _hash_unpacker.unpack(md5(pickle.dumps(x)).digest())[0]
 
+
 def safe_load(x: Union[str, bytes, io.TextIOBase]) -> Any:
-    """
-    Work around bugs parsing large json documents as yaml
-    """
+    """Work around bugs parsing large json documents as yaml."""
     # import ipdb; ipdb.set_trace()
     if not isinstance(x, (str, bytes, bytearray, memoryview)):
         x = x.read()

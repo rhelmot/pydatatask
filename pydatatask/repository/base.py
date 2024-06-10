@@ -3,6 +3,7 @@ repositories."""
 
 from typing import (
     Any,
+    AsyncContextManager,
     AsyncGenerator,
     AsyncIterable,
     AsyncIterator,
@@ -30,9 +31,11 @@ from .. import task as taskmodule
 from ..utils import (
     AReadStreamManager,
     AReadText,
+    AReadTextProto,
     AWriteStreamDrainer,
     AWriteStreamManager,
     AWriteText,
+    AWriteTextProto,
     async_copyfile,
     async_copyfile_close,
     asyncasynccontextmanager,
@@ -475,12 +478,12 @@ class BlobRepository(Repository, ABC):
 
     @overload
     @abstractmethod
-    async def open(self, job: str, mode: Literal["r"]) -> AReadText:
+    async def open(self, job: str, mode: Literal["r"]) -> AsyncContextManager[AReadTextProto]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, job: str, mode: Literal["w"]) -> AWriteText:
+    async def open(self, job: str, mode: Literal["w"]) -> AsyncContextManager[AWriteTextProto]:
         ...
 
     @overload
@@ -1162,6 +1165,22 @@ class CompressedBlobRepository(BlobRepository):
     def __init__(self, inner: BlobRepository):
         super().__init__()
         self.inner = inner
+
+    @overload
+    async def open(self, job, mode: Literal["r"]):
+        ...
+
+    @overload
+    async def open(self, job, mode: Literal["w"]):
+        ...
+
+    @overload
+    async def open(self, job, mode: Literal["rb"]):
+        ...
+
+    @overload
+    async def open(self, job, mode: Literal["wb"]):
+        ...
 
     @asyncasynccontextmanager
     async def open(self, job, mode="r"):

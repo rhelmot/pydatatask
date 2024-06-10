@@ -1,16 +1,15 @@
 """This module houses the container manager executors."""
 
-import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple, cast
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 import asyncio
-import aiofiles.ospath
+import os
 
 from aiodocker import DockerError
-from kubernetes_asyncio.client import V1Pod
 import aiodocker.containers
+import aiofiles.ospath
 import dateutil.parser
 
 from pydatatask.executor import Executor
@@ -139,16 +138,16 @@ class DockerContainerManager(AbstractContainerManager):
         host_mounts: Optional[Dict[str, str]] = None,
     ):
         if self._net is None:
-            if await aiofiles.ospath.exists('/.dockerenv'):
+            if await aiofiles.ospath.exists("/.dockerenv"):
                 try:
-                    hostname = cast(str, os.getenv('HOSTNAME'))
+                    hostname = cast(str, os.getenv("HOSTNAME"))
                     bytes.fromhex(hostname)
                 except:  # pylint: disable=broad-except
                     pass
                 else:
                     self_container = await self.docker.containers.get(hostname)
                     config = await self_container.show()
-                    self._net = config['HostConfig']['NetworkMode']
+                    self._net = config["HostConfig"]["NetworkMode"]
 
         config = {
             "Image": self._image_prefix + image,
@@ -166,7 +165,7 @@ class DockerContainerManager(AbstractContainerManager):
             },
         }
         if self._net is not None:
-            config['HostConfig']['NetworkMode'] = self._net
+            config["HostConfig"]["NetworkMode"] = self._net
 
         await self.docker.containers.run(config, name=self._id_to_name(task, job))
 
@@ -215,7 +214,9 @@ class DockerContainerManager(AbstractContainerManager):
     ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
-        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos if not isinstance(info, Exception)]
+        infos_and_names = [
+            (self._name_to_id(task, info["Name"]), info) for info in infos if not isinstance(info, BaseException)
+        ]
         activity = any(name is not None for name, _ in infos_and_names)
         dead = [
             (info, container, name)
@@ -241,7 +242,9 @@ class DockerContainerManager(AbstractContainerManager):
     async def _cleanup(
         self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
     ) -> Tuple[bytes, Dict[str, Any]]:
-        log = "".join(line for line in await container.log(stdout=True, stderr=True)).encode()
+        log = "".join(
+            line for line in await cast(Awaitable[List[str]], container.log(stdout=True, stderr=True))
+        ).encode()
         try:
             await container.delete()
         except Exception:  # pylint: disable=broad-exception-caught
@@ -349,7 +352,7 @@ class KubeContainerManager(AbstractContainerManager):
         )
         return bool(pods), {pod.metadata.labels["job"]: result for pod, result in zip(pods, results)}
 
-    async def _cleanup(self, pod: V1Pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
+    async def _cleanup(self, pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
         log = await self.cluster.logs(pod)
         await self.cluster.delete(pod)
         return (

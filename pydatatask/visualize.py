@@ -1,6 +1,6 @@
 """Visualizes the pipeline live using dash to plot the graph and update the status of each node over time."""
 
-from typing import Any, DefaultDict, Dict
+from typing import Any, DefaultDict, Dict, List
 from collections import defaultdict
 from multiprocessing import Process, Queue
 import asyncio
@@ -303,7 +303,7 @@ class TaskVisualizer:
                     break
             else:
                 return ""
-            children = [
+            children: List[Any] = [
                 html.H1(node.name),
             ]
             for link in node.links:

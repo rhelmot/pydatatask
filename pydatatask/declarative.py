@@ -184,7 +184,9 @@ def make_picker(name: str, options: Mapping[str, _T]) -> Callable[[Any], Optiona
         if not isinstance(thing, str):
             raise ValueError(f"When picking a {name}, must provide a str")
         if thing not in options:
-            raise ValueError(f"{name}: {thing} is not a valid option for {options}, you want e.g. {next(iter(options))}")
+            raise ValueError(
+                f"{name}: {thing} is not a valid option for {options}, you want e.g. {next(iter(options))}"
+            )
         return options[thing]
 
     return inner
@@ -240,8 +242,8 @@ def _build_docker_connection(
 
 def _build_mongo_connection(url: str, database: str):
     async def mongo():
-        client: "AgnosticClient" = motor.motor_asyncio.AsyncIOMotorClient(url)
-        collection: Database[Any] = client.get_database(database)
+        client = motor.motor_asyncio.AsyncIOMotorClient(url)
+        collection = client.get_database(database)
         yield collection
 
     return mongo

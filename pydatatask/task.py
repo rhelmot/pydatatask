@@ -1185,7 +1185,7 @@ class KubeTask(ShellTask):
             l.warning("Cannot launch %s: %s limit", self, limit)
             self.warned = True
 
-    async def _cleanup(self, pod: V1Pod, reason: str):
+    async def _cleanup(self, pod: Any, reason: str):
         job = pod.metadata.labels["job"]
         data = {
             "reason": reason,
@@ -1220,7 +1220,7 @@ class KubeTask(ShellTask):
             assert self.fail_fast
             raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-    async def delete(self, pod: V1Pod):
+    async def delete(self, pod: Any):
         """Kill a pod and relinquish its resources without marking the task as complete."""
         request = Quota(launches=1)
         for container in pod.spec.containers:
@@ -1238,7 +1238,7 @@ class KubeTask(ShellTask):
         await asyncio.gather(*jobs)
         return result
 
-    async def _update_one(self, pod: V1Pod):
+    async def _update_one(self, pod: Any):
         try:
             uptime: timedelta = datetime.now(tz=timezone.utc) - pod.metadata.creation_timestamp
             total_min = uptime.total_seconds() // 60
