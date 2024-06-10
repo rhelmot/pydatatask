@@ -785,3 +785,12 @@ class FilterFilesystemRepository(FilterRepository, FilesystemRepository):
 
     async def readlink(self, job: str, path: str) -> str:
         return await self.base.readlink(job, path)
+
+    def construct_backup_repo(self, path: Path, force_compress: Optional[bool] = None) -> "FilesystemRepository":
+        return self.base.construct_backup_repo(path, force_compress)
+
+    async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
+        return await self.base.dump_tarball(job, stream)
+
+    async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
+        return await self.base.get_tarball(job, dest)
