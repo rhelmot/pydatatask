@@ -34,6 +34,17 @@ from .session import Session
 
 l = logging.getLogger(__name__)
 
+already_logged_messages = set()
+def debug_log(l, *args, **kwargs):
+    cached_kwargs = tuple((k, v) for k, v in sorted(kwargs.items()))
+    cached_args = tuple(args)
+    if (cached_args, cached_kwargs) in already_logged_messages:
+        return
+    already_logged_messages.add((cached_args, cached_kwargs))
+    l.debug(*args, **kwargs)
+    
+    
+
 __all__ = ("Pipeline",)
 
 
@@ -298,7 +309,8 @@ class Pipeline:
         """Collect all jobs that are ready to be launched for a given task."""
         result: Set[str] = set()
         if task.disabled:
-            l.debug("%s is disabled - no jobs will be scheduled", task.name)
+            # l.debug("%s is disabled - no jobs will be scheduled", task.name)
+            debug_log(l, "%s is disabled - no jobs will be scheduled", task.name)
             return result
         async for job in task.ready:
             result.add(job)
