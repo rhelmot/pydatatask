@@ -39,7 +39,6 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
                 await fp.write(str(i))
         repo_stdout = pydatatask.InProcessBlobRepository()
         repo_done = pydatatask.InProcessMetadataRepository()
-        repo_pids = pydatatask.InProcessMetadataRepository()
 
         template = """\
 #!/bin/sh
@@ -52,7 +51,6 @@ echo bye >&2
             "task",
             template,
             done=repo_done,
-            pids=repo_pids,
             executor=manager,
             job_quota=pydatatask.Quota.parse("100m", "100m"),
             environ={},
@@ -71,7 +69,6 @@ echo bye >&2
         finally:
             await manager.teardown_agent()
 
-        assert len(repo_pids.data) == 0
         assert len(repo_stdout.data) == self.n
         assert len(repo_done.data) == self.n
 
@@ -146,7 +143,6 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
         repo_stdout = pydatatask.InProcessBlobRepository()
         repo_stderr = pydatatask.InProcessBlobRepository()
         repo_done = pydatatask.InProcessMetadataRepository()
-        repo_pids = pydatatask.InProcessMetadataRepository()
 
         template = """\
 #!/bin/sh
@@ -159,7 +155,6 @@ echo 'goodbye world!' >&2
             "task",
             template,
             repo_done,
-            repo_pids,
             procman,
             job_quota=pydatatask.Quota.parse("100m", "100m"),
             environ={},
@@ -177,7 +172,6 @@ echo 'goodbye world!' >&2
         assert len(repo_stdout.data) == self.n
         assert len(repo_stderr.data) == self.n
         assert len(repo_done.data) == self.n
-        assert len(repo_pids.data) == 0
 
         for i in range(self.n):
             assert repo_stderr.data[str(i)] == "hello world!\ngoodbye world!\n".encode()

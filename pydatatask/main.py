@@ -356,10 +356,10 @@ async def run(
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     start = asyncio.get_running_loop().time()
-    launch = True
-    while await pipeline.update(launch) or forever:
+    do_launch = True
+    while await pipeline.update(do_launch) or forever:
         if launch_once:
-            launch = False
+            do_launch = False
         await asyncio.sleep(1)
         if timeout and asyncio.get_running_loop().time() - start > timeout:
             raise TimeoutError("Pipeline run timeout")
@@ -586,7 +586,7 @@ async def launch(
     pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace, require_success=require_success)
 
     if force or await task.ready.contains(job):
-        await task.launch(job)
+        await task.launch(job, 0)
     else:
         log.warning("Task is not ready to launch - use -f to force")
         return 1

@@ -12,8 +12,7 @@ Typical usage is to construct a :class:`QuotaManager` and pass it to a task cons
 TODO REWRITE THIS GODDAMN SHIT
 """
 
-from typing import Awaitable, Callable, List, Optional, Union
-from asyncio import Lock
+from typing import Optional, Union
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum, auto

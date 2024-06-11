@@ -56,13 +56,12 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
     async def test_kube(self):
         session = pydatatask.Session()
-
-        await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
+        kube = session.ephemeral(kube_connect(context=self.kube_context))
 
         cluster_quota = pydatatask.Quota.parse("1", "1Gi", 99999)
 
-        kube = session.ephemeral(kube_connect())
         podman = pydatatask.PodManager(
+            cluster_quota,
             self.kube_host,
             f"test-{self.test_id}",
             self.kube_namespace,
@@ -73,21 +72,9 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         repoDone = pydatatask.InProcessMetadataRepository()
         repoLogs = pydatatask.InProcessBlobRepository()
 
-        if self.minikube_profile is not None:
-            # wait for boot I guess
-            async with kubernetes_asyncio.client.ApiClient() as api:
-                v1 = kubernetes_asyncio.client.CoreV1Api(api)
-                for i in range(200):
-                    if (await v1.list_namespaced_service_account(self.kube_namespace)).items:
-                        break
-                    await asyncio.sleep(0.1)
-                else:
-                    raise Exception("Minikube failed to give us anything interesting within 20 seconds")
-
         task = pydatatask.KubeTask(
             "task",
             podman,
-            cluster_quota,
             r"""
             apiVersion: v1
             kind: Pod
@@ -113,9 +100,18 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         )
         task.link("repo0", repo0, LinkKind.InputMetadata)
 
-        pipeline = pydatatask.Pipeline([task], session, [cluster_quota])
+        pipeline = pydatatask.Pipeline([task], session)
 
         async with pipeline:
+            if self.minikube_profile is not None:
+                # wait for boot I guess
+                for _ in range(200):
+                    if (await kube().v1.list_namespaced_service_account(self.kube_namespace)).items:
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    raise Exception("Minikube failed to give us anything interesting within 20 seconds")
+
             await pydatatask.update(pipeline)
             live = task.links["live"].repo
             launched = [x async for x in live]
@@ -126,7 +122,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(1)
 
             task.warned = False
-            await task.launch(launched[0])
+            await task.launch(launched[0], 0)
             await asyncio.sleep(5)
             assert await live.contains(launched[0])
 

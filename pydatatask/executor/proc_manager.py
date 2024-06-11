@@ -8,6 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncContextManager,
+    DefaultDict,
     Dict,
     List,
     Literal,
@@ -93,6 +94,10 @@ class AbstractProcessManager(Executor):
         stdout: bool,
         stderr: Union[bool, "_StderrIsStdout"],
     ):
+        """Launch!
+
+        That! Job!
+        """
         basedir = self._basedir / task / job / str(replica)
         dirmade = False
         pid = None
@@ -100,7 +105,7 @@ class AbstractProcessManager(Executor):
             cwd_path = basedir / "cwd"
             stdout_path = basedir / "stdout" if stdout else None
             if stderr is True:
-                stderr_path = basedir / "stderr"
+                stderr_path: Union[_StderrIsStdout, Path, None] = basedir / "stderr"
             elif stderr is False:
                 stderr_path = None
             else:
@@ -134,12 +139,12 @@ class AbstractProcessManager(Executor):
             try:
                 if dirmade:
                     await self._rmtree(basedir)
-            except:
+            except:  # pylint: disable=bare-except
                 pass
             try:
                 if pid is not None:
                     await self._kill(pid)
-            except:
+            except:  # pylint: disable=bare-except
                 pass
             raise
 
@@ -169,7 +174,6 @@ class AbstractProcessManager(Executor):
         """
         raise NotImplementedError
 
-    @abstractmethod
     async def kill(self, task: str, job: str, replica: int):
         """Terminate the process with the given identifier.
 
@@ -235,9 +239,7 @@ class AbstractProcessManager(Executor):
         live_pids -= timeout_pids
         dead_pids |= timeout_pids
         live_replicas = {
-            (job, replica): info[2]["start_time"]
-            for pid, (job, replica, info) in info_by_pids.items()
-            if pid in live_pids
+            (job, replica): info["start_time"] for pid, (job, replica, info) in info_by_pids.items() if pid in live_pids
         }
         live_jobs = {job for job, _ in live_replicas}
 
@@ -264,7 +266,7 @@ class AbstractProcessManager(Executor):
             return job, replica, info, stdout, stderr
 
         io_results = await asyncio.gather(*(io_guy(*info_by_pids[pid]) for pid in dead_pids))
-        final = defaultdict(dict)
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for job, replica, info, stdout, stderr in io_results:
             info["success"] = info["exit_code"] == 0
             info["end_time"] = now
@@ -272,6 +274,32 @@ class AbstractProcessManager(Executor):
                 final[job][replica] = (stdout, stderr, info)
 
         return live_replicas, final
+
+    async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
+        """We!
+
+        Are! Live!
+        """
+        task_dir = self._basedir / task
+        if job is not None:
+            jobs = [job]
+        else:
+            jobs = await self._readdir(task_dir)
+
+        async def replica_guy(job: str, replica: int):
+            async with await self._open(task_dir / job / str(replica) / "info", "rb") as fp:
+                return (job, replica, safe_load(await fp.read()))
+
+        async def job_guy(job: str):
+            replicas = await self._readdir(task_dir / job)
+            return await asyncio.gather(*(replica_guy(job, int(x)) for x in replicas))
+
+        infos = [
+            (job, replica, info)
+            for replicas in await asyncio.gather(*(job_guy(job) for job in jobs))
+            for (job, replica, info) in replicas
+        ]
+        return {(job, replica): info["start_time"] for job, replica, info in infos}
 
     @property
     @abstractmethod
@@ -356,7 +384,7 @@ class LocalLinuxManager(AbstractProcessManager):
         self.app = app
         self._image_prefix = image_prefix
         if nil_ephemeral is not None:
-            self._local_docker = DockerContainerManager(
+            self._local_docker: Optional[DockerContainerManager] = DockerContainerManager(
                 quota=quota, app=app, docker=nil_ephemeral._session.ephemeral(docker_connect())
             )
         else:
@@ -504,6 +532,7 @@ class _SSHLinuxFile:
         self.mode = mode
         self.ssh = ssh
         self.__fp: Optional[asyncssh.SFTPClientFile] = None
+        self.__fp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClientFile]] = None
 
     @property
     def _fp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClientFile]:
@@ -580,7 +609,11 @@ class SSHLinuxManager(AbstractProcessManager):
         return self._ssh()
 
     @property
-    def sftp(self):
+    def sftp(self) -> asyncssh.SFTPClient:
+        """The corresponding SFTP client connection.
+
+        Will fail if the connection is provided by an unopened Session.
+        """
         return self._sftp()
 
     @property
@@ -591,22 +624,22 @@ class SSHLinuxManager(AbstractProcessManager):
         return _SSHLinuxFile(path, mode, self)
 
     async def _rmtree(self, path: Path):
-        await self.sftp.rmtree(path, ignore_errors=True)
+        await self.sftp.rmtree(path, ignore_errors=True)  # pylint: disable=no-member
 
     async def _mkdir(self, path: Path):
-        await self.sftp.makedirs(path, exist_ok=True)
+        await self.sftp.makedirs(path, exist_ok=True)  # pylint: disable=no-member
 
     async def _kill(self, pid: str):
         await self.ssh.run(f"kill -9 {pid}")
 
     async def _readdir(self, path):
         try:
-            return [x for x in await self.sftp.listdir(path) if x not in (".", "..")]
+            return [x for x in await self.sftp.listdir(path) if x not in (".", "..")]  # pylint: disable=no-member
         except asyncssh.sftp.SFTPNoSuchFile:
             return []
 
     async def _chmod(self, path, mode):
-        await self.sftp.chmod(path, mode)
+        await self.sftp.chmod(path, mode)  # pylint: disable=no-member
 
     async def _get_live_pids(self, hint):
         p = await self.ssh.run("ls /proc")

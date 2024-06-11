@@ -312,10 +312,6 @@ class PipelineSpec:
                 task.executable.args["stdout"] = reponame
                 if "stderr" not in task.executable.args:
                     task.executable.args["stderr"] = "STDOUT"
-            if task.executable.cls == "Process" and "pids" not in task.executable.args:
-                reponame = f"autopids_{taskname}"
-                self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository", required=False)
-                task.executable.args["pids"] = reponame
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":
@@ -478,7 +474,6 @@ class PipelineStaging:
         )
 
     def _get_priority(self, task: str, job: str, replica: int) -> int:
-        # TODO FIXMEEEEE CONFIGURABLE REPLICA SHIT
         result = 0
         for directive in self.spec.priorities:
             if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):

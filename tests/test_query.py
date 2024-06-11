@@ -13,7 +13,10 @@ test_root = pathlib.Path(__file__).parent
 class TestQuery(unittest.IsolatedAsyncioTestCase):
     async def test_query(self):
         staging = PipelineStaging(test_root / "content" / "query" / "pipeline.yaml")
-        allocated = staging.allocate(TempAllocator().allocate, Dispatcher("TempLinux", {"app": "test_streaming"}))
+        allocated = staging.allocate(
+            TempAllocator().allocate,
+            Dispatcher("TempLinux", {"app": "test_streaming", "quota": {"cpu": 8, "mem": 1024**4, "launches": 9999}}),
+        )
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task0 = cast(ProcessTask, pipeline.tasks["task0"])

@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import (
     Awaitable,
     Callable,
+    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -53,26 +54,28 @@ __all__ = ("Pipeline",)
 
 
 @dataclass
-class JobPrioritizer:
+class _JobPrioritizer:
     priority: Callable[[str, str, int], float]
     task: taskmodule.Task
     job: str
     replica: int = 0
 
     def peek(self) -> float:
+        """Return this replica's priority."""
         return self.priority(self.task.name, self.job, self.replica)
 
     def advance(self):
+        """Move on to the next replica."""
         self.replica += 1
 
-    def __lt__(self, other: "JobPrioritizer") -> bool:
+    def __lt__(self, other: "_JobPrioritizer") -> bool:
         return self.peek() < other.peek()
 
 
 @dataclass
-class SchedState:
+class _SchedState:
     initial_jobs: List[Tuple[float, str, str]] = field(default_factory=list)
-    replica_heap: List[JobPrioritizer] = field(default_factory=list)
+    replica_heap: List[_JobPrioritizer] = field(default_factory=list)
 
 
 class Pipeline:
@@ -275,10 +278,10 @@ class Pipeline:
         # l.debug("Collecting launchable jobs")
         to_gather = await asyncio.gather(*(self._gather_ready_jobs(task) for task in self.tasks.values()))
 
-        by_manager = defaultdict(SchedState)
+        by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
         for job_list, task in zip(to_gather, task_list):
             for job in job_list:
-                prio = JobPrioritizer(self.priority, task, job)
+                prio = _JobPrioritizer(self.priority, task, job)
                 sched = by_manager[task.resource_limit]
                 sched.initial_jobs.append((prio.peek(), task.name, job))
                 prio.advance()
@@ -293,7 +296,7 @@ class Pipeline:
         N_WORKERS = 15
         N_LEADERS = len(by_manager)
 
-        async def leader(quota: Quota, sched: SchedState) -> None:
+        async def leader(quota: Quota, sched: _SchedState) -> None:
             used = sum(
                 (
                     self.tasks[task].job_quota
@@ -349,7 +352,6 @@ class Pipeline:
                     quits += 1
                     if quits == N_LEADERS:
                         break
-                    continue
                 else:
                     task, job, replica, kill = jobt
                     if kill:

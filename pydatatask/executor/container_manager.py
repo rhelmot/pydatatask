@@ -1,6 +1,16 @@
 """This module houses the container manager executors."""
 
-from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    cast,
+)
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -41,7 +51,8 @@ class AbstractContainerManager(ABC, Executor):
     Members of this class should be able to manage containers, including being able to track their lifecycles.
     """
 
-    def __init__(self, *, image_prefix: str = ""):
+    def __init__(self, quota: Quota, *, image_prefix: str = ""):
+        super().__init__(quota)
         self._image_prefix = image_prefix
 
     @abstractmethod
@@ -86,7 +97,7 @@ class AbstractContainerManager(ABC, Executor):
     @abstractmethod
     async def update(
         self, task: str, timeout: Optional[timedelta] = None
-    ) -> Tuple[Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[bytes, Dict[str, Any]]]]]:
+    ) -> Tuple[Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]]]:
         """Perform routine maintenence on the running set of jobs for the given task.
 
         Should return a tuple of a the set of live replicas and a dict mapping finished job names to a tuple of the
@@ -117,16 +128,11 @@ class DockerContainerManager(AbstractContainerManager):
         host: Host = LOCAL_HOST,
         image_prefix: str = "",
     ):
+        super().__init__(quota, image_prefix=image_prefix)
         self._docker = docker
-        self._quota = quota
         self.app = app
         self._host = host
-        super().__init__(image_prefix=image_prefix)
         self._net = None
-
-    @property
-    def quota(self):
-        return self._quota
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -141,8 +147,8 @@ class DockerContainerManager(AbstractContainerManager):
         name = name.strip("/")
         prefix = f"{self.app}___{task}___"
         if name.startswith(prefix):
-            id, replica = name[len(prefix) :].split("___")
-            return id, int(replica)
+            ident, replica = name[len(prefix) :].split("___")
+            return ident, int(replica)
         return None
 
     def _id_to_name(self, task: str, ident: str, replica: int) -> str:
@@ -268,7 +274,7 @@ class DockerContainerManager(AbstractContainerManager):
             *(self._cleanup(container, info) for info, container, _ in dead),
             *(self._cleanup(container, info, True) for info, container, _ in timed_out),
         )
-        final = defaultdict(dict)
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for (_, _, (job, replica)), result in zip(chain(dead, timed_out), results):
             if job not in live_jobs:
                 final[job][replica] = result
@@ -301,9 +307,9 @@ class DockerContainerManager(AbstractContainerManager):
 class KubeContainerManager(AbstractContainerManager):
     """An executor that runs containers on a kubernetes cluster."""
 
-    def __init__(self, *, cluster: "pod_manager.PodManager", image_prefix: str = ""):
+    def __init__(self, quota, *, cluster: "pod_manager.PodManager", image_prefix: str = ""):
+        super().__init__(quota, image_prefix=image_prefix)
         self.cluster = cluster
-        super().__init__(image_prefix=image_prefix)
 
     @property
     def host(self):
@@ -329,9 +335,9 @@ class KubeContainerManager(AbstractContainerManager):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
         await self.cluster.launch(
+            task,
             job,
             replica,
-            task,
             {
                 "apiVersion": "v1",
                 "kind": "Pod",
@@ -393,7 +399,7 @@ class KubeContainerManager(AbstractContainerManager):
         results = await asyncio.gather(
             *chain((self._cleanup(pod) for pod in finished_pods), (self._cleanup(pod, True) for pod in timeout_pods))
         )
-        final = defaultdict(dict)
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for pod, result in zip(pods, results):
             if pod.metadata.labels["job"] not in live_jobs:
                 final[pod.metadata.labels["job"]][int(pod.metadata.labels["replica"])] = result
@@ -403,7 +409,7 @@ class KubeContainerManager(AbstractContainerManager):
         log = await self.cluster.logs(pod)
         await self.cluster.delete(pod)
         return (
-            log.encode(),
+            log,
             {
                 "reason": pod.status.phase if not timeout else "Timeout",
                 "timeout": timeout,

@@ -298,7 +298,7 @@ def make_annotated_constructor(
     return make_constructor(name, inner_constructor, schema)
 
 
-def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
+def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
     """Generate a function which will dispatch a dict into all known repository constructors.
 
     This function can be extended through the ``pydatatask.repository_constructors`` entrypoint.
@@ -594,7 +594,7 @@ def build_task_picker(
     repos: Dict[str, Repository],
     executors: Dict[str, Executor],
     quotas: Dict[str, Quota],
-    ephemerals: Dict[str, Callable[[], Any]],
+    ephemerals: Mapping[str, Callable[[], Any]],
 ) -> Callable[[str, Any], Task]:
     """Generate a function which will dispatch a dict into all known task constructors.
 
@@ -665,7 +665,6 @@ def build_task_picker(
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
                 "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
-                "pids": make_picker("Repository", repos),
                 "stdin": make_picker("Repository", repos),
                 "stdout": make_picker("Repository", repos),
                 "stderr": lambda thing: pydatatask.task.STDOUT

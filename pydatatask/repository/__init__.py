@@ -11,6 +11,6 @@ to a flat address space.
 from .base import *
 from .bucket import *
 from .docker import *
-from .kubernetes import *
+from .live import *
 from .mongodb import *
 from .filesystem import *
