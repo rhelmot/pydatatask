@@ -231,7 +231,7 @@ class RepoClassSpec:
     schema: Optional[Dict[str, Any]] = None
     suffix: str = ""
     mimetype: str = "application/octet-stream"
-    required: bool = False
+    required: bool = True
     name: Optional[str] = None
 
 
@@ -371,7 +371,7 @@ class PipelineStaging:
         config: Union[None, Path, PipelineSpec] = None,
         basedir: Optional[Path] = None,
         params: Optional[PipelineChildArgs] = None,
-        is_top: bool = True,
+        is_top: Optional[bool] = True,
     ):
         """The basedir and params parameters are for internal use only."""
         self.children: Dict[str, PipelineStaging] = {}
@@ -445,7 +445,9 @@ class PipelineStaging:
                     child_params.repos.update(params.imports[imp_name].repos)
                     child_params.imports.update(params.imports[imp_name].imports)
 
-                self.children[imp_name] = PipelineStaging(self.basedir / imp.path, params=child_params, is_top=False)
+                self.children[imp_name] = PipelineStaging(
+                    self.basedir / imp.path, params=child_params, is_top=None if self.is_top is None else False
+                )
 
     def _get_repo(self, name: str) -> Union[Dispatcher, RepoClassSpec]:
         if name in self.repos_fulfilled_by_parents:
@@ -624,7 +626,9 @@ class PipelineStaging:
                     )
 
         result = PipelineStaging(basedir=self.basedir)
-        result.children["locked"] = PipelineStaging(self.spec, params=args, is_top=False)
+        result.children["locked"] = PipelineStaging(
+            self.spec, params=args, is_top=None if self.is_top is None else False
+        )
         result.spec.repos.update(repos)
         result.spec.executors.update(executors)
         result.spec.imports["locked"] = spec

@@ -268,6 +268,11 @@ def main():
         type=int,
         help="Specify the port the agent will be running at",
     )
+    parser.add_argument(
+        "--ignore-required",
+        action="store_true",
+        help="Allocate all missing repos - do not respect the required: True attribute",
+    )
     parsed = parser.parse_args()
 
     if not parsed.repo_allocator:
@@ -310,7 +315,7 @@ def main():
             print("Error: no lockfile to unlock")
             return 1
 
-    spec = PipelineStaging(cfgpath)
+    spec = PipelineStaging(cfgpath, is_top=None if parsed.ignore_require else True)
     locked = spec.allocate(
         allocators,
         Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name, "image_prefix": parsed.image_prefix}),
