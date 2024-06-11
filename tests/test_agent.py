@@ -14,7 +14,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             "task",
             "",
             pydatatask.InProcessMetadataRepository(),
-            pydatatask.InProcessMetadataRepository(),
             executor=manager,
         )
         pipeline = pydatatask.Pipeline([task], pydatatask.Session())

@@ -1079,7 +1079,7 @@ class KubeTask(TemplateShellTask):
         :param window:  Optional: How far back into the past to look in order to determine whether we have recently
             launched too many pods too quickly.
         :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it
-            will be timed out and stopped. The method `handle_timeout` will be called in-process.
+            will be timed out and stopped.
         :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
         """
