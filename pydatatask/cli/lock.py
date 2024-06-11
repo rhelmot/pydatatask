@@ -315,7 +315,7 @@ def main():
             print("Error: no lockfile to unlock")
             return 1
 
-    spec = PipelineStaging(cfgpath, is_top=None if parsed.ignore_require else True)
+    spec = PipelineStaging(cfgpath, is_top=None if parsed.ignore_required else True)
     locked = spec.allocate(
         allocators,
         Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name, "image_prefix": parsed.image_prefix}),
