@@ -5,7 +5,7 @@ repo_classes:
   output: BlobRepository
   outputMeta: MetadataRepository
   done: MetadataRepository
-  logs: BlobRepository
+
 tasks:
   task:
     done: done
