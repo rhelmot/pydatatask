@@ -14,6 +14,8 @@ import urllib.parse
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
+from pydatatask.quota import LOCALHOST_QUOTA
+from pydatatask.session import Session
 from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
 
 LOCK_ID = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
@@ -285,6 +287,12 @@ def main():
                 return result
         raise ValueError("Could not allocate %s: tried %s" % (spec, parsed.repo_allocator))
 
+    session = Session()
+
+    @session.ephemeral
+    async def nil_ephemeral():
+        yield None
+
     cfgpath = find_config()
     if cfgpath is None:
         print("Cannot find pipeline.yaml", file=sys.stderr)
@@ -295,7 +303,9 @@ def main():
         pipeline = locked.instantiate()
 
         # HACK
-        executor = LocalLinuxManager(app=cfgpath.name, image_prefix=parsed.image_prefix)
+        executor = LocalLinuxManager(
+            quota=LOCALHOST_QUOTA, app=cfgpath.name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
+        )
         asyncio.run(executor.teardown_agent())
 
         # HACK
@@ -318,7 +328,19 @@ def main():
     spec = PipelineStaging(cfgpath, is_top=None if parsed.ignore_required else True)
     locked = spec.allocate(
         allocators,
-        Dispatcher("LocalLinux", {"app": parsed.name or cfgpath.parent.name, "image_prefix": parsed.image_prefix}),
+        Dispatcher(
+            "LocalLinux",
+            {
+                "quota": {
+                    "cpu": float(LOCALHOST_QUOTA.cpu),
+                    "mem": float(LOCALHOST_QUOTA.mem),
+                    "launches": LOCALHOST_QUOTA.launches,
+                },
+                "app": parsed.name or cfgpath.parent.name,
+                "image_prefix": parsed.image_prefix,
+                "nil_ephemeral": "nil_ephemeral",
+            },
+        ),
         run_lockstep=not parsed.no_lockstep,
     )
     locked.filename = lockfile.name
@@ -330,6 +352,7 @@ def main():
         {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
     )
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
+    locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("DockerConnection", {"url": None})
     locked.save()
 
     locked = PipelineStaging(locked.basedir / locked.filename)
@@ -337,7 +360,9 @@ def main():
 
     # HACK
     if not parsed.no_launch_agent:
-        executor = LocalLinuxManager(app=cfgpath.name, image_prefix=parsed.image_prefix)
+        executor = LocalLinuxManager(
+            quota=LOCALHOST_QUOTA, app=cfgpath.name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
+        )
         asyncio.run(executor.launch_agent(pipeline))
 
     print(locked.basedir / locked.filename)

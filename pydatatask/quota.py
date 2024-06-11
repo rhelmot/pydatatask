@@ -8,6 +8,8 @@ Typical usage is to construct a :class:`QuotaManager` and pass it to a task cons
 
     quota = pydatatask.QuotaManager(pydatatask.Quota.parse(cpu='1000m', mem='1Gi'))
     task = pydatatask.ProcessTask("my_task", localhost, quota, ...)
+
+TODO REWRITE THIS GODDAMN SHIT
 """
 
 from typing import Awaitable, Callable, List, Optional, Union
@@ -17,9 +19,10 @@ from decimal import Decimal
 from enum import Enum, auto
 
 from kubernetes.utils import parse_quantity
+from typing_extensions import Self
 import psutil
 
-__all__ = ("QuotaType", "Quota", "QuotaManager", "parse_quantity", "localhost_quota_manager")
+__all__ = ("QuotaType", "Quota", "parse_quantity")
 
 
 class QuotaType(Enum):
@@ -33,7 +36,7 @@ class QuotaType(Enum):
     RATE = auto()
 
 
-@dataclass
+@dataclass(eq=False)
 class Quota:
     """A dataclass containing a quantity of resources.
 
@@ -51,27 +54,28 @@ class Quota:
     mem: Decimal = field(default=Decimal(0))
     launches: int = 1
 
-    @staticmethod
+    @classmethod
     def parse(
+        cls,
         cpu: Union[str, float, int, Decimal],
         mem: Union[str, float, int, Decimal],
         launches: Union[str, float, int, Decimal, None] = None,
-    ) -> "Quota":
+    ) -> Self:
         """Construct a :class:`Quota` instance by parsing the given quantities of CPU, memory, and launches."""
         if launches is None:
             launches = 999999999
-        return Quota(cpu=parse_quantity(cpu), mem=parse_quantity(mem), launches=int(launches))
+        return cls(cpu=parse_quantity(cpu), mem=parse_quantity(mem), launches=int(launches))
 
-    def __add__(self, other: "Quota"):
-        return Quota(cpu=self.cpu + other.cpu, mem=self.mem + other.mem, launches=self.launches + other.launches)
+    def __add__(self, other: Self):
+        return type(self)(cpu=self.cpu + other.cpu, mem=self.mem + other.mem, launches=self.launches + other.launches)
 
     def __mul__(self, other: int):
-        return Quota(cpu=self.cpu * other, mem=self.mem * other, launches=self.launches * other)
+        return type(self)(cpu=self.cpu * other, mem=self.mem * other, launches=self.launches * other)
 
-    def __sub__(self, other: "Quota"):
+    def __sub__(self, other: Self):
         return self + other * -1
 
-    def excess(self, limit: "Quota") -> Optional[QuotaType]:
+    def excess(self, limit: Self) -> Optional[QuotaType]:
         """Determine if these resources are over a given limit.
 
         :return: The QuotaType of the first resource that is over-limit, or None if self is under-limit.
@@ -86,74 +90,4 @@ class Quota:
             return None
 
 
-class QuotaManager:
-    """The QuotaManager tracks quotas of resources.
-
-    Direct use of this class beyond construction will only be necessary if you are writing a custom Task class.
-    """
-
-    def __init__(self, quota: Quota):
-        """
-        :param quota: The resource limit that should be applied to the sum of all tasks using this manager.
-        """
-        self.quota = quota
-        self.__lock: Optional[Lock] = None
-        self._cached: Optional[Quota] = None
-        self._registered_getters: List[Callable[[], Awaitable[Quota]]] = []
-
-    @property
-    def _lock(self):
-        if self.__lock is None:
-            self.__lock = Lock()
-        return self.__lock
-
-    def register(self, func: Callable[[], Awaitable[Quota]]):
-        """Register an async callback which will be used to load the current resource utilization on process start.
-        The initial reported usage will be the sum of the result of all the registered callbacks.
-
-        If you are writing a Task class, you should call this in your constructor to save a reference to a method on
-        your class which retrieves the current resource utilization by that task.
-        """
-        self._registered_getters.append(func)
-
-    async def _getter(self):
-        result = Quota()
-        for getter in self._registered_getters:
-            result += await getter()
-        return result
-
-    async def flush(self):
-        """Forget the cached amount of resources currently being used.
-
-        Next call to reserve or relinquish will calculate usage anew.
-        """
-        async with self._lock:
-            self._cached = None
-
-    async def reserve(self, request: Quota) -> Optional[QuotaType]:
-        """Atomically reserve the given amount of resources and return None, or do nothing and return the limiting
-        resource type if any resource would be over-quota."""
-        async with self._lock:
-            if self._cached is None:
-                self._cached = await self._getter()
-
-            target = self._cached + request
-            excess = target.excess(self.quota)
-            if excess is None:
-                self._cached = target
-                return None
-            else:
-                return excess
-
-    async def relinquish(self, request: Quota):
-        """Atomically mark the given amount of resources as available."""
-        async with self._lock:
-            if self._cached is None:
-                self._cached = await self._getter()
-
-            self._cached -= request
-
-
-localhost_quota_manager = QuotaManager(
-    Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)
-)
+LOCALHOST_QUOTA = Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)

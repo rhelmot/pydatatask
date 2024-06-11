@@ -58,13 +58,12 @@ import pydatatask
 
 from . import executor as execmodule
 from . import repository as repomodule
-from .quota import Quota, QuotaManager, localhost_quota_manager
+from .quota import Quota
 from .utils import (
     STDOUT,
     AReadStreamBase,
     AsyncReaderQueueStream,
     _StderrIsStdout,
-    async_copyfile,
     crypto_hash,
     safe_load,
     supergetattr,
@@ -87,6 +86,16 @@ __all__ = (
 )
 
 # pylint: disable=broad-except,bare-except
+
+
+@dataclass
+class ReplicaStatus:
+    started: datetime
+
+
+@dataclass
+class LiveStatus:
+    replicas: Dict[int, ReplicaStatus]
 
 
 @dataclass
@@ -203,6 +212,7 @@ class Task(ABC):
         long_running: bool = False,
         timeout: Optional[timedelta] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
+        replicable: bool = False,
     ):
         self.name = name
         self._ready = ready
@@ -223,6 +233,7 @@ class Task(ABC):
         self.queries = queries or {}
         self.done = done
         self.failure_ok = failure_ok
+        self.replicable = replicable
         self.success = pydatatask.query.repository.QueryRepository(
             "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
@@ -252,6 +263,16 @@ class Task(ABC):
         self._related_cache.clear()
         for link in self.links.values():
             link.repo.cache_flush()
+
+    @property
+    @abstractmethod
+    def job_quota(self) -> Quota:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def resource_limit(self) -> Quota:
+        raise NotImplementedError
 
     @property
     @abstractmethod
@@ -761,11 +782,6 @@ class Task(ABC):
         return {name: self._repo_related(name) for name, link in self.links.items() if link.is_output}
 
     @property
-    def status(self):
-        """A mapping from link name to repository for all links marked ``is_status``."""
-        return {name: self._repo_related(name) for name, link in self.links.items() if link.is_status}
-
-    @property
     def inhibits_start(self):
         """A mapping from link name to repository for all links marked ``inhibits_start``."""
         return {name: self._repo_related(name) for name, link in self.links.items() if link.inhibits_start}
@@ -803,19 +819,28 @@ class Task(ABC):
         """
 
     @abstractmethod
-    async def update(self) -> bool:
+    async def update(self) -> Tuple[Dict[Tuple[str, int], datetime], Set[str]]:
         """Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set
         of live tasks. Typically, this entails reaping finished processes.
 
-        Returns True if literally anything interesting happened, or if there are any live tasks.
+        Returns a tuple: The start time for any currently live replicas, and the set of jobs that were reaped in this
+        update.
         """
         raise NotImplementedError
 
     @abstractmethod
-    async def launch(self, job):
-        """Launch a job.
+    async def launch(self, job: str, replica: int):
+        """Launch a particular replica of a particular job.
 
-        Override this to begin execution of the provided job. Error handling will be done for you.
+        Override this to begin execution of the provided job/replica. Error handling will be done for you.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def kill(self, job: str, replica: int):
+        """Kill a particular replica of a particular job.
+
+        If this is the last replica, don't populate done.
         """
         raise NotImplementedError
 
@@ -975,7 +1000,7 @@ class Task(ABC):
             return template
 
 
-class ShellTask(Task):
+class TemplateShellTask(Task):
     """A task which templates a shell script to run."""
 
     async def build_template_env(
@@ -1026,14 +1051,13 @@ class KubeTask(ShellTask):
     """A task which runs a kubernetes pod.
 
     Will automatically link a `LiveKubeRepository` as "live" with
-    ``inhibits_start, inhibits_output, is_status``
+    ``inhibits_output, is_status``
     """
 
     def __init__(
         self,
         name: str,
         executor: "execmodule.Executor",
-        quota_manager: QuotaManager,
         template: Union[str, Path],
         logs: Optional["repomodule.BlobRepository"],
         done: "repomodule.MetadataRepository",
@@ -1067,7 +1091,6 @@ class KubeTask(ShellTask):
         )
 
         self.template = template
-        self.quota_manager = quota_manager
         self._executor = executor
         self._podman: Optional["execmodule.PodManager"] = None
         self.logs = logs
@@ -1075,14 +1098,11 @@ class KubeTask(ShellTask):
         self.warned = False
         self.window = window
 
-        self.quota_manager.register(self._get_load)
-
         self.link(
             "live",
             repomodule.LiveKubeRepository(self),
             None,
             is_status=True,
-            inhibits_start=True,
             inhibits_output=True,
         )
         if logs:
@@ -1107,22 +1127,6 @@ class KubeTask(ShellTask):
             self._podman = self._executor.to_pod_manager()
         return self._podman
 
-    async def _get_load(self):
-        usage = Quota()
-        cutoff = datetime.now(tz=timezone.utc) - self.window
-
-        try:
-            for pod in await self.podman.query(task=self.name):
-                if pod.metadata.creation_timestamp > cutoff:
-                    usage += Quota(launches=1)
-                for container in pod.spec.containers:
-                    usage += Quota.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
-        except ApiException as e:
-            if e.reason != "Forbidden":
-                raise
-
-        return usage
-
     async def build_template_env(self, orig_job, env_src=None):
         if env_src is None:
             env_src = {}
@@ -1132,7 +1136,7 @@ class KubeTask(ShellTask):
         template_env["argv0"] = os.path.basename(sys.argv[0])
         return template_env, preamble, epilogue
 
-    async def launch(self, job):
+    async def launch(self, job, replica):
         template_env, preamble, epilogue = await self.build_template_env(job)
         manifest = safe_load(await render_template(self.template, template_env))
         await self._test_auto_values(template_env)
@@ -1167,22 +1171,10 @@ class KubeTask(ShellTask):
             {execute}
             )
             RETCODE=$?
-            set -e
             {"; ".join(epilogue)}
             exit $RETCODE
             """,
             ]
-
-        limit = await self.quota_manager.reserve(request)
-        if limit is None:
-            try:
-                await self.podman.launch(job, self.name, manifest)
-            except:
-                await self.quota_manager.relinquish(request)
-                raise
-        elif not self.warned:
-            l.warning("Cannot launch %s: %s limit", self, limit)
-            self.warned = True
 
     async def _cleanup(self, pod: Any, reason: str):
         job = pod.metadata.labels["job"]
@@ -1203,7 +1195,7 @@ class KubeTask(ShellTask):
         if self.logs is not None:
             async with await self.logs.open(job, "w") as fp:
                 await fp.write(logs)
-        await self.delete(pod)
+        await self._delete(pod)
 
         if not data["success"] and self.require_success and not self.fail_fast:
             l.error(
@@ -1219,16 +1211,30 @@ class KubeTask(ShellTask):
             assert self.fail_fast
             raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-    async def delete(self, pod: Any):
+    async def kill(self, job: str, replica: int):
+        pods = await self.podman.query(job=job, replica=replica)
+        for pod in pods:
+            await self._delete(pod)
+
+    async def status(self, job: Optional[str] = None) -> List[LiveStatus]:
+        pods = await self.podman.query(job=job)
+        result = defaultdict(list)
+        for pod in pods:
+            job = pod.metadata.labels["job"]
+            replica = int(pod.metadata.labels["replica"])
+            start_time = pod.metadata.creation_timestamp
+            live = pod.status.phase in ("Succeeded", "Failed")
+            result[job].append(ReplicaStatus(replica, start_time, live))
+        return [LiveStatus(job, replicas) for job, replicas in result.items()]
+
+    async def _delete(self, pod: Any):
         """Kill a pod and relinquish its resources without marking the task as complete."""
         request = Quota(launches=1)
         for container in pod.spec.containers:
             request += Quota.parse(container.resources.requests["cpu"], container.resources.requests["memory"], 0)
         await self.podman.delete(pod)
-        await self.quota_manager.relinquish(request)
 
     async def update(self):
-        self.warned = False
         result = False
 
         pods = await self.podman.query(task=self.name)
@@ -1281,7 +1287,6 @@ class ProcessTask(ShellTask):
         done: "repomodule.MetadataRepository",
         pids: "repomodule.MetadataRepository",
         executor: Optional[execmodule.Executor] = None,
-        quota_manager: Optional["QuotaManager"] = None,
         job_quota: Optional["Quota"] = None,
         timeout: Optional[timedelta] = None,
         window: timedelta = timedelta(minutes=1),
@@ -1297,14 +1302,12 @@ class ProcessTask(ShellTask):
         """
         :param name: The name of this task.
         :param executor: The executor to use for this task.
-        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied
-                                 if they would break the quota.
         :param job_quota: The amount of resources an individual job should contribute to the quota. Note that this
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
         :param timeout: The amount of time that a job may take before it is terminated, or None for no timeout.
         :param pids: A metadata repository used to store the current live-status of processes. Will automatically be
-                     linked as "live" with ``is_status, inhibits_start, inhibits_output``.
+                     linked as "live" with ``is_status, inhibits_output``.
         :param template: YAML markup for the template of a script to run, either as a string or a path to a file.
         :param environ: Additional environment variables to set on the target machine before running the task.
         :param window: How recently a process must have been launched in order to contribute to the process
@@ -1336,17 +1339,14 @@ class ProcessTask(ShellTask):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self.job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
-        self.job_quota.launches = 1
-        self.quota_manager = quota_manager or localhost_quota_manager
+        self._job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
+        self._job_quota.launches = 1
         self._executor = executor or execmodule.localhost_manager
         self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
         self.window = window
 
-        self.quota_manager.register(self._get_load)
-
-        self.link("live", pids, None, is_status=True, inhibits_start=True, inhibits_output=True)
+        self.link("live", pids, None, is_status=True, inhibits_output=True)
         if stdin is not None:
             self.link("stdin", stdin, None, is_input=True)
         if stdout is not None:
@@ -1359,6 +1359,14 @@ class ProcessTask(ShellTask):
         return self.manager.host
 
     @property
+    def job_quota(self):
+        return self._job_quota
+
+    @property
+    def resource_limit(self):
+        return self.manager.quota
+
+    @property
     def manager(self) -> execmodule.AbstractProcessManager:
         """The process manager for this task.
 
@@ -1367,18 +1375,6 @@ class ProcessTask(ShellTask):
         if self._manager is None:
             self._manager = self._executor.to_process_manager()
         return self._manager
-
-    async def _get_load(self) -> "Quota":
-        cutoff = datetime.now(tz=timezone.utc) - self.window
-        count = 0
-        recent = 0
-        job_map = await self.pids.info_all()
-        for v in job_map.values():
-            count += 1
-            if v["start_time"] > cutoff:
-                recent += 1
-
-        return self.job_quota * count - Quota(launches=count - recent)
 
     @property
     def stderr(self) -> Optional["repomodule.BlobRepository"]:
@@ -1392,126 +1388,36 @@ class ProcessTask(ShellTask):
     def _unique_stderr(self):
         return self._stderr is not None and not isinstance(self._stderr, _StderrIsStdout)
 
-    @property
-    def basedir(self) -> Path:
-        """The path in the target environment that will be used to store information about this task."""
-        return self.manager.basedir / self.name
-
     async def update(self):
-        self.warned = False
-        job_map = await self.pids.info_all()
-        pid_map = {meta["pid"]: job for job, meta in job_map.items()}
-        now = datetime.now(tz=timezone.utc)
-        timedout_pid_set = {
-            meta["pid"] for job, meta in job_map.items() if self.timeout and now - meta["start_time"] > self.timeout
-        }
-        expected_live = set(pid_map)
-        try:
-            live_pids = await self.manager.get_live_pids(expected_live)
-        except Exception:
-            if self.fail_fast:
-                raise
-            l.error("Could not load live PIDs for %s", self, exc_info=True)
-        else:
-            died = expected_live - live_pids
-            coros = []
-            for pid in died:
-                job = pid_map[pid]
-                start_time = job_map[job]["start_time"]
-                coros.append(self._reap(job, start_time))
-            for pid in timedout_pid_set - died:
-                job = pid_map[pid]
-                start_time = job_map[job]["start_time"]
-                l.info("%s:%s timed out", self.name, job)
-                coros.append(self._timeout_reap(job, pid, start_time))
-            await asyncio.gather(*coros)
-
-        return bool(expected_live)
-
-    async def launch(self, job: str):
-        limit = await self.quota_manager.reserve(self.job_quota)
-        if limit is not None:
-            if not self.warned:
-                l.warning("Cannot launch %s: %s limit", self, limit)
-                self.warned = True
-            return
-
-        pid = None
-        dirmade = False
-
-        try:
-            cwd = self.basedir / job / "cwd"
-            await self.manager.mkdir(cwd)  # implicitly creates basedir / task / job
-            dirmade = True
-            stdin: Optional[str] = None
-            if self.stdin is not None:
-                stdin = str(self.basedir / job / "stdin")
-                async with await self.stdin.open(job, "rb") as fpr, await self.manager.open(Path(stdin), "wb") as fpw:
-                    await async_copyfile(fpr, fpw)
-                stdin = str(stdin)
-            stdout = None if self.stdout is None else str(self.basedir / job / "stdout")
-            stderr: Optional[Union[str, Path, _StderrIsStdout]] = STDOUT
-            if not isinstance(self._stderr, _StderrIsStdout):
-                stderr = None if self._stderr is None else str(self.basedir / job / "stderr")
-            template_env, preamble, epilogue = await self.build_template_env(job)
-            exe_path = self.basedir / job / "exe"
-            exe_txt = await render_template(self.template, template_env)
-            await self._test_auto_values(template_env)
-            for item in template_env.values():
-                if asyncio.iscoroutine(item):
-                    item.close()
-            async with await self.manager.open(exe_path, "w") as fp:
-                await fp.write("set -e\n")
-                for p in preamble:
-                    await fp.write(p)
-                await fp.write("set +e\n(\nset -e\n")
-                await fp.write(exe_txt)
-                await fp.write(")\nRETCODE=$?\nset -e\n")
-                for p in epilogue:
-                    await fp.write(p)
-                await fp.write("exit $RETCODE")
-            pid = await self.manager.spawn(
-                [str(exe_path)], self.environ, str(cwd), str(self.basedir / job / "return_code"), stdin, stdout, stderr
-            )
-            if pid is not None:
-                await self.pids.dump(job, {"pid": pid, "start_time": datetime.now(tz=timezone.utc)})
-        except:  # CLEAN UP YOUR MESS
-            try:
-                await self.quota_manager.relinquish(self.job_quota)
-            except:
-                pass
-            try:
-                if pid is not None:
-                    await self.manager.kill(pid)
-            except:
-                pass
-            try:
-                if dirmade:
-                    await self.manager.rmtree(self.basedir / job)
-            except:
-                pass
-            raise
-
-    async def _reap(self, job: str, start_time: datetime, timeout: bool = False):
-        try:
-            async with await self.manager.open(self.basedir / job / "return_code", "r") as fp1:
-                code = int(await fp1.read())
-            success = code == 0 and (not timeout or self.long_running)
+        # TODO XXX THIS IS AN OOM RISK
+        live, reaped = await self.manager.update(self.name, self.timeout)
+        for job, replicas in reaped.items():
+            success = True
+            stdouts: Dict[int, bytes] = {}
+            stderrs: Dict[int, bytes] = {}
+            dones = {}
+            for replica, (stdout, stderr, done) in replicas.items():
+                success &= done["success"] | (done["timeout"] and self.long_running)
+                if stdout is not None:
+                    stdouts[replica] = stdout
+                if stderr is not None:
+                    stderrs[replica] = stderr
+                dones[replica] = done
 
             if self.stdout is not None:
-                async with await self.manager.open(self.basedir / job / "stdout", "rb") as fpr, await self.stdout.open(
-                    job, "wb"
-                ) as fpw:
-                    await async_copyfile(fpr, fpw)
-            if isinstance(self._stderr, repomodule.BlobRepository):
-                async with await self.manager.open(self.basedir / job / "stderr", "rb") as fpr, await self._stderr.open(
-                    job, "wb"
-                ) as fpw:
-                    await async_copyfile(fpr, fpw)
-
-            await self.manager.rmtree(self.basedir / job)
-            await self.pids.delete(job)
-            await self.quota_manager.relinquish(self.job_quota)
+                async with await self.stdout.open(job, "wb") as fp:
+                    if len(stdouts) == 1:
+                        (log,) = stdouts.values()
+                    else:
+                        log = b"".join(f">>> replica {k} <<<\n".encode() + v for k, v in stdouts.items())
+                    await fp.write(log)
+            if self.stderr is not None and self._unique_stderr:
+                async with await self.stderr.open(job, "wb") as fp:
+                    if len(stderrs) == 1:
+                        (log,) = stderrs.values()
+                    else:
+                        log = b"".join(f">>> replica {k} <<<\n".encode() + v for k, v in stderrs.items())
+                    await fp.write(log)
 
             if not success and self.require_success and not self.fail_fast:
                 l.error(
@@ -1519,33 +1425,65 @@ class ProcessTask(ShellTask):
                     self.name,
                     job,
                 )
-                return
+                continue
 
-            await self.done.dump(
-                job,
-                {
-                    "exit_code": code,
-                    "start_time": start_time,
-                    "end_time": datetime.now(tz=timezone.utc),
-                    "timeout": timeout,
+            if len(dones) == 1:
+                (done,) = dones.values()
+            else:
+                done = {
                     "success": success,
-                },
-            )
+                    "start_time": min(d["start_time"] for d in dones.values()),
+                    "end_time": max(d["end_time"] for d in dones.values()),
+                    "timeout": all(d["timeout"] for d in dones.values()),
+                    "replicas_done": dones,
+                }
+            await self.done.dump(job, done)
 
             if not success and self.require_success:
                 assert self.fail_fast
-                raise Exception(f"require_success is set but {self.name}:{job} failed. aborting pipeline.")
+                raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        except Exception:
-            if self.fail_fast:
-                raise
-            l.error("Could not reap process for %s:%s", self, job, exc_info=True)
+        return live, set(reaped)
 
-    async def _timeout_reap(self, job: str, pid: str, start_time: datetime):
-        try:
-            await self.manager.kill(pid)
-        finally:
-            await self._reap(job, start_time, True)
+    async def launch(self, job: str, replica: int):
+        template_env, preamble, epilogue = await self.build_template_env(job)
+        exe_txt = await render_template(self.template, template_env)
+        await self._test_auto_values(template_env)
+        for item in template_env.values():
+            if asyncio.iscoroutine(item):
+                item.close()
+
+        NEWLINE = "\n"
+        exe = f"""
+        set -e
+        {NEWLINE.join(preamble)}
+        set +e
+        (
+          set -e
+          {exe_txt}
+        )
+        RETCODE=$?
+        {NEWLINE.join(epilogue)}
+        exit $RETCODE
+        """
+
+        if self._stderr is None:
+            stderr = False
+        elif isinstance(self._stderr, repomodule.BlobRepository):
+            stderr = True
+        else:
+            stderr = self._stderr
+
+        if self.stdin is not None:
+            async with await self.stdin.open(job, "rb") as fp:
+                await self.manager.launch(
+                    self.name, job, replica, exe, self.environ, fp, self.stdout is not None, stderr
+                )
+        else:
+            await self.manager.launch(self.name, job, replica, exe, self.environ, None, self.stdout is not None, stderr)
+
+    async def kill(self, job, replica):
+        await self.manager.kill(self.name, job, replica)
 
 
 class FunctionTaskProtocol(Protocol):
@@ -1614,7 +1552,8 @@ class InProcessSyncTask(Task):
     async def update(self):
         return False
 
-    async def launch(self, job: str):
+    async def launch(self, job: str, replica: int):
+        assert replica == 0
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching in-process %s:%s...", self.name, job)
@@ -1752,7 +1691,8 @@ class ExecutorTask(Task):
 
         await super().validate()
 
-    async def launch(self, job):
+    async def launch(self, job, replica):
+        assert replica == 0
         l.info("Launching %s:%s with %s...", self.name, job, self.executor)
         args, preamble, epilogue = await self.build_template_env(job)
         start_time = datetime.now(tz=timezone.utc)
@@ -1832,7 +1772,6 @@ class KubeFunctionTask(KubeTask):
         self,
         name: str,
         executor: "execmodule.Executor",
-        quota_manager: QuotaManager,
         template: Union[str, Path],
         kube_done: "repomodule.MetadataRepository",
         func_done: "repomodule.MetadataRepository",
@@ -1844,8 +1783,6 @@ class KubeFunctionTask(KubeTask):
         """
         :param name: The name of this task.
         :param executor: The executor to use for this task.
-        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied if they
-                          would break the quota.
         :param template: YAML markup for a pod manifest template that will run `pydatatask.main.main` as
                          ``python3 main.py launch [task] [job] --sync --force``, either as a string or a path to a file.
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
@@ -1861,9 +1798,7 @@ class KubeFunctionTask(KubeTask):
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
                      decorator.
         """
-        super().__init__(
-            name, executor, quota_manager, template, logs, kube_done, template_env=template_env, failure_ok=failure_ok
-        )
+        super().__init__(name, executor, template, logs, kube_done, template_env=template_env, failure_ok=failure_ok)
         self.func = func
         self.func_done = func_done
         if func_done is not None:
@@ -1894,11 +1829,12 @@ class KubeFunctionTask(KubeTask):
 
         await super().validate()
 
-    async def launch(self, job: str):
+    async def launch(self, job: str, replica):
+        assert replica == 0
         if self.synchronous:
             await self._launch_sync(job)
         else:
-            await super().launch(job)
+            await super().launch(job, replica)
 
     async def _launch_sync(self, job: str):
         assert self.func is not None
@@ -1943,7 +1879,6 @@ class ContainerTask(ShellTask):
         done: "repomodule.MetadataRepository",
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
         executor: Optional[execmodule.Executor] = None,
-        quota_manager: Optional["QuotaManager"] = None,
         job_quota: Optional["Quota"] = None,
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
@@ -1961,8 +1896,6 @@ class ContainerTask(ShellTask):
         :param name: The name of this task.
         :param image: The name of the docker image to use to run this task. Can be a jinja template.
         :param executor: The executor to use for this task.
-        :param quota_manager: A QuotaManager instance. Tasks launched will contribute to its quota and be denied
-                                 if they would break the quota.
         :param job_quota: The amount of resources an individual job should contribute to the quota. Note that this
                               is currently **not enforced** target-side, so jobs may actually take up more resources
                               than assigned.
@@ -1987,9 +1920,8 @@ class ContainerTask(ShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self.job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
-        self.job_quota.launches = 1
-        self.quota_manager = quota_manager or localhost_quota_manager
+        self._job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
+        self._job_quota.launches = 1
         self._executor = executor or execmodule.localhost_docker_manager
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
@@ -1999,8 +1931,6 @@ class ContainerTask(ShellTask):
         self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
         self.host_mounts = host_mounts or {}
 
-        self.quota_manager.register(self._get_load)
-
         if logs is not None:
             self.link("logs", logs, None, is_status=True)
         self.link(
@@ -2008,13 +1938,20 @@ class ContainerTask(ShellTask):
             repomodule.LiveContainerRepository(self),
             None,
             is_status=True,
-            inhibits_start=True,
             inhibits_output=True,
         )
 
     @property
     def host(self):
         return self.manager.host
+
+    @property
+    def job_quota(self):
+        return self._job_quota
+
+    @property
+    def resource_limit(self):
+        return self.manager.quota
 
     @property
     def manager(self) -> execmodule.AbstractContainerManager:
@@ -2026,23 +1963,26 @@ class ContainerTask(ShellTask):
             self._manager = self._executor.to_container_manager()
         return self._manager
 
-    async def _get_load(self) -> "Quota":
-        cutoff = datetime.now(tz=timezone.utc) - self.window
-        containers = await self.manager.live(self.name)
-        count = len(containers)
-        recent = sum(c > cutoff for c in containers.values())
-        return self.job_quota * count - Quota(launches=count - recent)
-
-    async def update(self) -> bool:
-        has_any, reaped = await self.manager.update(self.name, timeout=self.timeout)
-        for job, (log, done) in reaped.items():
-            done["success"] |= done["timeout"] and self.long_running
+    async def update(self):
+        live, reaped = await self.manager.update(self.name, timeout=self.timeout)
+        for job, replicas in reaped.items():
+            success = True
+            logs = {}
+            dones = {}
+            for replica, (log, done) in replicas.items():
+                success &= done["success"] | (done["timeout"] and self.long_running)
+                logs[replica] = log
+                dones[replica] = done
 
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:
+                    if len(logs) == 1:
+                        (log,) = logs.values()
+                    else:
+                        log = "".join(f">>> replica {k} <<<\n{v}" for k, v in logs.items())
                     await fp.write(log)
 
-            if not done["success"] and self.require_success and not self.fail_fast:
+            if not success and self.require_success and not self.fail_fast:
                 l.error(
                     "require_success is set but %s:%s failed. job will be retried.",
                     self.name,
@@ -2050,22 +1990,25 @@ class ContainerTask(ShellTask):
                 )
                 continue
 
+            if len(dones) == 1:
+                (done,) = dones.values()
+            else:
+                done = {
+                    "success": success,
+                    "start_time": min(d["start_time"] for d in dones.values()),
+                    "end_time": max(d["end_time"] for d in dones.values()),
+                    "timeout": all(d["timeout"] for d in dones.values()),
+                    "replicas_done": dones,
+                }
             await self.done.dump(job, done)
 
-            if not done["success"] and self.require_success:
+            if not success and self.require_success:
                 assert self.fail_fast
                 raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        return has_any
+        return live, set(reaped)
 
-    async def launch(self, job: str):
-        limit = await self.quota_manager.reserve(self.job_quota)
-        if limit is not None:
-            if not self.warned:
-                l.warning("Cannot launch %s: %s limit", self, limit)
-                self.warned = True
-            return
-
+    async def launch(self, job: str, replica: int):
         template_env, preamble, epilogue = await self.build_template_env(job)
         exe_txt = await render_template(self.template, template_env)
         image = await render_template(self.image, template_env)
@@ -2080,7 +2023,6 @@ class ContainerTask(ShellTask):
                 exe_txt,
                 ")",
                 "RETCODE=$?",
-                "set -e",
                 *epilogue,
                 "exit $RETCODE",
             ]
@@ -2096,6 +2038,7 @@ class ContainerTask(ShellTask):
         await self.manager.launch(
             self.name,
             job,
+            replica,
             image,
             list(self.entrypoint),
             exe_txt,
@@ -2106,6 +2049,9 @@ class ContainerTask(ShellTask):
             tty,
             host_mounts=self.host_mounts,
         )
+
+    async def kill(self, job, replica):
+        await self.manager.kill(self.name, job, replica)
 
     async def build_template_env(
         self,

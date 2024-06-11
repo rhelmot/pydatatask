@@ -125,7 +125,7 @@ class PodManager(Executor):
         """A CoreV1Api instance associated with the current websocket-aware API client."""
         return self.connection.v1_ws
 
-    async def launch(self, job, task, manifest):
+    async def launch(self, job, replica, task, manifest):
         """Create a pod with the given manifest, named and labeled for this podman's app and the given job and
         task."""
         assert manifest["kind"] == "Pod"
@@ -139,6 +139,7 @@ class PodManager(Executor):
                     "app": self.app,
                     "task": task,
                     "job": job,
+                    "replica": str(replica),
                 },
             }
         )
@@ -146,13 +147,15 @@ class PodManager(Executor):
         l.info("Creating task %s for job %s", task, job)
         await self.v1.create_namespaced_pod(self.namespace, manifest)
 
-    async def query(self, job=None, task=None) -> List[Any]:
+    async def query(self, job=None, task=None, replica=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
         selectors = ["app=" + self.app]
         if job is not None:
             selectors.append("job=" + job)
         if task is not None:
             selectors.append("task=" + task.replace("_", "-"))
+        if replica is not None:
+            selectors.append("replica=" + str(replica))
         selector = ",".join(selectors)
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 

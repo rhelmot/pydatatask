@@ -30,12 +30,18 @@ Sessions cannot be opened more than once. But this doesn't have to be the way! I
 GitHub issue, and I'll see what can be done.
 """
 
-from typing import AsyncIterable, Callable, Optional, TypeVar
+from typing import AsyncIterable, Callable, Generic, Optional, Protocol, TypeVar
 
 __all__ = ("Session", "Ephemeral")
 
-T = TypeVar("T")
-Ephemeral = Callable[[], T]
+T = TypeVar("T", covariant=True)
+
+
+class Ephemeral(Protocol[T]):
+    def __call__(self) -> T:
+        ...
+
+    _session: "Session"
 
 
 class Session:
@@ -62,7 +68,8 @@ class Session:
                 raise Exception("Session is not open")
             return self.ephemerals[name]
 
-        return inner
+        inner._session = self  # type: ignore
+        return inner  # type: ignore
 
     async def __aenter__(self):
         await self.open()
@@ -83,7 +90,7 @@ class Session:
 
         This is automatically called when exiting an ``async with session:`` block.
         """
-        for name, manager in self._ephemeral_defs.items():
+        for name, manager in reversed(self._ephemeral_defs.items()):
             try:
                 await manager.__anext__()
             except StopAsyncIteration:

@@ -59,7 +59,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
 
         await kubernetes_asyncio.config.load_kube_config(context=self.kube_context)
 
-        cluster_quota = pydatatask.QuotaManager(pydatatask.Quota.parse("1", "1Gi", 99999))
+        cluster_quota = pydatatask.Quota.parse("1", "1Gi", 99999)
 
         kube = session.ephemeral(kube_connect())
         podman = pydatatask.PodManager(

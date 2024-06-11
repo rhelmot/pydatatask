@@ -73,7 +73,7 @@ class LiveContainerRepository(Repository):
         return (self.task.name,)
 
     async def unfiltered_iter(self):
-        for name in await self.task.manager.live(self.task.name):
+        for (name, _) in await self.task.manager.live(self.task.name):
             yield name
 
     async def contains(self, item, /):

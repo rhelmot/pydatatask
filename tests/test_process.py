@@ -30,7 +30,7 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
 
     async def test_local_process(self):
         session = pydatatask.Session()
-        quota = pydatatask.QuotaManager(pydatatask.Quota.parse(1, 1, 99999))
+        quota = pydatatask.Quota.parse(1, 1, 99999)
 
         repo_input = pydatatask.FileRepository(self.dir / "input")
         await repo_input.validate()
@@ -47,15 +47,14 @@ echo weh | cat {{input}} -
 echo bye >&2
         """
 
-        manager = InProcessLocalLinuxManager(app="tests")
+        manager = InProcessLocalLinuxManager(quota, app="tests")
         task = pydatatask.ProcessTask(
             "task",
             template,
             done=repo_done,
-            quota_manager=quota,
+            pids=repo_pids,
             executor=manager,
             job_quota=pydatatask.Quota.parse("100m", "100m"),
-            pids=repo_pids,
             environ={},
             stdin=None,
             stdout=repo_stdout,
@@ -63,7 +62,7 @@ echo bye >&2
         )
         task.link("input", repo_input, LinkKind.InputFilepath)
 
-        pipeline = pydatatask.Pipeline([task], session, [quota], agent_port=self.agent_port)
+        pipeline = pydatatask.Pipeline([task], session, agent_port=self.agent_port)
         await manager.launch_agent(pipeline)
 
         try:
@@ -77,8 +76,8 @@ echo bye >&2
         assert len(repo_done.data) == self.n
 
         for i in range(self.n):
-            assert repo_done.data[str(i)]["exit_code"] == 0
             assert repo_stdout.data[str(i)] == f"{i}weh\nbye\n".encode()
+            assert repo_done.data[str(i)]["exit_code"] == 0
 
     async def asyncTearDown(self):
         await aioshutil.rmtree(self.dir, ignore_errors=True)
@@ -140,9 +139,8 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
             ) as s:
                 yield s
 
-        procman = pydatatask.SSHLinuxManager(self.test_id, ssh, Host("remote", HostOS.Linux))
-
-        quota = pydatatask.QuotaManager(pydatatask.Quota.parse(1, 1, 99999))
+        quota = pydatatask.Quota.parse(1, 1, 99999)
+        procman = pydatatask.SSHLinuxManager(quota, self.test_id, ssh, Host("remote", HostOS.Linux))
 
         repo_stdin = pydatatask.InProcessBlobRepository({str(i): str(i).encode() for i in range(self.n)})
         repo_stdout = pydatatask.InProcessBlobRepository()
@@ -163,7 +161,6 @@ echo 'goodbye world!' >&2
             repo_done,
             repo_pids,
             procman,
-            quota_manager=quota,
             job_quota=pydatatask.Quota.parse("100m", "100m"),
             environ={},
             stdin=repo_stdin,
@@ -171,7 +168,7 @@ echo 'goodbye world!' >&2
             stderr=repo_stderr,
         )
 
-        pipeline = pydatatask.Pipeline([task], session, [quota])
+        pipeline = pydatatask.Pipeline([task], session)
 
         async with pipeline:
             await pydatatask.run(pipeline, False, False, 120)

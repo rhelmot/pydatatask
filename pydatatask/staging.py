@@ -41,7 +41,7 @@ from pydatatask.declarative import (
 from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
 from pydatatask.query.repository import QueryRepository
-from pydatatask.quota import Quota, QuotaManager
+from pydatatask.quota import Quota
 from pydatatask.repository import Repository
 from pydatatask.session import Ephemeral, Session
 from pydatatask.utils import safe_load
@@ -132,7 +132,6 @@ class TaskSpec:
     timeout: Dict[str, str] = field(default_factory=dict)
     long_running: bool = False
     job_quota: Optional[Quota] = None
-    quota_manager: Optional[str] = None
     failure_ok: bool = False
 
 
@@ -478,12 +477,13 @@ class PipelineStaging:
             executors={param_name: self._get_executor(sat_name) for param_name, sat_name in imp.executors.items()},
         )
 
-    def _get_priority(self, task: str, job: str) -> int:
+    def _get_priority(self, task: str, job: str, replica: int) -> int:
+        # TODO FIXMEEEEE CONFIGURABLE REPLICA SHIT
         result = 0
         for directive in self.spec.priorities:
             if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):
                 result += directive.priority
-        return result
+        return result - replica
 
     def missing(self) -> PipelineChildArgsMissing:
         """Return a PipelineChildArgsMissing instance for this pipeline.yaml file.
@@ -531,7 +531,6 @@ class PipelineStaging:
         ephemeral_cache: Dict["PipelineStaging", Dict[str, Ephemeral[Any]]] = {}
         executor_cache: Dict[int, Executor] = {}
         all_tasks = []
-        all_quotas: List[QuotaManager] = []
         session = Session()
         global_template_env = {}
         for staging in self._iter_children():
@@ -562,7 +561,7 @@ class PipelineStaging:
                 if isinstance(repo, QueryRepository):
                     repo.query.repos.update(all_repos)
 
-            quotas = {name: QuotaManager(val) for name, val in staging.spec.quotas.items()}
+            quotas = dict(staging.spec.quotas)
             all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
             all_executors.update(
                 {
@@ -570,7 +569,6 @@ class PipelineStaging:
                     for name, dispatch in staging.executors_fulfilled_by_parents.items()
                 }
             )
-            all_quotas.extend(quotas.values())
             task_constructor = build_task_picker(all_repos, all_executors, quotas, ephemeral_cache[staging])
             for task_name, task_spec in staging.spec.tasks.items():
                 dict_spec = asdict(task_spec)
@@ -584,7 +582,6 @@ class PipelineStaging:
         return Pipeline(
             all_tasks,
             session,
-            all_quotas,
             self._get_priority,
             agent_port=self.spec.agent_port,
             agent_hosts={
@@ -645,7 +642,7 @@ class PipelineStaging:
         """Save this spec back to the pipeline.yaml file, in case it has been modified."""
         spec_dict = asdict(self.spec)
         with open(self.basedir / self.filename, "w", encoding="utf-8") as fp:
-            yaml.dump(spec_dict, fp)
+            yaml.safe_dump(spec_dict, fp)
 
 
 def find_config() -> Optional[Path]:

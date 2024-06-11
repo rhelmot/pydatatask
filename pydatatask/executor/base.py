@@ -11,6 +11,7 @@ class focused on what is run instead of how it is run.
 from typing import TYPE_CHECKING
 
 from pydatatask.host import Host
+from pydatatask.quota import Quota
 
 if TYPE_CHECKING:
     from ..pipeline import Pipeline
@@ -20,8 +21,11 @@ if TYPE_CHECKING:
 class Executor:
     """The executor base class.
 
-    Provides nothing other than the ability to upcast to other executor types.
+    Provides nothing other than the ability to upcast to other executor types and a quota.
     """
+
+    def __init__(self, quota: Quota):
+        self.quota = quota
 
     def to_process_manager(self) -> "proc_manager.AbstractProcessManager":
         """Convert this executor into one that will run processes on the same machine.
