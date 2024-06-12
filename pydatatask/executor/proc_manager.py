@@ -188,6 +188,17 @@ class AbstractProcessManager(Executor):
         await self._kill(pid)
         await self._rmtree(basedir)
 
+    async def killall(self, task: str):
+        """Terminate all processes for the given task."""
+        task_dir = self._basedir / task
+
+        async def job_guy(job: str):
+            replicas = await self._readdir(task_dir / job)
+            return await asyncio.gather(*(self.kill(task, job, int(x)) for x in replicas))
+
+        jobs = await self._readdir(task_dir)
+        await asyncio.gather(*(job_guy(job) for job in jobs))
+
     @abstractmethod
     async def _kill(self, pid: str):
         raise NotImplementedError

@@ -95,6 +95,11 @@ class AbstractContainerManager(ABC, Executor):
         raise NotImplementedError
 
     @abstractmethod
+    async def killall(self, task: str):
+        """Kill all containers for the given task."""
+        await asyncio.gather(*(self.kill(task, job, replica) for (job, replica) in await self.live(task)))
+
+    @abstractmethod
     async def update(
         self, task: str, timeout: Optional[timedelta] = None
     ) -> Tuple[Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]]]:

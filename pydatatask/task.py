@@ -841,6 +841,11 @@ class Task(ABC):
         """
         raise NotImplementedError
 
+    @abstractmethod
+    async def killall(self):
+        """Kill all running jobs."""
+        raise NotImplementedError
+
     # This should almost certainly instead return a context manager returning a object wrapping the jinja environment,
     # the preamble, and the epilogue which cleans up the coroutines on close.
     async def build_template_env(
@@ -1199,6 +1204,10 @@ class KubeTask(TemplateShellTask):
     async def kill(self, job: str, replica: int):
         await self.podman.kill(self.name, job, replica)
 
+    async def killall(self):
+        for pod in await self.podman.query(task=self.name):
+            await self.podman.delete(pod)
+
     async def update(self):
         live, reaped = await self.podman.update(self.name, timeout=self.timeout)
         for job, replicas in reaped.items():
@@ -1460,6 +1469,9 @@ class ProcessTask(TemplateShellTask):
     async def kill(self, job, replica):
         await self.manager.kill(self.name, job, replica)
 
+    async def killall(self):
+        await self.manager.killall(self.name)
+
 
 class FunctionTaskProtocol(Protocol):
     """The protocol which is expected by the tasks which take a python function to execute."""
@@ -1570,6 +1582,9 @@ class InProcessSyncTask(Task):
     async def kill(self, job, replica):
         return
 
+    async def killall(self):
+        return
+
 
 class ExecutorTask(Task):
     """A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been
@@ -1643,6 +1658,10 @@ class ExecutorTask(Task):
     async def kill(self, job: str, replica: int):
         assert replica == 0
         self.rev_jobs[job].cancel()
+
+    async def killall(self):
+        for job in self.jobs:
+            job.cancel()
 
     async def update(self):
         done, _ = wait(self.jobs, 0, FIRST_EXCEPTION)
@@ -2065,6 +2084,9 @@ class ContainerTask(TemplateShellTask):
 
     async def kill(self, job, replica):
         await self.manager.kill(self.name, job, replica)
+
+    async def killall(self):
+        await self.manager.killall(self.name)
 
     async def build_template_env(
         self,

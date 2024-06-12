@@ -383,6 +383,10 @@ class Pipeline:
         self.cache_flush()
         return True
 
+    async def kill_all(self):
+        for task in self.tasks.values():
+            await task.killall()
+
     async def _gather_ready_jobs(self, task: taskmodule.Task) -> Set[str]:
         """Collect all jobs that are ready to be launched for a given task."""
         if task.disabled:

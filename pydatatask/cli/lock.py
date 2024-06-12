@@ -14,6 +14,7 @@ import urllib.parse
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
+from pydatatask.pipeline import Pipeline
 from pydatatask.quota import LOCALHOST_QUOTA
 from pydatatask.session import Session
 from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
@@ -299,8 +300,21 @@ def main():
         return 1
     lockfile = cfgpath.with_suffix(".lock")
     if lockfile.exists():
-        locked = PipelineStaging(lockfile)
-        pipeline = locked.instantiate()
+        try:
+            locked = PipelineStaging(lockfile)
+            pipeline = locked.instantiate()
+        except:  # pylint: disable=bare-except
+            print(
+                "Could not load lockfile.\n"
+                "This could indicate that either your version of pydatatask or the pipeline.yaml have changed.\n"
+                "In order to manually clean up before deleting the lockfile, you should:\n\n"
+                "- kill any live worker processes, containers, pods, etc\n"
+                "- kill any running agents\n"
+                "- delete all filepaths mentioned in the lockfile\n"
+            )
+            sys.exit(1)
+
+        asyncio.run(pipeline.kill_all())
 
         # HACK
         executor = LocalLinuxManager(
