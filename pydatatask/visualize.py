@@ -191,7 +191,7 @@ class TaskVisualizer:
             async with self.pipeline:
                 return await coroutine(*args)
 
-        result = asyncio.run(inner)
+        result = asyncio.run(inner())
         queue.put(result)
 
     def populate_all_node_info(self, nodes):
