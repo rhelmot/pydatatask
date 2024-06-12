@@ -483,7 +483,7 @@ class Task(ABC):
                 WATCHER_LAST=1
             fi
             for f in *; do
-              if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ]; then
+              if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ] && [ "$(($(date +%s) - $(stat -c %Y "$f")))" -ge 5 ]; then
                 ID=$(idgen)
                 ln -sf "$PWD/$f" {upload}
                 {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
