@@ -1065,6 +1065,7 @@ class KubeTask(TemplateShellTask):
         ready: Optional["repomodule.Repository"] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
+        replicable: bool = False,
     ):
         """
         :param name: The name of the task.
@@ -1084,7 +1085,14 @@ class KubeTask(TemplateShellTask):
         :param ready:   Optional: A repository from which to read task-ready status.
         """
         super().__init__(
-            name, done, ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+            name,
+            done,
+            ready,
+            long_running=long_running,
+            timeout=timeout,
+            queries=queries,
+            failure_ok=failure_ok,
+            replicable=replicable,
         )
 
         self.template = _read_template(template)
@@ -1262,6 +1270,7 @@ class ProcessTask(TemplateShellTask):
         ready: Optional["repomodule.Repository"] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
+        replicable: bool = False,
     ):
         """
         :param name: The name of this task.
@@ -1291,7 +1300,14 @@ class ProcessTask(TemplateShellTask):
         :param ready:  Optional: A repository from which to read task-ready status.
         """
         super().__init__(
-            name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+            name,
+            done,
+            ready=ready,
+            long_running=long_running,
+            timeout=timeout,
+            queries=queries,
+            failure_ok=failure_ok,
+            replicable=replicable,
         )
 
         self.template = template
@@ -1878,6 +1894,7 @@ class ContainerTask(TemplateShellTask):
         tty: Optional[bool] = False,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
+        replicable: bool = False,
         host_mounts: Optional[Dict[str, str]] = None,
     ):
         """
@@ -1900,7 +1917,14 @@ class ContainerTask(TemplateShellTask):
         :param ready:  Optional: A repository from which to read task-ready status.
         """
         super().__init__(
-            name, done, ready=ready, long_running=long_running, timeout=timeout, queries=queries, failure_ok=failure_ok
+            name,
+            done,
+            ready=ready,
+            long_running=long_running,
+            timeout=timeout,
+            queries=queries,
+            failure_ok=failure_ok,
+            replicable=replicable,
         )
 
         self.template = template

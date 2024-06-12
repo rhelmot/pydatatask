@@ -69,7 +69,7 @@ class _JobPrioritizer:
         self.replica += 1
 
     def __lt__(self, other: "_JobPrioritizer") -> bool:
-        return self.peek() < other.peek()
+        return self.peek() > other.peek()
 
 
 @dataclass
@@ -334,7 +334,11 @@ class Pipeline:
                         heapq.heappop(sched.replica_heap)
                     else:
                         used += alloc
-                        await queue.put((next_guy.task.name, next_guy.job, next_guy.replica, False))
+                        tup = (next_guy.task.name, next_guy.job, next_guy.replica)
+                        if tup not in to_kill:
+                            await queue.put((*tup, False))
+                        else:
+                            to_kill.remove(tup)
                         next_guy.advance()
                         heapq.heapreplace(sched.replica_heap, next_guy)
             # kill!!
@@ -357,11 +361,11 @@ class Pipeline:
                     if kill:
                         try:
                             l.info("Killing %s:%s.%d", task, job, replica)
-                            await self.tasks[task].launch(job, replica)
+                            await self.tasks[task].kill(job, replica)
                         except:  # pylint: disable=bare-except
                             if self.fail_fast:
                                 raise
-                            l.exception("Failed to launch %s:%s.%d", task, job, replica)
+                            l.exception("Failed to kill %s:%s.%d", task, job, replica)
                     else:
                         try:
                             l.info("Launching %s:%s", task, job)

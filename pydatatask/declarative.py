@@ -593,7 +593,6 @@ link_kind_constructor = make_enum_constructor(LinkKind)
 def build_task_picker(
     repos: Dict[str, Repository],
     executors: Dict[str, Executor],
-    quotas: Dict[str, Quota],
     ephemerals: Mapping[str, Callable[[], Any]],
 ) -> Callable[[str, Any], Task]:
     """Generate a function which will dispatch a dict into all known task constructors.
@@ -651,7 +650,6 @@ def build_task_picker(
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
-                "quota": make_picker("Quota", quotas),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
@@ -660,6 +658,7 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Process-specific
                 "template": str,
@@ -689,8 +688,10 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Kube-specific
+                "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
                 "template": str,
                 "template_env": make_dict_parser("environ", str, str),
                 "logs": make_picker("Repository", repos),
@@ -713,6 +714,7 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Container-specific
                 "template": str,
@@ -731,12 +733,15 @@ def build_task_picker(
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()
         try:
-            kinds.update(maker(repos, quotas, ephemerals))
+            kinds.update(maker(repos, ephemerals))
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     dispatcher = make_dispatcher("Task", kinds)
 
     def constructor(name, thing):
+        thing.pop("priority")
+        thing.pop("priority_factor")
+        thing.pop("priority_addend")
         executable = thing.pop("executable")
         executable["args"].update(thing)
         executable["args"]["name"] = name

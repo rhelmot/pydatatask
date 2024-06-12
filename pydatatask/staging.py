@@ -133,6 +133,10 @@ class TaskSpec:
     long_running: bool = False
     job_quota: Optional[Quota] = None
     failure_ok: bool = False
+    replicable: bool = False
+    priority_factor: Optional[float] = None
+    priority_addend: Optional[int] = None
+    priority: float = 0.0
 
 
 @_dataclass_serial
@@ -243,7 +247,8 @@ class PipelineSpec:
     repo_queries: Dict[str, RepoQuerySpec] = field(default_factory=dict)
     repo_classes: Dict[str, RepoClassSpec] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
-    quotas: Dict[str, Quota] = field(default_factory=dict)
+    priority_factors: Dict[str, float] = field(default_factory=dict)
+    priority_addends: Dict[str, float] = field(default_factory=dict)
     ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
     imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
     lockstep: str = ""
@@ -473,12 +478,29 @@ class PipelineStaging:
             executors={param_name: self._get_executor(sat_name) for param_name, sat_name in imp.executors.items()},
         )
 
-    def _get_priority(self, task: str, job: str, replica: int) -> int:
-        result = 0
-        for directive in self.spec.priorities:
-            if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):
-                result += directive.priority
-        return result - replica
+    def _get_priority(self, task: str, job: str, replica: int) -> float:
+        result = 0.0
+
+        for child in self._iter_children():
+            for directive in child.spec.priorities:
+                if (directive.job is None or directive.job == job) and (
+                    directive.task is None or directive.task == task
+                ):
+                    result += directive.priority
+            if task in child.spec.tasks:
+                result += child.spec.tasks[task].priority
+                addend = child.spec.tasks[task].priority_addend
+                factor = child.spec.tasks[task].priority_factor
+                if addend is not None:
+                    assert addend >= 0, "Priority addend must be >= 0"
+                    result -= addend * replica
+                if factor is not None:
+                    assert 0 < factor <= 1, "Priority factor must be 0 < x <= 1"
+                    if result < 0:
+                        result /= factor**replica
+                    else:
+                        result *= factor**replica
+        return result
 
     def missing(self) -> PipelineChildArgsMissing:
         """Return a PipelineChildArgsMissing instance for this pipeline.yaml file.
@@ -556,7 +578,6 @@ class PipelineStaging:
                 if isinstance(repo, QueryRepository):
                     repo.query.repos.update(all_repos)
 
-            quotas = dict(staging.spec.quotas)
             all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
             all_executors.update(
                 {
@@ -564,7 +585,7 @@ class PipelineStaging:
                     for name, dispatch in staging.executors_fulfilled_by_parents.items()
                 }
             )
-            task_constructor = build_task_picker(all_repos, all_executors, quotas, ephemeral_cache[staging])
+            task_constructor = build_task_picker(all_repos, all_executors, ephemeral_cache[staging])
             for task_name, task_spec in staging.spec.tasks.items():
                 dict_spec = asdict(task_spec)
                 if task_name in staging.executors_fulfilled_by_parents:
