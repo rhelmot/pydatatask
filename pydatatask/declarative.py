@@ -56,7 +56,7 @@ import pydatatask
 _T = TypeVar("_T")
 
 
-def nil_eph():
+def _nil_eph():
     async def nil_eph():
         yield None
 
@@ -584,7 +584,7 @@ def build_ephemeral_picker() -> Callable[[Any], Ephemeral[Any]]:
                 "url": lambda thing: thing,
             },
         ),
-        "Nil": lambda x: nil_eph(),
+        "Nil": lambda x: _nil_eph(),
     }
     for ep in entry_points(group="pydatatask.ephemeral_constructors"):
         maker = ep.load()

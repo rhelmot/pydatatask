@@ -112,7 +112,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                 else:
                     raise Exception("Minikube failed to give us anything interesting within 20 seconds")
 
-            await pydatatask.update(pipeline)
+            await pipeline.update()
             live = task.links["live"].repo
             launched = [x async for x in live]
             assert launched
