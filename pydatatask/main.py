@@ -386,7 +386,7 @@ http {{
     """
 
     agents = [
-        subprocess.Popen(
+        subprocess.Popen(  # pylint: disable=consider-using-with
             [
                 sys.executable,
                 "-m",
@@ -401,7 +401,7 @@ http {{
         for i in range(count)
     ]
     config_filename = f"/tmp/pydatatask-nginx-{pipeline.agent_port}.conf"
-    with open(config_filename, "w") as f:
+    with open(config_filename, "w", encoding="utf-8") as f:
         f.write(nginx_config)
     process_result = subprocess.run([nginx, "-c", config_filename], check=False)
     for agent in agents:

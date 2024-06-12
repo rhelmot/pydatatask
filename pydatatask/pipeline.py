@@ -384,6 +384,7 @@ class Pipeline:
         return True
 
     async def kill_all(self):
+        """Kill all jobs for all tasks in the pipeline."""
         for task in self.tasks.values():
             await task.killall()
 

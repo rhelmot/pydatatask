@@ -15,7 +15,6 @@ import yaml
 from pydatatask.utils import (
     AReadStreamBase,
     AWriteStreamBase,
-    AWriteStreamBaseIntWrapper,
     async_copyfile,
     safe_load,
 )
@@ -31,6 +30,7 @@ class _DeferredResponse:
         self.prepared = False
 
     async def write(self, data: bytes, /) -> int:
+        """Write it."""
         if not self.prepared:
             await self.response.prepare(self.request)
             self.prepared = True
@@ -38,6 +38,7 @@ class _DeferredResponse:
         return len(data)
 
     async def write_eof(self):
+        """Term it."""
         if not self.prepared:
             await self.response.prepare(self.request)
             self.prepared = True
