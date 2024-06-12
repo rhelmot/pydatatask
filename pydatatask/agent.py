@@ -24,6 +24,26 @@ from . import repository as repomodule
 from .pipeline import Pipeline
 
 
+class _DeferredResponse:
+    def __init__(self, request: web.Request):
+        self.request = request
+        self.response = web.StreamResponse()
+        self.prepared = False
+
+    async def write(self, data: bytes, /) -> int:
+        if not self.prepared:
+            await self.response.prepare(self.request)
+            self.prepared = True
+        await self.response.write(data)
+        return len(data)
+
+    async def write_eof(self):
+        if not self.prepared:
+            await self.response.prepare(self.request)
+            self.prepared = True
+        await self.response.write_eof()
+
+
 def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Application:
     """Given a pipeline, generate an aiohttp web app to serve its repositories."""
 
@@ -59,19 +79,18 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
     async def get(request: web.Request, repo: repomodule.Repository, job: str) -> web.StreamResponse:
         meta = request.query.getone("meta", None) == "1"
         subpath = request.query.getone("subpath", None)
-        response = web.StreamResponse()
-        await response.prepare(request)
+        response = _DeferredResponse(request)
         if isinstance(repo, repomodule.FilesystemRepository):
             if meta:
-                await cat_fs_meta(repo, job, AWriteStreamBaseIntWrapper(response))
+                await cat_fs_meta(repo, job, response)
             elif subpath:
-                await cat_fs_entry(repo, job, AWriteStreamBaseIntWrapper(response), subpath)
+                await cat_fs_entry(repo, job, response, subpath)
             else:
-                await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
+                await cat_data(repo, job, response)
         else:
-            await cat_data(repo, job, AWriteStreamBaseIntWrapper(response))
+            await cat_data(repo, job, response)
         await response.write_eof()
-        return response
+        return response.response
 
     async def post(request: web.Request) -> web.StreamResponse:
         try:
@@ -113,11 +132,10 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
 
         result = await query.execute(params)
 
-        response = web.StreamResponse()
-        await response.prepare(request)
-        await query.format_response(result, AWriteStreamBaseIntWrapper(response))
+        response = _DeferredResponse(request)
+        await query.format_response(result, response)
         await response.write_eof()
-        return response
+        return response.response
 
     async def cokey_post(request: web.Request) -> web.StreamResponse:
         try:

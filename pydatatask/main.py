@@ -379,7 +379,6 @@ http {{
             proxy_set_header     Upgrade $http_upgrade;
             proxy_set_header     Connection upgrade;
             proxy_set_header     Host $host;
-            proxy_cache_bypass   $http_upgrade;
         }}
     }}
 }}
@@ -400,7 +399,7 @@ http {{
         )
         for i in range(count)
     ]
-    config_filename = "/tmp/pydatatask-nginx-{pipeline.agent_port}.conf"
+    config_filename = f"/tmp/pydatatask-nginx-{pipeline.agent_port}.conf"
     with open(config_filename, "w") as f:
         f.write(nginx_config)
     process_result = subprocess.run([nginx, "-c", config_filename], check=False)
