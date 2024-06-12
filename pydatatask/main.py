@@ -9,8 +9,7 @@ The help screen should look something like this:
       usage: main.py [-h] {update,run,status,trace,rm,ls,cat,inject,launch,shell} ...
 
     positional arguments:
-      {update,run,status,trace,rm,ls,cat,inject,launch,shell}
-        update              Keep the pipeline in motion
+      {run,status,trace,rm,ls,cat,inject,launch,shell}
         run                 Run update in a loop until everything is quiet
         status              View the pipeline status
         trace               Track a job's progress through the pipeline
@@ -74,7 +73,6 @@ token_re = re.compile(r"\w+(?:\.\w+)+")
 
 __all__ = (
     "main",
-    "update",
     "cat_data",
     "list_data",
     "delete_data",
@@ -105,13 +103,11 @@ def main(
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 
-    parser_update = subparsers.add_parser("update", help="Keep the pipeline in motion")
-    parser_update.set_defaults(func=update)
-
     parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
+    parser_run.add_argument("--once", action="store_true", help="Run only a single loop of updates")
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
-    parser_run.add_argument("--verbose", action="store_true", help="Only evaluates tasks-to-launch once")
+    parser_run.add_argument("--verbose", action="store_true", help="Enable more verbose logging")
     parser_run.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
@@ -337,10 +333,6 @@ async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
         write_dot(pipeline.graph, f)
 
 
-async def update(pipeline: Pipeline):
-    await pipeline.update()
-
-
 def http_agent(pipeline: Pipeline, host: str, override_port: Optional[int] = None) -> None:
     logging.getLogger("aiohttp.access").setLevel("DEBUG")
     app = build_agent_app(pipeline, True)
@@ -422,6 +414,7 @@ async def run(
     require_success: bool = False,
     tasks: Optional[List[str]] = None,
     debug_trace: bool = False,
+    once: bool = False,
 ):
     if tasks == []:
         tasks = None
@@ -434,6 +427,8 @@ async def run(
     start = asyncio.get_running_loop().time()
     do_launch = True
     while await pipeline.update(do_launch) or forever:
+        if once:
+            break
         if launch_once:
             do_launch = False
         await asyncio.sleep(1)

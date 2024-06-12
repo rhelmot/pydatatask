@@ -56,6 +56,13 @@ import pydatatask
 _T = TypeVar("_T")
 
 
+def nil_eph():
+    async def nil_eph():
+        yield None
+
+    return nil_eph
+
+
 def parse_bool(thing: Any) -> bool:
     """Parse a string, int, or bool into a bool."""
     if isinstance(thing, bool):
@@ -577,6 +584,7 @@ def build_ephemeral_picker() -> Callable[[Any], Ephemeral[Any]]:
                 "url": lambda thing: thing,
             },
         ),
+        "Nil": lambda x: nil_eph(),
     }
     for ep in entry_points(group="pydatatask.ephemeral_constructors"):
         maker = ep.load()

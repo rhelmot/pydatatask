@@ -177,8 +177,7 @@ class AbstractProcessManager(Executor):
     async def kill(self, task: str, job: str, replica: int):
         """Terminate the process with the given identifier.
 
-        This should do nothing if the process is not currently running. This should not prevent e.g. the ``return_code``
-        file from being populated.
+        This should do nothing if the process is not currently running.
         """
         basedir = self._basedir / task / job / str(replica)
         info_path = basedir / "info"
@@ -186,6 +185,7 @@ class AbstractProcessManager(Executor):
             info = safe_load(await fp.read())
         pid = info["pid"]
         await self._kill(pid)
+        await asyncio.sleep(0.1)  # don't race with return_code writing
         await self._rmtree(basedir)
 
     async def killall(self, task: str):
@@ -454,7 +454,10 @@ class LocalLinuxManager(AbstractProcessManager):
         return pid.decode().strip()
 
     async def _kill(self, pid: str):
-        os.kill(int(pid), signal.SIGKILL)
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     async def _chmod(self, path, mode):
         os.chmod(path, mode)

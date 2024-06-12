@@ -371,7 +371,7 @@ def main():
         {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
     )
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
-    locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("DockerConnection", {"url": None})
+    locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("Nil", {})
     locked.save()
 
     locked = PipelineStaging(locked.basedir / locked.filename)
