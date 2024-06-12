@@ -41,13 +41,14 @@ l = logging.getLogger(__name__)
 already_logged_messages = set()
 
 
-def debug_log(l, *args, **kwargs):
+def debug_log(logger, *args, **kwargs):
+    """Emit a log message, but don't emit the same message more than once."""
     cached_kwargs = tuple((k, v) for k, v in sorted(kwargs.items()))
     cached_args = tuple(args)
     if (cached_args, cached_kwargs) in already_logged_messages:
         return
     already_logged_messages.add((cached_args, cached_kwargs))
-    l.debug(*args, **kwargs)
+    logger.debug(*args, **kwargs)
 
 
 __all__ = ("Pipeline",)
