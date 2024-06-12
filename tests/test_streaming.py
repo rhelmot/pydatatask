@@ -19,7 +19,10 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming(self):
         staging = PipelineStaging(test_root / "content" / "streaming_input" / "pipeline.yaml")
-        allocated = staging.allocate(TempAllocator().allocate, Dispatcher("TempLinux", {"app": "test_streaming"}))
+        allocated = staging.allocate(
+            TempAllocator().allocate,
+            Dispatcher("TempLinux", {"app": "test_streaming", "quota": {"cpu": 8, "mem": 1024**4, "launches": 9999}}),
+        )
         pipeline = allocated.instantiate()
         # pipeline.settings(debug_trace=True)
         task = cast(ProcessTask, pipeline.tasks["task"])
@@ -35,8 +38,8 @@ class TestStreaming(unittest.IsolatedAsyncioTestCase):
             async with pipeline:
                 assert not await pipeline.update()
                 await scope.dump("1", "hoo hoo hoo")
+                assert await task.ready.contains("1")
                 assert await pipeline.update()
-                assert not await pipeline.update_only_launch()
                 assert await live.contains("1")
                 await inputScope.dump("100", {"target": 1})
                 await inputScope.dump("101", {"target": 1})

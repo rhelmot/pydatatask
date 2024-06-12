@@ -41,7 +41,7 @@ from pydatatask.declarative import (
 from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
 from pydatatask.query.repository import QueryRepository
-from pydatatask.quota import Quota, QuotaManager
+from pydatatask.quota import Quota
 from pydatatask.repository import Repository
 from pydatatask.session import Ephemeral, Session
 from pydatatask.utils import safe_load
@@ -132,8 +132,11 @@ class TaskSpec:
     timeout: Dict[str, str] = field(default_factory=dict)
     long_running: bool = False
     job_quota: Optional[Quota] = None
-    quota_manager: Optional[str] = None
     failure_ok: bool = False
+    replicable: bool = False
+    priority_factor: Optional[float] = None
+    priority_addend: Optional[int] = None
+    priority: float = 0.0
 
 
 @_dataclass_serial
@@ -244,7 +247,8 @@ class PipelineSpec:
     repo_queries: Dict[str, RepoQuerySpec] = field(default_factory=dict)
     repo_classes: Dict[str, RepoClassSpec] = field(default_factory=dict)
     priorities: List[PriorityEntry] = field(default_factory=list)
-    quotas: Dict[str, Quota] = field(default_factory=dict)
+    priority_factors: Dict[str, float] = field(default_factory=dict)
+    priority_addends: Dict[str, float] = field(default_factory=dict)
     ephemerals: Dict[str, Dispatcher] = field(default_factory=dict)
     imports: Dict[str, PipelineChildSpec] = field(default_factory=dict)
     lockstep: str = ""
@@ -313,10 +317,6 @@ class PipelineSpec:
                 task.executable.args["stdout"] = reponame
                 if "stderr" not in task.executable.args:
                     task.executable.args["stderr"] = "STDOUT"
-            if task.executable.cls == "Process" and "pids" not in task.executable.args:
-                reponame = f"autopids_{taskname}"
-                self.repo_classes[reponame] = RepoClassSpec(cls="MetadataRepository", required=False)
-                task.executable.args["pids"] = reponame
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":
@@ -478,11 +478,28 @@ class PipelineStaging:
             executors={param_name: self._get_executor(sat_name) for param_name, sat_name in imp.executors.items()},
         )
 
-    def _get_priority(self, task: str, job: str) -> int:
-        result = 0
-        for directive in self.spec.priorities:
-            if (directive.job is None or directive.job == job) and (directive.task is None or directive.task == task):
-                result += directive.priority
+    def _get_priority(self, task: str, job: str, replica: int) -> float:
+        result = 0.0
+
+        for child in self._iter_children():
+            for directive in child.spec.priorities:
+                if (directive.job is None or directive.job == job) and (
+                    directive.task is None or directive.task == task
+                ):
+                    result += directive.priority
+            if task in child.spec.tasks:
+                result += child.spec.tasks[task].priority
+                addend = child.spec.tasks[task].priority_addend
+                factor = child.spec.tasks[task].priority_factor
+                if addend is not None:
+                    assert addend >= 0, "Priority addend must be >= 0"
+                    result -= addend * replica
+                if factor is not None:
+                    assert 0 < factor <= 1, "Priority factor must be 0 < x <= 1"
+                    if result < 0:
+                        result /= factor**replica
+                    else:
+                        result *= factor**replica
         return result
 
     def missing(self) -> PipelineChildArgsMissing:
@@ -492,7 +509,7 @@ class PipelineStaging:
         .ready() function to get a boolean for whether it is properly ready.
         """
         return PipelineChildArgsMissing(
-            is_top=self.is_top,
+            is_top=True if self.is_top is None else self.is_top,
             repos={
                 name: cls
                 for name, cls in self.spec.repo_classes.items()
@@ -531,7 +548,6 @@ class PipelineStaging:
         ephemeral_cache: Dict["PipelineStaging", Dict[str, Ephemeral[Any]]] = {}
         executor_cache: Dict[int, Executor] = {}
         all_tasks = []
-        all_quotas: List[QuotaManager] = []
         session = Session()
         global_template_env = {}
         for staging in self._iter_children():
@@ -562,7 +578,6 @@ class PipelineStaging:
                 if isinstance(repo, QueryRepository):
                     repo.query.repos.update(all_repos)
 
-            quotas = {name: QuotaManager(val) for name, val in staging.spec.quotas.items()}
             all_executors = {name: executor_cache[id(dispatch)] for name, dispatch in staging.spec.executors.items()}
             all_executors.update(
                 {
@@ -570,8 +585,7 @@ class PipelineStaging:
                     for name, dispatch in staging.executors_fulfilled_by_parents.items()
                 }
             )
-            all_quotas.extend(quotas.values())
-            task_constructor = build_task_picker(all_repos, all_executors, quotas, ephemeral_cache[staging])
+            task_constructor = build_task_picker(all_repos, all_executors, ephemeral_cache[staging])
             for task_name, task_spec in staging.spec.tasks.items():
                 dict_spec = asdict(task_spec)
                 if task_name in staging.executors_fulfilled_by_parents:
@@ -584,7 +598,6 @@ class PipelineStaging:
         return Pipeline(
             all_tasks,
             session,
-            all_quotas,
             self._get_priority,
             agent_port=self.spec.agent_port,
             agent_hosts={
@@ -645,7 +658,7 @@ class PipelineStaging:
         """Save this spec back to the pipeline.yaml file, in case it has been modified."""
         spec_dict = asdict(self.spec)
         with open(self.basedir / self.filename, "w", encoding="utf-8") as fp:
-            yaml.dump(spec_dict, fp)
+            yaml.safe_dump(spec_dict, fp)
 
 
 def find_config() -> Optional[Path]:

@@ -6,7 +6,9 @@ will set up an appropriate environment for running the task and retrieve the res
 
 from typing import (
     TYPE_CHECKING,
+    Any,
     AsyncContextManager,
+    DefaultDict,
     Dict,
     List,
     Literal,
@@ -18,6 +20,8 @@ from typing import (
     overload,
 )
 from abc import abstractmethod
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import asyncio
 import getpass
@@ -28,7 +32,7 @@ import subprocess
 import sys
 
 from aiohttp import web
-import aiofiles
+import aiofiles.os
 import aioshutil
 import asyncssh
 import psutil
@@ -36,16 +40,19 @@ import yaml
 
 from pydatatask import agent
 from pydatatask.executor import Executor
-from pydatatask.executor.container_manager import DockerContainerManager
+from pydatatask.executor.container_manager import DockerContainerManager, docker_connect
 from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.quota import LOCALHOST_QUOTA, Quota
 from pydatatask.session import Ephemeral
 
 from ..utils import (
     AReadStream,
+    AReadStreamBase,
     AReadTextProto,
     AWriteStream,
     AWriteTextProto,
     _StderrIsStdout,
+    async_copyfile,
     safe_load,
 )
 
@@ -61,31 +68,96 @@ class AbstractProcessManager(Executor):
     Processes are managed through arbitrary "process identifier" handle strings.
     """
 
-    def __init__(self, tmp_path: Union[str, Path]):
-        self.tmp_path = Path(tmp_path)
+    def __init__(self, quota: Quota, tmp_path: Union[str, Path]):
+        super().__init__(quota)
+        self._tmp_path = Path(tmp_path)
 
     def to_process_manager(self) -> "AbstractProcessManager":
         return self
 
     @abstractmethod
-    async def get_live_pids(self, hint: Set[str]) -> Set[str]:
+    async def _get_live_pids(self, hint: Set[str]) -> Set[str]:
         """Get a set of the live process identifiers.
 
-        This may include processes which are not part of the current app/task, but MUST include all the processes in
-        ``hint`` which are still alive.
+        This must return a subset of hint.
         """
         raise NotImplementedError
 
+    async def launch(
+        self,
+        task: str,
+        job: str,
+        replica: int,
+        script: str,
+        environ: Dict[str, str],
+        stdin: Union[AReadStreamBase, None],
+        stdout: bool,
+        stderr: Union[bool, "_StderrIsStdout"],
+    ):
+        """Launch!
+
+        That! Job!
+        """
+        basedir = self._basedir / task / job / str(replica)
+        dirmade = False
+        pid = None
+        try:
+            cwd_path = basedir / "cwd"
+            stdout_path = basedir / "stdout" if stdout else None
+            if stderr is True:
+                stderr_path: Union[_StderrIsStdout, Path, None] = basedir / "stderr"
+            elif stderr is False:
+                stderr_path = None
+            else:
+                stderr_path = stderr
+            return_code = basedir / "return_code"
+            info_path = basedir / "info"
+            script_path = basedir / "exe"
+            await self._mkdir(cwd_path)
+            dirmade = True
+            async with await self._open(script_path, "w") as fp:
+                await fp.write(script)
+            await self._chmod(script_path, 0o755)
+            if stdin is not None:
+                stdin_path = basedir / "stdin"
+                async with await self._open(stdin_path, "wb") as fp:
+                    await async_copyfile(stdin, fp)
+            else:
+                stdin_path = None
+            pid = await self._spawn(
+                ["/bin/sh", "-c", str(script_path)],
+                environ,
+                cwd_path,
+                return_code,
+                stdin_path,
+                stdout_path,
+                stderr_path,
+            )
+            async with await self._open(info_path, "w") as fp:
+                await fp.write(yaml.safe_dump({"pid": pid, "start_time": datetime.now(tz=timezone.utc)}))
+        except:
+            try:
+                if dirmade:
+                    await self._rmtree(basedir)
+            except:  # pylint: disable=bare-except
+                pass
+            try:
+                if pid is not None:
+                    await self._kill(pid)
+            except:  # pylint: disable=bare-except
+                pass
+            raise
+
     @abstractmethod
-    async def spawn(
+    async def _spawn(
         self,
         args: List[str],
         environ: Dict[str, str],
         cwd: Union[str, Path],
         return_code: Union[str, Path],
-        stdin: Optional[Union[str, Path]],
-        stdout: Optional[Union[str, Path]],
-        stderr: Optional[Union[str, Path, "_StderrIsStdout"]],
+        stdin: Union[str, Path, None],
+        stdout: Union[str, Path, None],
+        stderr: Union[str, Path, "_StderrIsStdout", None],
     ) -> str:
         """Launch a process on the target system. This function MUST NOT wait until the process has terminated
         before returning.
@@ -102,48 +174,171 @@ class AbstractProcessManager(Executor):
         """
         raise NotImplementedError
 
-    @abstractmethod
-    async def kill(self, pid: str):
+    async def kill(self, task: str, job: str, replica: int):
         """Terminate the process with the given identifier.
 
         This should do nothing if the process is not currently running. This should not prevent e.g. the ``return_code``
         file from being populated.
         """
+        basedir = self._basedir / task / job / str(replica)
+        info_path = basedir / "info"
+        async with await self._open(info_path, "rb") as fp:
+            info = safe_load(await fp.read())
+        pid = info["pid"]
+        await self._kill(pid)
+        await self._rmtree(basedir)
+
+    @abstractmethod
+    async def _kill(self, pid: str):
         raise NotImplementedError
+
+    async def update(
+        self, task: str, timeout: Optional[timedelta] = None
+    ) -> Tuple[
+        Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[Optional[bytes], Optional[bytes], Dict[str, Any]]]]
+    ]:
+        """Perform routine maintenence on the running set of jobs for the given task.
+
+        Should return a tuple of a bool indicating whether any jobs were running before this function was called, and a
+        dict mapping finished job names to a tuple of the output logs from the job and a dict with any metadata left
+        over from any replicas of the job.
+
+        If any job has been alive for longer than timeout, kill it and return it as part of the finished jobs.
+        """
+        task_dir = self._basedir / task
+        jobs = await self._readdir(task_dir)
+
+        async def replica_guy(job: str, replica: int):
+            async with await self._open(task_dir / job / str(replica) / "info", "rb") as fp:
+                return (job, replica, safe_load(await fp.read()))
+
+        async def job_guy(job: str):
+            replicas = await self._readdir(task_dir / job)
+            return await asyncio.gather(*(replica_guy(job, int(x)) for x in replicas))
+
+        infos = [
+            (job, replica, info)
+            for replicas in await asyncio.gather(*(job_guy(job) for job in jobs))
+            for (job, replica, info) in replicas
+        ]
+        info_by_pids = {info["pid"]: (job, replica, info) for job, replica, info in infos}
+        maybe_pids = set(info_by_pids)
+        live_pids = await self._get_live_pids(maybe_pids)
+        dead_pids = maybe_pids - live_pids
+        now = datetime.now(tz=timezone.utc)
+        if timeout is not None:
+            timeout_pids = {pid for pid in live_pids if info_by_pids[pid][2]["start_time"] + timeout > now}
+        else:
+            timeout_pids = set()
+
+        await asyncio.gather(*(self._kill(pid) for pid in timeout_pids))
+        for pid in timeout_pids:
+            info_by_pids[pid][2]["timeout"] = True
+        for pid in dead_pids:
+            info_by_pids[pid][2]["timeout"] = False
+        live_pids -= timeout_pids
+        dead_pids |= timeout_pids
+        live_replicas = {
+            (job, replica): info["start_time"] for pid, (job, replica, info) in info_by_pids.items() if pid in live_pids
+        }
+        live_jobs = {job for job, _ in live_replicas}
+
+        async def io_guy(
+            job: str, replica: int, info: Dict[str, Any]
+        ) -> Tuple[str, int, Dict[str, Any], Optional[bytes], Optional[bytes]]:
+            rep_dir = task_dir / job / str(replica)
+            try:
+                async with await self._open(rep_dir / "stdout", "rb") as fp:
+                    stdout = await fp.read()
+            except FileNotFoundError:
+                stdout = None
+            try:
+                async with await self._open(rep_dir / "stderr", "rb") as fp:
+                    stderr = await fp.read()
+            except FileNotFoundError:
+                stderr = None
+            try:
+                async with await self._open(rep_dir / "return_code", "r") as fp:
+                    info["exit_code"] = int(await fp.read())
+            except FileNotFoundError:
+                info["exit_code"] = 1
+            await self._rmtree(rep_dir)
+            return job, replica, info, stdout, stderr
+
+        io_results = await asyncio.gather(*(io_guy(*info_by_pids[pid]) for pid in dead_pids))
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
+        for job, replica, info, stdout, stderr in io_results:
+            info["success"] = info["exit_code"] == 0
+            info["end_time"] = now
+            if job not in live_jobs:
+                final[job][replica] = (stdout, stderr, info)
+
+        return live_replicas, final
+
+    async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
+        """We!
+
+        Are! Live!
+        """
+        task_dir = self._basedir / task
+        if job is not None:
+            jobs = [job]
+        else:
+            jobs = await self._readdir(task_dir)
+
+        async def replica_guy(job: str, replica: int):
+            async with await self._open(task_dir / job / str(replica) / "info", "rb") as fp:
+                return (job, replica, safe_load(await fp.read()))
+
+        async def job_guy(job: str):
+            replicas = await self._readdir(task_dir / job)
+            return await asyncio.gather(*(replica_guy(job, int(x)) for x in replicas))
+
+        infos = [
+            (job, replica, info)
+            for replicas in await asyncio.gather(*(job_guy(job) for job in jobs))
+            for (job, replica, info) in replicas
+        ]
+        return {(job, replica): info["start_time"] for job, replica, info in infos}
 
     @property
     @abstractmethod
-    def basedir(self) -> Path:
+    def _basedir(self) -> Path:
         """A path on the target system to a directory which can be freely manipulated by the app."""
         raise NotImplementedError
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["r"]) -> AsyncContextManager["AReadTextProto"]:
+    async def _open(self, path: Union[Path, str], mode: Literal["r"]) -> AsyncContextManager["AReadTextProto"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["w"]) -> AsyncContextManager["AWriteTextProto"]:
+    async def _open(self, path: Union[Path, str], mode: Literal["w"]) -> AsyncContextManager["AWriteTextProto"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["rb"]) -> AsyncContextManager["AReadStream"]:
+    async def _open(self, path: Union[Path, str], mode: Literal["rb"]) -> AsyncContextManager["AReadStream"]:
         ...
 
     @overload
     @abstractmethod
-    async def open(self, path: Union[Path, str], mode: Literal["wb"]) -> AsyncContextManager["AWriteStream"]:
+    async def _open(self, path: Union[Path, str], mode: Literal["wb"]) -> AsyncContextManager["AWriteStream"]:
         ...
 
     @abstractmethod
-    async def open(self, path, mode):
+    async def _open(self, path, mode):
         """Open the file on the target system for reading or writing according to the given mode."""
         raise NotImplementedError
 
     @abstractmethod
-    async def mkdir(self, path: Path):  # exist_ok=True, parents=True
+    async def _chmod(self, path: Union[Path, str], mode: int):
+        """Change the mode of the given file on the target system."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def _mkdir(self, path: Path):  # exist_ok=True, parents=True
         """Create a directory with the given path on the target system.
 
         This should have the semantics of ``mkdir -p``, i.e. create any necessary parent directories and also succeed if
@@ -152,8 +347,16 @@ class AbstractProcessManager(Executor):
         raise NotImplementedError
 
     @abstractmethod
-    async def rmtree(self, path: Path):
+    async def _rmtree(self, path: Path):
         """Remove a directory and all its children with the given path on the target system."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def _readdir(self, path: Path) -> List[str]:
+        """Return the contents of the given directory.
+
+        Returns just the basenames.
+        """
         raise NotImplementedError
 
 
@@ -164,51 +367,64 @@ class LocalLinuxManager(AbstractProcessManager):
     """
 
     def to_container_manager(self):
-        return DockerContainerManager(app=self.app, image_prefix=self._image_prefix)
+        if self._local_docker is not None:
+            return self._local_docker
+        raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
 
     def __init__(
         self,
+        quota: Quota,
         *,
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
         image_prefix: str = "",
+        nil_ephemeral: Optional[Ephemeral[None]] = None,
     ):
-        super().__init__(Path(local_path) / app)
+        super().__init__(quota, Path(local_path) / app)
         self.app = app
         self._image_prefix = image_prefix
+        if nil_ephemeral is not None:
+            self._local_docker: Optional[DockerContainerManager] = DockerContainerManager(
+                quota=quota, app=app, docker=nil_ephemeral._session.ephemeral(docker_connect())
+            )
+        else:
+            self._local_docker = None
 
     @property
     def host(self) -> Host:
         return LOCAL_HOST
 
     @property
-    def basedir(self) -> Path:
-        return self.tmp_path
+    def _basedir(self) -> Path:
+        return self._tmp_path
 
-    async def get_live_pids(self, hint: Set[str]) -> Set[str]:
-        return {str(x) for x in psutil.pids()}
+    async def _get_live_pids(self, hint: Set[str]) -> Set[str]:
+        return {str(x) for x in psutil.pids()} & hint
 
-    async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
-        await self.mkdir(self.tmp_path)
+    async def _readdir(self, path):
+        try:
+            return await aiofiles.os.listdir(path)
+        except FileNotFoundError:
+            return []
+
+    async def _spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
         if stdin is None:
-            stdin = "/dev/null"
+            stdin_real = "/dev/null"
         else:
-            stdin = shlex.quote(str(stdin))
+            stdin_real = shlex.quote(str(stdin))
         if stdout is None:
-            stdout = "/dev/null"
+            stdout_real = "/dev/null"
         else:
-            stdout = shlex.quote(str(stdout))
+            stdout_real = shlex.quote(str(stdout))
         if stderr is None:
-            stderr = "/dev/null"
+            stderr_real = "/dev/null"
         elif isinstance(stderr, _StderrIsStdout):
-            stderr = "&1"
+            stderr_real = "&1"
         else:
-            stderr = shlex.quote(str(stderr))
-        if "/" in args[0]:
-            os.chmod(args[0], 0o755)
+            stderr_real = shlex.quote(str(stderr))
         return_code = shlex.quote(str(return_code))
         cmd = f"""
-        {shlex.join(args)} <{stdin} >{stdout} 2>{stderr} &
+        {shlex.join(args)} <{stdin_real} >{stdout_real} 2>{stderr_real} &
         PID=$!
         echo $PID
         wait $PID >/dev/null 2>/dev/null
@@ -226,16 +442,19 @@ class LocalLinuxManager(AbstractProcessManager):
         pid = p.stdout.readline()
         return pid.decode().strip()
 
-    async def kill(self, pid: str):
+    async def _kill(self, pid: str):
         os.kill(int(pid), signal.SIGKILL)
 
-    async def mkdir(self, path: Path):
+    async def _chmod(self, path, mode):
+        os.chmod(path, mode)
+
+    async def _mkdir(self, path: Path):
         path.mkdir(parents=True, exist_ok=True)
 
-    async def rmtree(self, path: Path):
+    async def _rmtree(self, path: Path):
         await aioshutil.rmtree(path)
 
-    async def open(self, path, mode):
+    async def _open(self, path, mode):
         return aiofiles.open(path, mode)
 
     async def _agent_live(self) -> Tuple[Optional[str], Optional[str]]:
@@ -243,14 +462,14 @@ class LocalLinuxManager(AbstractProcessManager):
 
         If so, return (pid, version_string). Otherwise, return (None, None)
         """
-        agent_path = self.tmp_path / "agent"
+        agent_path = self._basedir / "agent"
         try:
-            async with await self.open(agent_path, "r") as fp:
+            async with await self._open(agent_path, "r") as fp:
                 bdata = await fp.read()
             data = safe_load(bdata)
             pid = data["pid"]
             live_version = data["version"]
-            if pid in await self.get_live_pids(set()):
+            if await self._get_live_pids({pid}):
                 return pid, live_version
         except FileNotFoundError:
             pass
@@ -260,7 +479,7 @@ class LocalLinuxManager(AbstractProcessManager):
     async def teardown_agent(self):
         pid, _ = await self._agent_live()
         if pid is not None:
-            await self.kill(pid)
+            await self._kill(pid)
 
     async def launch_agent(self, pipeline):
         asyncio.get_event_loop().set_debug(True)
@@ -271,7 +490,7 @@ class LocalLinuxManager(AbstractProcessManager):
         if pid is not None:
             if version == pipeline.agent_version:
                 return
-            await self.kill(pid)
+            await self._kill(pid)
 
         # lmao, hack
         tmp = os.environ.get("TEMP", "/tmp")
@@ -295,37 +514,25 @@ class LocalLinuxManager(AbstractProcessManager):
                 f"Launched agent version {pipeline.agent_version} pid {p.pid} "
                 f"pipeline {pipeline.source_file} port {pipeline.agent_port}".encode()
             )
-        agent_path = self.tmp_path / "agent"
-        await self.mkdir(self.tmp_path)
+        agent_path = self._basedir / "agent"
+        await self._mkdir(self._basedir)
         data = yaml.safe_dump({"pid": str(p.pid), "version": pipeline.agent_version})
-        async with await self.open(agent_path, "w") as fp:
+        async with await self._open(agent_path, "w") as fp:
             await fp.write(data)
 
 
-class SSHLinuxFile:
+class _SSHLinuxFile:
     """A file returned by `SSHLinuxManager.open`.
 
     Probably don't instantiate this directly.
     """
 
-    def __init__(self, path: Union[Path, str], mode: Literal["r", "w", "rb", "wb"], ssh: asyncssh.SSHClientConnection):
+    def __init__(self, path: Union[Path, str], mode: Literal["r", "w", "rb", "wb"], ssh: "SSHLinuxManager"):
         self.path = Path(path)
         self.mode = mode
         self.ssh = ssh
-        self.__sftp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClient]] = None
-        self.__sftp: Optional[asyncssh.SFTPClient] = None
-        self.__fp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClientFile]] = None
         self.__fp: Optional[asyncssh.SFTPClientFile] = None
-
-    @property
-    def _sftp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClient]:
-        assert self.__sftp_mgr is not None
-        return self.__sftp_mgr
-
-    @property
-    def _sftp(self) -> asyncssh.SFTPClient:
-        assert self.__sftp is not None
-        return self.__sftp
+        self.__fp_mgr: Optional[AsyncContextManager[asyncssh.SFTPClientFile]] = None
 
     @property
     def _fp_mgr(self) -> AsyncContextManager[asyncssh.SFTPClientFile]:
@@ -338,15 +545,12 @@ class SSHLinuxFile:
         return self.__fp
 
     async def __aenter__(self):
-        self.__sftp_mgr = self.ssh.start_sftp_client()
-        self.__sftp = await self._sftp_mgr.__aenter__()
-        self.__fp_mgr = self._sftp.open(self.path, self.mode)
+        self.__fp_mgr = self.ssh.sftp.open(self.path, self.mode)
         self.__fp = await self._fp_mgr.__aenter__()
         return self._fp
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._fp_mgr.__aexit__(exc_type, exc_val, exc_tb)
-        await self._sftp_mgr.__aexit__(exc_type, exc_val, exc_tb)
 
 
 class SSHLinuxManager(AbstractProcessManager):
@@ -375,13 +579,21 @@ class SSHLinuxManager(AbstractProcessManager):
 
     def __init__(
         self,
+        quota: Quota,
         app: str,
         ssh: Ephemeral[asyncssh.SSHClientConnection],
         host: Host,
         remote_path: Union[Path, str] = f"/tmp/pydatatask-{getpass.getuser()}",
     ):
-        super().__init__(Path(remote_path) / app)
+        super().__init__(quota, Path(remote_path) / app)
+
+        @ssh._session.ephemeral
+        async def sftp():
+            async with ssh().start_sftp_client() as mgr:
+                yield mgr
+
         self._ssh = ssh
+        self._sftp = sftp
         self._host = host
 
     @property
@@ -397,30 +609,45 @@ class SSHLinuxManager(AbstractProcessManager):
         return self._ssh()
 
     @property
-    def basedir(self) -> Path:
-        return self.tmp_path
+    def sftp(self) -> asyncssh.SFTPClient:
+        """The corresponding SFTP client connection.
 
-    async def open(self, path, mode):  # type: ignore
-        return SSHLinuxFile(path, mode, self.ssh)
+        Will fail if the connection is provided by an unopened Session.
+        """
+        return self._sftp()
 
-    async def rmtree(self, path: Path):
-        async with self.ssh.start_sftp_client() as sftp:
-            await sftp.rmtree(path, ignore_errors=True)
+    @property
+    def _basedir(self) -> Path:
+        return self._tmp_path
 
-    async def mkdir(self, path: Path):
-        async with self.ssh.start_sftp_client() as sftp:
-            await sftp.makedirs(path, exist_ok=True)
+    async def _open(self, path, mode):  # type: ignore
+        return _SSHLinuxFile(path, mode, self)
 
-    async def kill(self, pid: str):
+    async def _rmtree(self, path: Path):
+        await self.sftp.rmtree(path, ignore_errors=True)  # pylint: disable=no-member
+
+    async def _mkdir(self, path: Path):
+        await self.sftp.makedirs(path, exist_ok=True)  # pylint: disable=no-member
+
+    async def _kill(self, pid: str):
         await self.ssh.run(f"kill -9 {pid}")
 
-    async def get_live_pids(self, hint):
+    async def _readdir(self, path):
+        try:
+            return [x for x in await self.sftp.listdir(path) if x not in (".", "..")]  # pylint: disable=no-member
+        except asyncssh.sftp.SFTPNoSuchFile:
+            return []
+
+    async def _chmod(self, path, mode):
+        await self.sftp.chmod(path, mode)  # pylint: disable=no-member
+
+    async def _get_live_pids(self, hint):
         p = await self.ssh.run("ls /proc")
         assert p.stdout is not None
-        return {cast(str, x) for x in p.stdout.split() if x.isdigit()}
+        return {cast(str, x) for x in p.stdout.split() if x.isdigit()} & hint
 
-    async def spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
-        await self.mkdir(self.tmp_path)
+    async def _spawn(self, args, environ, cwd, return_code, stdin, stdout, stderr):
+        await self._mkdir(self._tmp_path)
         if stdin is None:
             stdin = "/dev/null"
         else:
@@ -435,9 +662,6 @@ class SSHLinuxManager(AbstractProcessManager):
             stderr = "&1"
         else:
             stderr = shlex.quote(str(stderr))
-        if "/" in args[0]:
-            async with self.ssh.start_sftp_client() as sftp:
-                await sftp.chmod(args[0], 0o755)
         p = cast(
             asyncssh.SSHClientProcess[bytes],
             await self.ssh.create_process(
@@ -457,7 +681,7 @@ class SSHLinuxManager(AbstractProcessManager):
         return pid.strip().decode()
 
 
-localhost_manager = LocalLinuxManager(app="default")
+localhost_manager = LocalLinuxManager(LOCALHOST_QUOTA, app="default")
 
 
 class InProcessLocalLinuxManager(LocalLinuxManager):
@@ -465,10 +689,11 @@ class InProcessLocalLinuxManager(LocalLinuxManager):
 
     def __init__(
         self,
+        quota: Quota,
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
     ):
-        super().__init__(app=app, local_path=local_path)
+        super().__init__(quota, app=app, local_path=local_path)
 
         self.runner: Optional[web.AppRunner] = None
 

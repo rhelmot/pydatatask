@@ -12,8 +12,7 @@ __all__ = (
     "AbstractContainerManager",
     "DockerContainerManager",
     "KubeContainerManager",
-    "localhost_docker_manager",
-    "SSHLinuxFile",
+    "docker_connect",
     "SSHLinuxManager",
     "InProcessLocalLinuxManager",
 )
@@ -24,7 +23,6 @@ from .proc_manager import (
     AbstractProcessManager,
     LocalLinuxManager,
     localhost_manager,
-    SSHLinuxFile,
     SSHLinuxManager,
     InProcessLocalLinuxManager,
 )
@@ -32,5 +30,5 @@ from .container_manager import (
     AbstractContainerManager,
     DockerContainerManager,
     KubeContainerManager,
-    localhost_docker_manager,
+    docker_connect,
 )

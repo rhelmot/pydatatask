@@ -4,10 +4,22 @@ needs several resource references.
 the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
-from typing import Any, AsyncIterator, Callable, List, Optional
+from typing import (
+    Any,
+    AsyncIterator,
+    Callable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+import asyncio
 import logging
 
-from kubernetes_asyncio.client import ApiClient, CoreV1Api
+from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
 from kubernetes_asyncio.config import load_kube_config
 from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
@@ -15,6 +27,7 @@ from kubernetes_asyncio.stream import WsApiClient
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import KubeContainerManager
 from pydatatask.host import Host
+from pydatatask.quota import Quota
 from pydatatask.session import Ephemeral
 
 l = logging.getLogger(__name__)
@@ -72,10 +85,11 @@ class PodManager(Executor):
         return self
 
     def to_container_manager(self):
-        return KubeContainerManager(cluster=self)
+        return KubeContainerManager(self.quota, cluster=self)
 
     def __init__(
         self,
+        quota: Quota,
         host: Host,
         app: str,
         namespace: str,
@@ -88,6 +102,7 @@ class PodManager(Executor):
                                  to use the "default" configuration, i.e. what is available after calling
                                  ``await kubernetes_asyncio.config.load_kube_config()``.
         """
+        super().__init__(quota)
         self._host = host
         self.app = app
         self.namespace = namespace
@@ -125,7 +140,17 @@ class PodManager(Executor):
         """A CoreV1Api instance associated with the current websocket-aware API client."""
         return self.connection.v1_ws
 
-    async def launch(self, job, task, manifest):
+    def _id_to_name(self, task: str, job: str, replica: int) -> str:
+        return f"{self.app}-{task}-{job}-{replica}"
+
+    def _name_to_id(self, name: str, task: str) -> Tuple[str, int]:
+        prefix = f"{self.app}-{task}-"
+        if name.startswith(prefix):
+            job, replica = name[len(prefix) :].split("-")
+            return job, int(replica)
+        raise Exception("Not a pod for this task")
+
+    async def launch(self, task: str, job: str, replica: int, manifest):
         """Create a pod with the given manifest, named and labeled for this podman's app and the given job and
         task."""
         assert manifest["kind"] == "Pod"
@@ -134,25 +159,85 @@ class PodManager(Executor):
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
             {
-                "name": "%s-%s-%s" % (self.app, job, task),
+                "name": self._id_to_name(task, job, replica),
                 "labels": {
                     "app": self.app,
                     "task": task,
                     "job": job,
+                    "replica": str(replica),
                 },
             }
         )
 
-        l.info("Creating task %s for job %s", task, job)
         await self.v1.create_namespaced_pod(self.namespace, manifest)
 
-    async def query(self, job=None, task=None) -> List[Any]:
+    async def kill(self, task: str, job: str, replica: int):
+        """Killllllllllllll."""
+        await self.v1.delete_namespaced_pod(self._id_to_name(task, job, replica), self.namespace)
+
+    async def update(
+        self, task: str, timeout: Optional[timedelta] = None
+    ) -> Tuple[Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]]]:
+        """Do maintainence."""
+        pods = await self.query(task=task)
+        podmap = {pod.metadata.name: pod for pod in pods}
+        dead = {name for name, pod in podmap.items() if pod.status.phase in ("Succeeded", "Failed")}
+        live = set(podmap) - dead
+        now = datetime.now(tz=timezone.utc)
+        timed = {
+            name for name in live if timeout is not None and podmap[name].metadata.creation_timesamp + timeout > now
+        }
+        live -= timed
+        dead |= timed
+        live_jobs = {self._name_to_id(name, task)[0] for name in live}
+
+        def gen_done(pod):
+            return {
+                "reason": "Timeout" if pod.metadata.name in timed else pod.status.phase,
+                "start_time": pod.metadata.creation_timestamp,
+                "end_time": datetime.now(tz=timezone.utc),
+                "image": pod.status.container_statuses[0].image,
+                "node": pod.spec.node_name,
+                "timeout": pod.metadata.name in timed,
+                "success": pod.status.phase == "Succeeded",
+            }
+
+        async def io_guy(name) -> Optional[bytes]:
+            try:
+                return await self.logs(podmap[name])
+            except (TimeoutError, ApiException):
+                return None
+
+        logs = await asyncio.gather(
+            *(io_guy(name) for name in dead if self._name_to_id(name, task)[0] not in live_jobs)
+        )
+        await asyncio.gather(
+            *(self.v1.delete_namespaced_pod(name, self.namespace) for name in dead), return_exceptions=True
+        )
+
+        live_result = {
+            (str(podmap[name].metadata.labels["job"]), int(podmap[name].metadata.labels["replica"])): podmap[
+                name
+            ].metadata.creation_timestamp
+            for name in live
+        }
+        reap_result: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
+        for name, log in zip(dead, logs):
+            job, replica = self._name_to_id(name, task)
+            if job not in live_jobs:
+                reap_result[job][replica] = (log, gen_done(podmap[name]))
+
+        return live_result, dict(reap_result)
+
+    async def query(self, job=None, task=None, replica=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
         selectors = ["app=" + self.app]
         if job is not None:
             selectors.append("job=" + job)
         if task is not None:
             selectors.append("task=" + task.replace("_", "-"))
+        if replica is not None:
+            selectors.append("replica=" + str(replica))
         selector = ",".join(selectors)
         return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
 
@@ -160,6 +245,8 @@ class PodManager(Executor):
         """Destroy the given pod."""
         await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
 
-    async def logs(self, pod: Any, timeout=10) -> str:
+    async def logs(self, pod: Any, timeout=10) -> bytes:
         """Retrieve the logs for the given pod."""
-        return await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)
+        return (
+            await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)
+        ).encode()

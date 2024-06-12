@@ -4,11 +4,9 @@ repo_classes:
   inputScope: MetadataRepository
   output: BlobRepository
   outputMeta: MetadataRepository
-  done: MetadataRepository
 
 tasks:
   task:
-    done: done
     links:
       # scope and the task itself are keyed alike
       scope:
@@ -36,8 +34,6 @@ tasks:
     executable:
       cls: Process
       args:
-        stdout: logs
-        stderr: STDOUT
         template: |
           echo hoo >/tmp/hoo {{ bwahhhhhh | default("") }}
           BROKEN=

@@ -58,7 +58,6 @@ from .agent import build_agent_app
 from .agent import cat_data as cat_data_inner
 from .agent import inject_data as inject_data_inner
 from .pipeline import Pipeline
-from .quota import localhost_quota_manager
 from .utils import AsyncQueueStream, async_copyfile
 from .visualize import run_viz
 
@@ -354,19 +353,13 @@ async def run(
         fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
     )
 
-    async def update_only_update_flush():
-        await pipeline.update_only_update()
-        for res in pipeline.quota_managers:
-            await res.flush()
-        await localhost_quota_manager.flush()
-
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
-    func = pipeline.update
     start = asyncio.get_running_loop().time()
-    while await func() or forever:
+    do_launch = True
+    while await pipeline.update(do_launch) or forever:
         if launch_once:
-            func = update_only_update_flush
+            do_launch = False
         await asyncio.sleep(1)
         if timeout and asyncio.get_running_loop().time() - start > timeout:
             raise TimeoutError("Pipeline run timeout")
@@ -593,7 +586,7 @@ async def launch(
     pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace, require_success=require_success)
 
     if force or await task.ready.contains(job):
-        await task.launch(job)
+        await task.launch(job, 0)
     else:
         log.warning("Task is not ready to launch - use -f to force")
         return 1

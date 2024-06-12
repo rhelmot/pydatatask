@@ -11,11 +11,8 @@ repos:
         invert: ". | not"
 repo_classes:
   inputs: MetadataRepository
-  done0: MetadataRepository
-  done1: MetadataRepository
 tasks:
   task0:
-    done: done0
     executable:
       cls: Process
       args:
@@ -25,7 +22,6 @@ tasks:
         repo: inputs
         kind: OutputFilepath
   task1:
-    done: done1
     executable:
       cls: Process
       args:

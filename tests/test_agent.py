@@ -3,20 +3,20 @@ import unittest
 
 import aiohttp
 
+from pydatatask.quota import LOCALHOST_QUOTA
 import pydatatask
 
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
     async def test_errors(self):
-        manager = pydatatask.InProcessLocalLinuxManager(app="test_agent")
+        manager = pydatatask.InProcessLocalLinuxManager(quota=LOCALHOST_QUOTA, app="test_agent")
         task = pydatatask.ProcessTask(
             "task",
             "",
             pydatatask.InProcessMetadataRepository(),
-            pydatatask.InProcessMetadataRepository(),
             executor=manager,
         )
-        pipeline = pydatatask.Pipeline([task], pydatatask.Session(), [])
+        pipeline = pydatatask.Pipeline([task], pydatatask.Session())
         await pipeline.open()
         await manager.launch_agent(pipeline)
         headers = {"Cookie": "secret=" + pipeline.agent_secret}

@@ -19,7 +19,7 @@ import docker_registry_client_async
 import motor.motor_asyncio
 
 from pydatatask.executor import Executor
-from pydatatask.executor.container_manager import DockerContainerManager
+from pydatatask.executor.container_manager import DockerContainerManager, docker_connect
 from pydatatask.executor.pod_manager import PodManager, kube_connect
 from pydatatask.executor.proc_manager import (
     InProcessLocalLinuxManager,
@@ -34,7 +34,7 @@ from pydatatask.query.repository import (
     QueryMetadataRepository,
     QueryRepository,
 )
-from pydatatask.quota import Quota, QuotaManager
+from pydatatask.quota import Quota
 from pydatatask.repository import (
     DirectoryRepository,
     DockerRepository,
@@ -298,7 +298,7 @@ def make_annotated_constructor(
     return make_constructor(name, inner_constructor, schema)
 
 
-def build_repository_picker(ephemerals: Dict[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
+def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
     """Generate a function which will dispatch a dict into all known repository constructors.
 
     This function can be extended through the ``pydatatask.repository_constructors`` entrypoint.
@@ -442,11 +442,13 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
 
     This function can be extended through the ``pydatatask.executor_constructors`` entrypoint.
     """
+    nil_picker = make_picker("None", ephemerals)
     kinds: Dict[str, Callable[[Any], Executor]] = {
         "TempLinux": make_constructor(
             "InProcessLocalLinuxManager",
             InProcessLocalLinuxManager,
             {
+                "quota": quota_constructor,
                 "app": str,
                 "local_path": str,
             },
@@ -455,15 +457,18 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
             "LocalLinuxManager",
             LocalLinuxManager,
             {
+                "quota": quota_constructor,
                 "app": str,
                 "local_path": str,
                 "image_prefix": str,
+                "nil_ephemeral": lambda thing: None if thing is None else nil_picker(thing),
             },
         ),
         "SSHLinux": make_constructor(
             "SSHLinuxManager",
             SSHLinuxManager,
             {
+                "quota": quota_constructor,
                 "host": make_picker("Host", hosts),
                 "app": str,
                 "remote_path": str,
@@ -474,6 +479,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
             "PodManager",
             PodManager,
             {
+                "quota": quota_constructor,
                 "host": make_picker("Host", hosts),
                 "app": str,
                 "namespace": str,
@@ -484,9 +490,10 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
             "DockerContainerManager",
             DockerContainerManager,
             {
+                "quota": quota_constructor,
                 "host": make_picker("Host", hosts),
                 "app": str,
-                "url": str,
+                "docker": make_picker("DockerConnection", ephemerals),
                 "image_prefix": str,
             },
         ),
@@ -563,6 +570,13 @@ def build_ephemeral_picker() -> Callable[[Any], Ephemeral[Any]]:
                 "context": str,
             },
         ),
+        "DockerConnection": make_constructor(
+            "DockerConnection",
+            docker_connect,
+            {
+                "url": lambda thing: thing,
+            },
+        ),
     }
     for ep in entry_points(group="pydatatask.ephemeral_constructors"):
         maker = ep.load()
@@ -579,8 +593,7 @@ link_kind_constructor = make_enum_constructor(LinkKind)
 def build_task_picker(
     repos: Dict[str, Repository],
     executors: Dict[str, Executor],
-    quotas: Dict[str, QuotaManager],
-    ephemerals: Dict[str, Callable[[], Any]],
+    ephemerals: Mapping[str, Callable[[], Any]],
 ) -> Callable[[str, Any], Task]:
     """Generate a function which will dispatch a dict into all known task constructors.
 
@@ -637,7 +650,6 @@ def build_task_picker(
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
-                "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
@@ -646,12 +658,12 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Process-specific
                 "template": str,
                 "environ": make_dict_parser("environ", str, str),
                 "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
-                "pids": make_picker("Repository", repos),
                 "stdin": make_picker("Repository", repos),
                 "stdout": make_picker("Repository", repos),
                 "stderr": lambda thing: pydatatask.task.STDOUT
@@ -668,7 +680,6 @@ def build_task_picker(
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
-                "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
@@ -677,8 +688,10 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Kube-specific
+                "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
                 "template": str,
                 "template_env": make_dict_parser("environ", str, str),
                 "logs": make_picker("Repository", repos),
@@ -693,7 +706,6 @@ def build_task_picker(
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
-                "quota_manager": make_picker("QuotaManager", quotas),
                 "done": make_picker("Repository", repos),
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
@@ -702,6 +714,7 @@ def build_task_picker(
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
+                "replicable": parse_bool,
 
                 # Container-specific
                 "template": str,
@@ -720,12 +733,15 @@ def build_task_picker(
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()
         try:
-            kinds.update(maker(repos, quotas, ephemerals))
+            kinds.update(maker(repos, ephemerals))
         except TypeError:
             traceback.print_exc(file=sys.stderr)
     dispatcher = make_dispatcher("Task", kinds)
 
     def constructor(name, thing):
+        thing.pop("priority")
+        thing.pop("priority_factor")
+        thing.pop("priority_addend")
         executable = thing.pop("executable")
         executable["args"].update(thing)
         executable["args"]["name"] = name

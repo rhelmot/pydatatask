@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import (
     Awaitable,
     Callable,
+    DefaultDict,
     Dict,
     Iterable,
     List,
@@ -16,9 +17,12 @@ from typing import (
     Tuple,
     Union,
 )
-from datetime import timedelta
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 import asyncio
+import heapq
 import logging
 
 import networkx.algorithms.traversal.depth_first_search
@@ -29,7 +33,7 @@ from pydatatask.utils import supergetattr_path
 
 from . import repository as repomodule
 from . import task as taskmodule
-from .quota import QuotaManager, localhost_quota_manager
+from .quota import Quota
 from .session import Session
 
 l = logging.getLogger(__name__)
@@ -37,16 +41,42 @@ l = logging.getLogger(__name__)
 already_logged_messages = set()
 
 
-def debug_log(l, *args, **kwargs):
+def debug_log(logger, *args, **kwargs):
+    """Emit a log message, but don't emit the same message more than once."""
     cached_kwargs = tuple((k, v) for k, v in sorted(kwargs.items()))
     cached_args = tuple(args)
     if (cached_args, cached_kwargs) in already_logged_messages:
         return
     already_logged_messages.add((cached_args, cached_kwargs))
-    l.debug(*args, **kwargs)
+    logger.debug(*args, **kwargs)
 
 
 __all__ = ("Pipeline",)
+
+
+@dataclass
+class _JobPrioritizer:
+    priority: Callable[[str, str, int], float]
+    task: taskmodule.Task
+    job: str
+    replica: int = 0
+
+    def peek(self) -> float:
+        """Return this replica's priority."""
+        return self.priority(self.task.name, self.job, self.replica)
+
+    def advance(self):
+        """Move on to the next replica."""
+        self.replica += 1
+
+    def __lt__(self, other: "_JobPrioritizer") -> bool:
+        return self.peek() > other.peek()
+
+
+@dataclass
+class _SchedState:
+    initial_jobs: List[Tuple[float, str, str]] = field(default_factory=list)
+    replica_heap: List[_JobPrioritizer] = field(default_factory=list)
 
 
 class Pipeline:
@@ -56,8 +86,7 @@ class Pipeline:
         self,
         tasks: Iterable[taskmodule.Task],
         session: Session,
-        quota_managers: Iterable[QuotaManager],
-        priority: Optional[Callable[[str, str], int]] = None,
+        priority: Optional[Callable[[str, str, int], float]] = None,
         agent_version: str = "unversioned",
         agent_secret: str = "insecure",
         agent_port: int = 6132,
@@ -69,16 +98,16 @@ class Pipeline:
         """
         :param tasks: The tasks which make up this pipeline.
         :param session: The session to open while this pipeline is active.
-        :param quota_managers: Any quota managers in use. You need to provide these so the pipeline can reset the
-                          rate-limiting at each update.
-        :param priority: Optional: A function which takes a task and job name and returns an integer priority. No jobs
-                         will be scheduled unless all higher-priority jobs (larger numbers) have already been scheduled.
+        :param priority: Optional: A function which takes a task name, job, and replica, and returns an float priority.
+                         The priority *must* be monotonically decreasing as replica increases.
+                         No jobs will be scheduled unless all higher-priority jobs (larger numbers) have already been
+                         scheduled. No second-third-etc replicas will be scheduled unless all first-replicas have been
+                         scheduled.
         """
         self.tasks: Dict[str, taskmodule.Task] = {task.name: task for task in tasks}
         self._opened = False
         self.session = session
-        self.quota_managers = list(quota_managers)
-        self.priority = priority
+        self.priority = priority or (lambda x, y, z: 1.0)
         self._graph: Optional["networkx.classes.digraph.DiGraph"] = None
         self.agent_version: str = agent_version
         self.agent_secret: str = agent_secret
@@ -210,7 +239,7 @@ class Pipeline:
         """
         await self.session.close()
 
-    async def update(self) -> bool:
+    async def update(self, launch: bool = True) -> bool:
         """Perform one round of pipeline maintenance, running the update phase and then the launch phase. The
         pipeline must be opened for this function to run.
 
@@ -219,16 +248,11 @@ class Pipeline:
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
-        # l.debug("Running update...")
-        result1 = await self.update_only_update()
-        result2 = await self.update_only_launch()
-        for res in self.quota_managers:
-            await res.flush()
-        await localhost_quota_manager.flush()
-        # l.debug("Completed update")
-        return result1 | result2
+        info = await self._update_only_update()
+        result2 = (await self._update_only_launch(info)) if launch else False
+        return any(any(live) or any(reaped) for live, reaped in info.values()) or result2
 
-    async def update_only_update(self) -> bool:
+    async def _update_only_update(self) -> Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str]]]:
         """Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this
         function to run.
 
@@ -237,12 +261,12 @@ class Pipeline:
         if not self._opened:
             raise Exception("Pipeline must be opened")
 
-        to_gather = [task.update() for task in self.tasks.values()]
-        gathered = await asyncio.gather(*to_gather, return_exceptions=False)
+        to_gather = (task.update() for task in self.tasks.values())
+        gathered = dict(zip(self.tasks, await asyncio.gather(*to_gather, return_exceptions=False)))
         self.cache_flush()
-        return any(gathered)
+        return gathered
 
-    async def update_only_launch(self) -> bool:
+    async def _update_only_launch(self, info: Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str]]]) -> bool:
         """Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this
         function to run.
 
@@ -253,69 +277,119 @@ class Pipeline:
 
         task_list = list(self.tasks.values())
         # l.debug("Collecting launchable jobs")
-        to_gather = await asyncio.gather(*[self.gather_ready_jobs(task) for task in task_list])
-        jobs = [
-            (
-                self.priority(task.name, job) if self.priority is not None else 0,
-                task.name,
-                job,
-            )
-            for job_list, task in zip(to_gather, task_list)
-            for job in job_list
-        ]
-        if not jobs:
+        to_gather = await asyncio.gather(*(self._gather_ready_jobs(task) for task in self.tasks.values()))
+
+        by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
+        for job_list, task in zip(to_gather, task_list):
+            for job in job_list:
+                prio = _JobPrioritizer(self.priority, task, job)
+                sched = by_manager[task.resource_limit]
+                sched.initial_jobs.append((prio.peek(), task.name, job))
+                prio.advance()
+                if task.replicable:
+                    heapq.heappush(sched.replica_heap, prio)
+
+        if all(not sched.initial_jobs for sched in by_manager.values()):
             self.cache_flush()
             return False
 
-        jobs.sort()  # do not reverse - the next op we're doing implicitly reverses it
-        jobs_by_priority = [[jobs.pop()]]
-        while jobs:
-            priority, task, job = jobs.pop()
-            if priority != jobs_by_priority[-1][0][0]:
-                jobs_by_priority.append([])
-            jobs_by_priority[-1].append((priority, task, job))
-
-        queue: asyncio.Queue[Optional[Tuple[int, str, str]]] = asyncio.Queue()
+        queue: asyncio.Queue[Optional[Tuple[str, str, int, bool]]] = asyncio.Queue()
         N_WORKERS = 15
+        N_LEADERS = len(by_manager)
 
-        async def leader(jobs) -> None:
-            for job in jobs:
-                await queue.put(job)
+        async def leader(quota: Quota, sched: _SchedState) -> None:
+            used = sum(
+                (
+                    self.tasks[task].job_quota
+                    for task, (live, _) in info.items()
+                    for (_, replica) in live
+                    if replica == 0
+                ),
+                Quota.parse(0, 0, 0),
+            )
+            base_already = {
+                (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica == 0
+            }
+            to_kill = {
+                (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica != 0
+            }
+
+            sched.initial_jobs.sort(reverse=True)
+            excess = None
+            for (_, task, job) in sched.initial_jobs:
+                if (task, job, 0) in base_already:
+                    continue
+                alloc = self.tasks[task].job_quota
+                excess = (used + alloc).excess(quota)
+                if excess is not None:
+                    break
+                used += alloc
+                await queue.put((task, job, 0, False))
+            else:
+                # schedule replicas
+                while sched.replica_heap:
+                    next_guy = sched.replica_heap[0]
+                    alloc = self.tasks[next_guy.task.name].job_quota
+                    excess = (used + alloc).excess(quota)
+                    if excess is not None:
+                        heapq.heappop(sched.replica_heap)
+                    else:
+                        used += alloc
+                        tup = (next_guy.task.name, next_guy.job, next_guy.replica)
+                        if tup not in to_kill:
+                            await queue.put((*tup, False))
+                        else:
+                            to_kill.remove(tup)
+                        next_guy.advance()
+                        heapq.heapreplace(sched.replica_heap, next_guy)
+            # kill!!
+            for task, job, replica in to_kill:
+                await queue.put((task, job, replica, True))
+            # terminate
             for _ in range(N_WORKERS):
                 await queue.put(None)
 
         async def worker() -> None:
+            quits = 0
             while True:
                 jobt = await queue.get()
                 if jobt is None:
-                    return
+                    quits += 1
+                    if quits == N_LEADERS:
+                        break
+                else:
+                    task, job, replica, kill = jobt
+                    if kill:
+                        try:
+                            l.info("Killing %s:%s.%d", task, job, replica)
+                            await self.tasks[task].kill(job, replica)
+                        except:  # pylint: disable=bare-except
+                            if self.fail_fast:
+                                raise
+                            l.exception("Failed to kill %s:%s.%d", task, job, replica)
+                    else:
+                        try:
+                            l.info("Launching %s:%s", task, job)
+                            await self.tasks[task].launch(job, replica)
+                        except:  # pylint: disable=bare-except
+                            if self.fail_fast:
+                                raise
+                            l.exception("Failed to launch %s:%s", task, job)
 
-                _, task, job = jobt
-                try:
-                    l.info("Launching %s:%s", task, job)
-                    await self.tasks[task].launch(job)
-                except:  # pylint: disable=bare-except
-                    if self.fail_fast:
-                        raise
-                    l.exception("Failed to launch %s:%s", task, job)
-
-        for prio_queue in jobs_by_priority:
-            l.debug("Launching jobs of priority %s", prio_queue[0][0])
-            await asyncio.gather(leader(prio_queue), *[worker() for _ in range(N_WORKERS)])
+        await asyncio.gather(
+            *(leader(manager, sched) for manager, sched in by_manager.items()), *(worker() for _ in range(N_WORKERS))
+        )
 
         self.cache_flush()
         return True
 
-    async def gather_ready_jobs(self, task: taskmodule.Task) -> Set[str]:
+    async def _gather_ready_jobs(self, task: taskmodule.Task) -> Set[str]:
         """Collect all jobs that are ready to be launched for a given task."""
-        result: Set[str] = set()
         if task.disabled:
             # l.debug("%s is disabled - no jobs will be scheduled", task.name)
             debug_log(l, "%s is disabled - no jobs will be scheduled", task.name)
-            return result
-        async for job in task.ready:
-            result.add(job)
-        return result
+            return set()
+        return set(await task.ready.keys())
 
     @staticmethod
     def _make_single_func(

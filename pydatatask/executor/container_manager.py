@@ -1,7 +1,18 @@
 """This module houses the container manager executors."""
 
-from typing import TYPE_CHECKING, Any, Awaitable, Dict, List, Optional, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    cast,
+)
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 import asyncio
@@ -15,9 +26,23 @@ import dateutil.parser
 from pydatatask.executor import Executor
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.quota import Quota
+from pydatatask.session import Ephemeral
 
 if TYPE_CHECKING:
     from pydatatask.executor import pod_manager
+
+
+def docker_connect(url: Optional[str] = None):
+    """Connect to a docker daemon.
+
+    If url is provided, connect to the socket there. If not, connect to the default system daemon.
+    """
+
+    async def docker_connect_inner():
+        async with aiodocker.Docker(url) as docker:
+            yield docker
+
+    return docker_connect_inner
 
 
 class AbstractContainerManager(ABC, Executor):
@@ -26,7 +51,8 @@ class AbstractContainerManager(ABC, Executor):
     Members of this class should be able to manage containers, including being able to track their lifecycles.
     """
 
-    def __init__(self, *, image_prefix: str = ""):
+    def __init__(self, quota: Quota, *, image_prefix: str = ""):
+        super().__init__(quota)
         self._image_prefix = image_prefix
 
     @abstractmethod
@@ -34,6 +60,7 @@ class AbstractContainerManager(ABC, Executor):
         self,
         task: str,
         job: str,
+        replica: int,
         image: str,
         entrypoint: List[str],
         cmd: str,
@@ -51,7 +78,7 @@ class AbstractContainerManager(ABC, Executor):
         raise NotImplementedError
 
     @abstractmethod
-    async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
+    async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         """Determine which containers from the given task (and optionally, the given job) are still live.
 
         Should return a dict mapping job id to job start time.
@@ -59,8 +86,8 @@ class AbstractContainerManager(ABC, Executor):
         raise NotImplementedError
 
     @abstractmethod
-    async def kill(self, task: str, job: str):
-        """Kill the container associated with the given task and job.
+    async def kill(self, task: str, job: str, replica: int):
+        """Kill the container associated with the given task and job and replica.
 
         This does not need to be done gracefully by any stretch. It should wipe any resources associated with the job,
         so it does not show up as a finished task next time `update` is called.
@@ -70,14 +97,14 @@ class AbstractContainerManager(ABC, Executor):
     @abstractmethod
     async def update(
         self, task: str, timeout: Optional[timedelta] = None
-    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    ) -> Tuple[Dict[Tuple[str, int], datetime], Dict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]]]:
         """Perform routine maintenence on the running set of jobs for the given task.
 
-        Should return a tuple of a bool indicating whether any jobs were running before this function was called, and a
-        dict mapping finished job names to a tuple of the output logs from the job and a dict with any metadata left
-        over from the job.
+        Should return a tuple of a the set of live replicas and a dict mapping finished job names to a tuple of the
+        output logs from the job and a dict with any metadata left over from any replicas of the job.
 
-        If any job has been alive for longer than timeout, kill it and return it as part of the finished jobs.
+        If any job has been alive for longer than timeout, kill it and return it as part of the finished jobs, not the
+        live jobs.
         """
         raise NotImplementedError
 
@@ -93,40 +120,45 @@ class DockerContainerManager(AbstractContainerManager):
     """
 
     def __init__(
-        self, *, app: str = "pydatatask", url: Optional[str] = None, host: Host = LOCAL_HOST, image_prefix: str = ""
+        self,
+        quota: Quota,
+        *,
+        app: str = "pydatatask",
+        docker: Ephemeral[aiodocker.Docker],
+        host: Host = LOCAL_HOST,
+        image_prefix: str = "",
     ):
-        self._url = url
-        self._docker: Optional[aiodocker.Docker] = None
+        super().__init__(quota, image_prefix=image_prefix)
+        self._docker = docker
         self.app = app
         self._host = host
-        super().__init__(image_prefix=image_prefix)
         self._net = None
 
     @property
     def docker(self) -> aiodocker.Docker:
         """The aiodocker client instance associated with this executor."""
-        if self._docker is None:
-            self._docker = aiodocker.Docker(self._url)
-        return self._docker
+        return self._docker()
 
     @property
     def host(self):
         return self._host
 
-    def _name_to_id(self, task: str, name: str) -> Optional[str]:
+    def _name_to_id(self, task: str, name: str) -> Optional[Tuple[str, int]]:
         name = name.strip("/")
         prefix = f"{self.app}___{task}___"
         if name.startswith(prefix):
-            return name[len(prefix) :]
+            ident, replica = name[len(prefix) :].split("___")
+            return ident, int(replica)
         return None
 
-    def _id_to_name(self, task: str, ident: str) -> str:
-        return f"{self.app}___{task}___{ident}"
+    def _id_to_name(self, task: str, ident: str, replica: int) -> str:
+        return f"{self.app}___{task}___{ident}___{replica}"
 
     async def launch(
         self,
         task: str,
         job: str,
+        replica: int,
         image: str,
         entrypoint: List[str],
         cmd: str,
@@ -167,9 +199,9 @@ class DockerContainerManager(AbstractContainerManager):
         if self._net is not None:
             config["HostConfig"]["NetworkMode"] = self._net
 
-        await self.docker.containers.run(config, name=self._id_to_name(task, job))
+        await self.docker.containers.run(config, name=self._id_to_name(task, job, replica))
 
-    async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
+    async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
 
@@ -201,23 +233,20 @@ class DockerContainerManager(AbstractContainerManager):
             if name is not None and (job is None or name == job)
         }
 
-    async def kill(self, task: str, job: str):
-        cont = await self.docker.containers.get(self._id_to_name(task, job))
+    async def kill(self, task: str, job: str, replica: int):
+        cont = await self.docker.containers.get(self._id_to_name(task, job, replica))
         try:
             await cont.kill()
         except aiodocker.exceptions.DockerError:
             pass
         await cont.delete()
 
-    async def update(
-        self, task: str, timeout: Optional[timedelta] = None
-    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    async def update(self, task: str, timeout: Optional[timedelta] = None):
         containers = await self.docker.containers.list(all=1)
         infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
         infos_and_names = [
             (self._name_to_id(task, info["Name"]), info) for info in infos if not isinstance(info, BaseException)
         ]
-        activity = any(name is not None for name, _ in infos_and_names)
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
@@ -232,12 +261,25 @@ class DockerContainerManager(AbstractContainerManager):
             and timeout
             and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout
         ]
+        live_replicas = {
+            name: dateutil.parser.isoparse(info["State"]["StartedAt"])
+            for (name, info), _ in zip(infos_and_names, containers)
+            if info["State"]["Status"] not in ("exited",)
+            and name is not None
+            and not (timeout and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout)
+        }
+        live_jobs = {job for job, _ in live_replicas}
         await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out))
         results = await asyncio.gather(
             *(self._cleanup(container, info) for info, container, _ in dead),
             *(self._cleanup(container, info, True) for info, container, _ in timed_out),
         )
-        return activity, {name: result for (_, _, name), result in zip(chain(dead, timed_out), results)}
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
+        for (_, _, (job, replica)), result in zip(chain(dead, timed_out), results):
+            if job not in live_jobs:
+                final[job][replica] = result
+
+        return live_replicas, dict(final)
 
     async def _cleanup(
         self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
@@ -265,9 +307,9 @@ class DockerContainerManager(AbstractContainerManager):
 class KubeContainerManager(AbstractContainerManager):
     """An executor that runs containers on a kubernetes cluster."""
 
-    def __init__(self, *, cluster: "pod_manager.PodManager", image_prefix: str = ""):
+    def __init__(self, quota, *, cluster: "pod_manager.PodManager", image_prefix: str = ""):
+        super().__init__(quota, image_prefix=image_prefix)
         self.cluster = cluster
-        super().__init__(image_prefix=image_prefix)
 
     @property
     def host(self):
@@ -277,6 +319,7 @@ class KubeContainerManager(AbstractContainerManager):
         self,
         task: str,
         job: str,
+        replica: int,
         image: str,
         entrypoint: List[str],
         cmd: str,
@@ -292,8 +335,9 @@ class KubeContainerManager(AbstractContainerManager):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
         await self.cluster.launch(
-            job,
             task,
+            job,
+            replica,
             {
                 "apiVersion": "v1",
                 "kind": "Pod",
@@ -325,18 +369,16 @@ class KubeContainerManager(AbstractContainerManager):
             },
         )
 
-    async def live(self, task: str, job: Optional[str] = None) -> Dict[str, datetime]:
+    async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         pods = await self.cluster.query(job, task)
         return {pod.metadata.labels["job"]: pod.metadata.creation_timestamp for pod in pods}
 
-    async def kill(self, task: str, job: str):
-        pods = await self.cluster.query(job, task)
+    async def kill(self, task: str, job: str, replica: int):
+        pods = await self.cluster.query(job, task, replica)
         for pod in pods:
             await self.cluster.delete(pod)
 
-    async def update(
-        self, task: str, timeout: Optional[timedelta] = None
-    ) -> Tuple[bool, Dict[str, Tuple[bytes, Dict[str, Any]]]]:
+    async def update(self, task: str, timeout: Optional[timedelta] = None):
         pods = await self.cluster.query(job=None, task=task)
         finished_pods = [pod for pod in pods if pod.status.phase in ("Succeeded", "Failed")]
         now = datetime.now(tz=timezone.utc)
@@ -347,16 +389,27 @@ class KubeContainerManager(AbstractContainerManager):
             and timeout
             and now - pod.metadata.creation_timestamp > timeout
         ]
+        live_replicas = {
+            (pod.metadata.labels["job"], int(pod.metadata.labels["replica"])): pod.metadata.creation_timestamp
+            for pod in pods
+            if pod.status.phase not in ("Succeeded", "Failed")
+            and not (timeout and now - pod.metadata.creation_timestamp > timeout)
+        }
+        live_jobs = {job for job, _ in live_replicas}
         results = await asyncio.gather(
             *chain((self._cleanup(pod) for pod in finished_pods), (self._cleanup(pod, True) for pod in timeout_pods))
         )
-        return bool(pods), {pod.metadata.labels["job"]: result for pod, result in zip(pods, results)}
+        final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
+        for pod, result in zip(pods, results):
+            if pod.metadata.labels["job"] not in live_jobs:
+                final[pod.metadata.labels["job"]][int(pod.metadata.labels["replica"])] = result
+        return live_replicas, dict(final)
 
     async def _cleanup(self, pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
         log = await self.cluster.logs(pod)
         await self.cluster.delete(pod)
         return (
-            log.encode(),
+            log,
             {
                 "reason": pod.status.phase if not timeout else "Timeout",
                 "timeout": timeout,
@@ -367,6 +420,3 @@ class KubeContainerManager(AbstractContainerManager):
                 "success": pod.status.phase == "Succeeded" and not timeout,
             },
         )
-
-
-localhost_docker_manager = DockerContainerManager()
