@@ -46,6 +46,9 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import sys
 
 from aiohttp import web
 from networkx.drawing.nx_pydot import write_dot
@@ -261,6 +264,13 @@ def main(
     parser_http_agent.set_defaults(func=http_agent)
     parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
 
+    parser_http_multi = subparsers.add_parser(
+        "agent-http-multi", help="Launch multiple http agents balanced behind nginx"
+    )
+    parser_http_multi.set_defaults(func=http_agent_multi)
+    parser_http_multi.add_argument("--host", help="The host to listen on", default="0.0.0.0")
+    parser_http_multi.add_argument("--count", help="The number of agents to use", default=4, type=int)
+
     parser_viz = subparsers.add_parser("viz", help="Show Visualization of Running Pipeline")
     parser_viz.set_defaults(func=run_viz)
 
@@ -330,10 +340,70 @@ async def update(pipeline: Pipeline):
     await pipeline.update()
 
 
-def http_agent(pipeline: Pipeline, host: str) -> None:
+def http_agent(pipeline: Pipeline, host: str, override_port: Optional[int] = None) -> None:
     logging.getLogger("aiohttp.access").setLevel("DEBUG")
     app = build_agent_app(pipeline, True)
     web.run_app(app, host=host, port=pipeline.agent_port)
+
+
+def http_agent_multi(pipeline: Pipeline, host: str, count: int) -> None:
+    nginx = shutil.which("nginx")
+    if nginx is None:
+        raise Exception("Cannot run agent-multi without nginx on PATH")
+
+    servers = "\n        ".join(f"localhost:{pipeline.agent_port + 1 + i}" for i in range(count))
+
+    nginx_config = f"""
+error_log /dev/stderr info;
+pid /dev/null;
+daemon off;
+
+events {{
+    worker_connections 2048;
+}}
+
+http {{
+    access_log /dev/stderr combined;
+    error_log /dev/stderr info;
+    upstream custom-domains {{
+        {servers}
+    }}
+    server {{
+        listen       {pipeline.agent_port};
+        server_name  _;
+
+        location / {{
+            proxy_pass http://custom-domains;
+            proxy_http_version   1.1;
+            proxy_set_header     Upgrade $http_upgrade;
+            proxy_set_header     Connection upgrade;
+            proxy_set_header     Host $host;
+            proxy_cache_bypass   $http_upgrade;
+        }}
+    }}
+}}
+    """
+
+    agents = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "pydatatask.cli.main",
+                "--",
+                "agent-http",
+                "--host",
+                host,
+                "--override-port",
+                str(pipeline.agent_port + 1 + i),
+            ]
+        )
+        for i in range(count)
+    ]
+    subprocess.run([nginx], input=nginx_config, check=False)
+    for agent in agents:
+        agent.terminate()
+        agent.wait()
 
 
 async def run(
