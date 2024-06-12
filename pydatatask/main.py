@@ -263,6 +263,7 @@ def main(
     )
     parser_http_agent.set_defaults(func=http_agent)
     parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
+    parser_http_agent.add_argument("--override-port", help="The port to listen on", type=int)
 
     parser_http_multi = subparsers.add_parser(
         "agent-http-multi", help="Launch multiple http agents balanced behind nginx"
@@ -343,7 +344,7 @@ async def update(pipeline: Pipeline):
 def http_agent(pipeline: Pipeline, host: str, override_port: Optional[int] = None) -> None:
     logging.getLogger("aiohttp.access").setLevel("DEBUG")
     app = build_agent_app(pipeline, True)
-    web.run_app(app, host=host, port=pipeline.agent_port)
+    web.run_app(app, host=host, port=override_port or pipeline.agent_port)
 
 
 def http_agent_multi(pipeline: Pipeline, host: str, count: int) -> None:
@@ -351,7 +352,7 @@ def http_agent_multi(pipeline: Pipeline, host: str, count: int) -> None:
     if nginx is None:
         raise Exception("Cannot run agent-multi without nginx on PATH")
 
-    servers = "\n        ".join(f"localhost:{pipeline.agent_port + 1 + i}" for i in range(count))
+    servers = "\n        ".join(f"server localhost:{pipeline.agent_port + 1 + i};" for i in range(count))
 
     nginx_config = f"""
 error_log /dev/stderr info;
@@ -390,7 +391,6 @@ http {{
                 sys.executable,
                 "-m",
                 "pydatatask.cli.main",
-                "--",
                 "agent-http",
                 "--host",
                 host,
@@ -400,10 +400,16 @@ http {{
         )
         for i in range(count)
     ]
-    subprocess.run([nginx], input=nginx_config, check=False)
+    config_filename = "/tmp/pydatatask-nginx-{pipeline.agent_port}.conf"
+    with open(config_filename, "w") as f:
+        f.write(nginx_config)
+    process_result = subprocess.run([nginx, "-c", config_filename], check=False)
     for agent in agents:
         agent.terminate()
         agent.wait()
+
+    if process_result.returncode != 0:
+        raise Exception("nginx failed to start")
 
 
 async def run(
