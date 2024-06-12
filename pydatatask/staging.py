@@ -509,7 +509,7 @@ class PipelineStaging:
         .ready() function to get a boolean for whether it is properly ready.
         """
         return PipelineChildArgsMissing(
-            is_top=self.is_top,
+            is_top=True if self.is_top is None else self.is_top,
             repos={
                 name: cls
                 for name, cls in self.spec.repo_classes.items()
