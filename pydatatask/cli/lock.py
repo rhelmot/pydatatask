@@ -190,6 +190,11 @@ def walk_obj(obj: Any, duplicates: bool = False, seen: Optional[Set[int]] = None
         yield from walk_obj(sub, duplicates, new_seen)
 
 
+async def kill_all(pipeline: Pipeline):
+    async with pipeline:
+        await pipeline.kill_all()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Produce a lockfile allocating executors and repositories for a given pipeline"
@@ -314,7 +319,7 @@ def main():
             )
             sys.exit(1)
 
-        asyncio.run(pipeline.kill_all())
+        asyncio.run(kill_all(pipeline))
 
         # HACK
         executor = LocalLinuxManager(
