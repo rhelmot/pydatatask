@@ -186,7 +186,12 @@ class TaskVisualizer:
 
     def run_async(self, queue, coroutine, *args):
         """Doesn't really need docs lol."""
-        result = asyncio.run(coroutine(*args))
+
+        async def inner():
+            async with self.pipeline:
+                return await coroutine(*args)
+
+        result = asyncio.run(inner)
         queue.put(result)
 
     def populate_all_node_info(self, nodes):
