@@ -122,6 +122,12 @@ def main(
         action="store_true",
         help="Make every worker script print out its execution trace for debugging",
     )
+    parser_run.add_argument(
+        "--global-template-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
+    )
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -415,13 +421,14 @@ async def run(
     tasks: Optional[List[str]] = None,
     debug_trace: bool = False,
     once: bool = False,
+    global_template_env: Optional[List[str]] = None,
 ):
     if tasks == []:
         tasks = None
     pipeline.settings(
         fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
     )
-
+    pipeline.global_template_env.update({k: v for k, v in [line.split("=", 1) for line in global_template_env or []]})
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     start = asyncio.get_running_loop().time()
