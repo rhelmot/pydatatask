@@ -49,6 +49,14 @@ class Ephemeral(Protocol[T_co]):
     _session: "Session"
 
 
+class SessionClosedError(Exception):
+    """An error indicating attempted access to an ephemeral while its session is closed."""
+
+
+class SessionOpenFailedError(Exception):
+    """An error indicating attempted access to an optional ephemeral that failed creation."""
+
+
 class Session:
     """The session class.
 
@@ -57,9 +65,13 @@ class Session:
 
     def __init__(self):
         self._ephemeral_defs = {}
+        self._ephemeral_errors = {}
+        self._optionals = set()
         self.ephemerals = {}
 
-    def ephemeral(self, manager: Callable[[], AsyncIterable[T_co]], name: Optional[str] = None) -> Ephemeral[T_co]:
+    def ephemeral(
+        self, manager: Callable[[], AsyncIterable[T_co]], name: Optional[str] = None, optional: bool = False
+    ) -> Ephemeral[T_co]:
         """Decorator for ephemeral resource managers.
 
         Should be called with an async function that will yield exactly one object, the live constructed resource, and
@@ -67,10 +79,14 @@ class Session:
         """
         name = name or manager.__name__
         self._ephemeral_defs[name] = manager()
+        if optional:
+            self._optionals.add(name)
 
         def inner():
             if name not in self.ephemerals:
-                raise Exception("Session is not open")
+                if optional and name in self._ephemeral_errors:
+                    raise SessionOpenFailedError(f"{name} failed to open") from self._ephemeral_errors[name]
+                raise SessionClosedError("Session is not open")
             return self.ephemerals[name]
 
         inner._session = self  # type: ignore
@@ -85,7 +101,13 @@ class Session:
         This is automatically called when entering an ``async with session:`` block.
         """
         for name, manager in self._ephemeral_defs.items():
-            self.ephemerals[name] = await manager.__anext__()
+            try:
+                self.ephemerals[name] = await manager.__anext__()
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                if name in self._optionals:
+                    self._ephemeral_errors[name] = e
+                else:
+                    raise
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()

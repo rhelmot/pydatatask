@@ -40,10 +40,16 @@ import yaml
 
 from pydatatask import agent
 from pydatatask.executor import Executor
-from pydatatask.executor.container_manager import DockerContainerManager, docker_connect
-from pydatatask.host import LOCAL_HOST, Host
+from pydatatask.executor.container_manager import (
+    AbstractContainerManager,
+    DockerContainerManager,
+    KubeContainerManager,
+    docker_connect,
+)
+from pydatatask.executor.pod_manager import PodManager, kube_connect
+from pydatatask.host import LOCAL_HOST, Host, HostOS
 from pydatatask.quota import LOCALHOST_QUOTA, Quota
-from pydatatask.session import Ephemeral
+from pydatatask.session import Ephemeral, SessionOpenFailedError
 
 from ..utils import (
     AReadStream,
@@ -377,15 +383,15 @@ class LocalLinuxManager(AbstractProcessManager):
     By default, it will create a directory ``/tmp/pydatatask-{getpass.getuser()}`` in which to store data.
     """
 
-    def to_container_manager(self):
+    def to_container_manager(self) -> AbstractContainerManager:
         if self._local_docker is not None:
             return self._local_docker
         raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
 
     def __init__(
         self,
-        quota: Quota,
         *,
+        quota: Quota = LOCALHOST_QUOTA,
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
         image_prefix: str = "",
@@ -395,8 +401,12 @@ class LocalLinuxManager(AbstractProcessManager):
         self.app = app
         self._image_prefix = image_prefix
         if nil_ephemeral is not None:
+            # This MIGHT not work on machines without docker installed.
             self._local_docker: Optional[DockerContainerManager] = DockerContainerManager(
-                quota=quota, app=app, docker=nil_ephemeral._session.ephemeral(docker_connect())
+                quota=quota,
+                app=app,
+                docker=nil_ephemeral._session.ephemeral(docker_connect(), optional=True, name=f"{app}_local_docker"),
+                image_prefix=image_prefix,
             )
         else:
             self._local_docker = None
@@ -533,6 +543,57 @@ class LocalLinuxManager(AbstractProcessManager):
         data = yaml.safe_dump({"pid": str(p.pid), "version": pipeline.agent_version})
         async with await self._open(agent_path, "w") as fp:
             await fp.write(data)
+
+
+class LocalLinuxOrKubeManager(LocalLinuxManager):
+    """LocalLinuxManager, but also allowed access to the kubernetes configuration on the local machine."""
+
+    def __init__(
+        self,
+        quota: Quota,
+        *,
+        app: str,
+        image_prefix: str = "",
+        nil_ephemeral: Optional[Ephemeral[None]] = None,
+        kube_namespace: str = "default",
+        kube_host: Host = Host("LOCAL_KUBE", HostOS.Linux),
+        kube_quota: Optional[Quota] = None,
+        kube_context: Optional[str] = None,
+        **kwargs,
+    ):
+        super().__init__(quota=quota, app=app, image_prefix=image_prefix, nil_ephemeral=nil_ephemeral, **kwargs)
+
+        if nil_ephemeral is not None:
+            self._local_kube: Optional[KubeContainerManager] = KubeContainerManager(
+                quota=quota,
+                cluster=PodManager(
+                    kube_quota or quota,
+                    kube_host,
+                    app,
+                    kube_namespace,
+                    nil_ephemeral._session.ephemeral(
+                        kube_connect(context=kube_context), name=f"{app}_local_kube", optional=True
+                    ),
+                ),
+                image_prefix=image_prefix,
+            )
+        else:
+            self._local_kube = None
+
+    def to_pod_manager(self):
+        if self._local_kube is not None:
+            return self._local_kube.cluster
+        raise TypeError("Not configured to connect to kubernetes (pass nil_ephemeral, lol)")
+
+    def to_container_manager(self):
+        if self._local_kube is not None:
+            try:
+                dir(self._local_kube.cluster.connection)
+            except SessionOpenFailedError:
+                pass
+            else:
+                return self._local_kube
+        return super().to_container_manager()
 
 
 class _SSHLinuxFile:
@@ -695,7 +756,7 @@ class SSHLinuxManager(AbstractProcessManager):
         return pid.strip().decode()
 
 
-localhost_manager = LocalLinuxManager(LOCALHOST_QUOTA, app="default")
+localhost_manager = LocalLinuxManager(quota=LOCALHOST_QUOTA, app="default")
 
 
 class InProcessLocalLinuxManager(LocalLinuxManager):
@@ -707,7 +768,7 @@ class InProcessLocalLinuxManager(LocalLinuxManager):
         app: str,
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
     ):
-        super().__init__(quota, app=app, local_path=local_path)
+        super().__init__(quota=quota, app=app, local_path=local_path)
 
         self.runner: Optional[web.AppRunner] = None
 

@@ -1,7 +1,19 @@
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from pathlib import Path
 import argparse
 import asyncio
+import functools
 import getpass
 import os
 import random
@@ -14,14 +26,21 @@ import urllib.parse
 import aiodocker
 
 from pydatatask.executor.proc_manager import LocalLinuxManager
+from pydatatask.host import Host, HostOS
 from pydatatask.pipeline import Pipeline
-from pydatatask.quota import LOCALHOST_QUOTA
+from pydatatask.quota import LOCALHOST_QUOTA, Quota
 from pydatatask.session import Session
 from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
 
 LOCK_ID = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
+LOCK_PATH = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/lock-{LOCK_ID}")
 
 EPHEMERALS: Dict[Any, Tuple[str, Dispatcher]] = {}
+
+T = TypeVar("T")
+
+# issues for future Audrey:
+# - quotas aren't deduplicated, nor can they be without some new interfaces
 
 
 class Allocator:
@@ -42,7 +61,7 @@ class TempAllocator(Allocator):
 
 class LocalAllocator(Allocator):
     def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
-        path = Path(f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}/lock-{LOCK_ID}")
+        path = LOCK_PATH
         path.mkdir(exist_ok=True, parents=True)
         basedir = tempfile.mkdtemp(dir=path)
         if spec.cls == "MetadataRepository":
@@ -152,6 +171,98 @@ class MongoMetaAllocator(Allocator):
         )
 
 
+def _subargparse(url: str):
+    result: Dict[str, Union[bool, str]] = {}
+    for arg in url.split(","):
+        if not arg:
+            continue
+        if "=" in arg:
+            k, v = arg.split("=", 1)
+            result[k] = v
+        else:
+            result[arg] = True
+    return result
+
+
+def parse_quota(thing: str):
+    cpu, mem, launches = thing.split("/")
+    return Quota.parse(cpu, mem, launches)
+
+
+def parse_host(thing: str):
+    os, hostname = thing.split("/")
+    return Host(
+        hostname,
+        {
+            "linux": HostOS.Linux,
+        }[os.lower()],
+    )
+
+
+def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], T]]:
+    def outer(f):
+        @functools.wraps(f)
+        def inner(url):
+            inner_kwargs = {}
+            args = _subargparse(url)
+            for name, constructor in outer_kwargs.items():
+                arg = args.pop(name, None)
+                if arg is not None:
+                    inner_kwargs = constructor(arg)
+            if args:
+                print(f"Warning: unused subargument{'' if len(args) == 1 else 's'} {', '.join(args)}")
+            return f(**inner_kwargs)
+
+        setattr(inner, "argstr", ", ".join(outer_kwargs))
+        return inner
+
+    return outer
+
+
+@subargparse(quota=parse_quota)
+def local_exec_allocator(quota: Optional[Quota] = None):
+    LOCK_PATH.mkdir(exist_ok=True, parents=True)
+    dargs = {
+        "nil_ephemeral": "nil_ephemeral",
+        "local_path": LOCK_PATH,
+    }
+    if quota is not None:
+        dargs["quota"] = quota
+
+    def inner(*, name, image_prefix, **kwargs):
+        dargs["app"] = name
+        dargs["image_prefix"] = image_prefix
+        return Dispatcher("LocalLinux", dict(dargs))
+
+    return inner
+
+
+@subargparse(local_quota=parse_quota, kube_quota=parse_quota, namespace=str, kube_host=parse_host, kube_context=str)
+def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None, kube_host=None, kube_context=None):
+    LOCK_PATH.mkdir(exist_ok=True, parents=True)
+    dargs = {
+        "nil_ephemeral": "nil_ephemeral",
+        "local_path": LOCK_PATH,
+    }
+    if local_quota is not None:
+        dargs["quota"] = local_quota
+    if kube_quota is not None:
+        dargs["kube_quota"] = kube_quota
+    if namespace is not None:
+        dargs["kube_namespace"] = namespace
+    if kube_host is not None:
+        dargs["kube_host"] = kube_host
+    if kube_context is not None:
+        dargs["kube_context"] = kube_context
+
+    def inner(*, name, image_prefix, **kwargs):
+        dargs["app"] = name
+        dargs["image_prefix"] = image_prefix
+        return Dispatcher("LocalLinuxOrKube", dict(dargs))
+
+    return inner
+
+
 async def get_ip() -> str:
     docker = None
     try:
@@ -234,6 +345,20 @@ def main():
         const=TempAllocator(),
         help="Allocate repositories in-memory",
     )
+    parser.add_argument(
+        "--exec-local",
+        action="store",
+        dest="executor",
+        type=local_exec_allocator,
+        help=f"Run tasks on the local machine. Takes subarguments: {getattr(local_exec_allocator, 'argstr')}",
+    )
+    parser.add_argument(
+        "--exec-local-or-kube",
+        action="store",
+        dest="executor",
+        type=local_exec_kube_allocator,
+        help=f"Run tasks on the local machine or the kubernetes cluster configured for access from the local machine. Takes subarguments: {getattr(local_exec_kube_allocator, 'argstr')}",
+    )
     parser.add_argument("--name", help="The name of the app for automatically generated executors")
     parser.add_argument(
         "--long-running-timeout",
@@ -303,6 +428,7 @@ def main():
     if cfgpath is None:
         print("Cannot find pipeline.yaml", file=sys.stderr)
         return 1
+    name = parsed.name or cfgpath.parent.name
     lockfile = cfgpath.with_suffix(".lock")
     if lockfile.exists():
         try:
@@ -323,7 +449,7 @@ def main():
 
         # HACK
         executor = LocalLinuxManager(
-            quota=LOCALHOST_QUOTA, app=cfgpath.name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
+            quota=LOCALHOST_QUOTA, app=name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
         )
         asyncio.run(executor.teardown_agent())
 
@@ -347,19 +473,7 @@ def main():
     spec = PipelineStaging(cfgpath, is_top=None if parsed.ignore_required else True)
     locked = spec.allocate(
         allocators,
-        Dispatcher(
-            "LocalLinux",
-            {
-                "quota": {
-                    "cpu": float(LOCALHOST_QUOTA.cpu),
-                    "mem": float(LOCALHOST_QUOTA.mem),
-                    "launches": LOCALHOST_QUOTA.launches,
-                },
-                "app": parsed.name or cfgpath.parent.name,
-                "image_prefix": parsed.image_prefix,
-                "nil_ephemeral": "nil_ephemeral",
-            },
-        ),
+        (parsed.executor or local_exec_allocator(""))(**parsed.__dict__),
         run_lockstep=not parsed.no_lockstep,
     )
     locked.filename = lockfile.name
@@ -380,7 +494,7 @@ def main():
     # HACK
     if not parsed.no_launch_agent:
         executor = LocalLinuxManager(
-            quota=LOCALHOST_QUOTA, app=cfgpath.name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
+            quota=LOCALHOST_QUOTA, app=name, image_prefix=parsed.image_prefix, nil_ephemeral=nil_ephemeral
         )
         asyncio.run(executor.launch_agent(pipeline))
 
