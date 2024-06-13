@@ -16,6 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 import asyncio
+import logging
 import os
 
 from aiodocker import DockerError
@@ -30,6 +31,9 @@ from pydatatask.session import Ephemeral
 
 if TYPE_CHECKING:
     from pydatatask.executor import pod_manager
+
+
+l = logging.getLogger(__name__)
 
 
 def docker_connect(url: Optional[str] = None):
@@ -287,10 +291,14 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def _cleanup(
         self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
-    ) -> Tuple[bytes, Dict[str, Any]]:
-        log = "".join(
-            line for line in await cast(Awaitable[List[str]], container.log(stdout=True, stderr=True))
-        ).encode()
+    ) -> Tuple[Optional[bytes], Dict[str, Any]]:
+        try:
+            log = "".join(
+                line for line in await cast(Awaitable[List[str]], container.log(stdout=True, stderr=True))
+            ).encode()
+        except DockerError:
+            l.warning("Failed to obtain logs", exc_info=True)
+            log = None
         try:
             await container.delete()
         except Exception:  # pylint: disable=broad-exception-caught
