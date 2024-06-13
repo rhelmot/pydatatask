@@ -222,7 +222,7 @@ def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], 
 @subargparse(quota=parse_quota)
 def local_exec_allocator(quota: Optional[Quota] = None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
-    dargs = {
+    dargs: Dict[str, Any] = {
         "nil_ephemeral": "nil_ephemeral",
         "local_path": str(LOCK_PATH),
     }
