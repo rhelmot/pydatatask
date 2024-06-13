@@ -186,7 +186,7 @@ def _subargparse(url: str):
 
 def parse_quota(thing: str):
     cpu, mem, launches = thing.split("/")
-    return Quota.parse(cpu, mem, launches)
+    return {"cpu": cpu, "mem": mem, "launches": launches}
 
 
 def parse_host(thing: str):
@@ -203,15 +203,18 @@ def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], 
     def outer(f):
         @functools.wraps(f)
         def inner(url):
-            inner_kwargs = {}
-            args = _subargparse(url)
-            for name, constructor in outer_kwargs.items():
-                arg = args.pop(name, None)
-                if arg is not None:
-                    inner_kwargs = constructor(arg)
-            if args:
-                print(f"Warning: unused subargument{'' if len(args) == 1 else 's'} {', '.join(args)}")
-            return f(**inner_kwargs)
+            try:
+                inner_kwargs = {}
+                args = _subargparse(url)
+                for name, constructor in outer_kwargs.items():
+                    arg = args.pop(name, None)
+                    if arg is not None:
+                        inner_kwargs[name] = constructor(arg)
+                if args:
+                    print(f"Warning: unused subargument{'' if len(args) == 1 else 's'} {', '.join(args)}")
+                return f(**inner_kwargs)
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                raise Exception("weh") from e
 
         setattr(inner, "argstr", ", ".join(outer_kwargs))
         return inner
@@ -220,7 +223,7 @@ def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], 
 
 
 @subargparse(quota=parse_quota)
-def local_exec_allocator(quota: Optional[Quota] = None):
+def local_exec_allocator(quota=None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
     dargs: Dict[str, Any] = {
         "nil_ephemeral": "nil_ephemeral",
@@ -347,14 +350,12 @@ def main():
     )
     parser.add_argument(
         "--exec-local",
-        action="store",
         dest="executor",
         type=local_exec_allocator,
         help=f"Run tasks on the local machine. Takes subarguments: {getattr(local_exec_allocator, 'argstr')}",
     )
     parser.add_argument(
         "--exec-local-or-kube",
-        action="store",
         dest="executor",
         type=local_exec_kube_allocator,
         help=f"Run tasks on the local machine or the kubernetes cluster configured for access from the local machine. Takes subarguments: {getattr(local_exec_kube_allocator, 'argstr')}",
