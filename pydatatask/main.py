@@ -428,7 +428,7 @@ async def run(
     pipeline.settings(
         fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
     )
-    pipeline.global_template_env.update({k: v for k, v in [line.split("=", 1) for line in global_template_env or []]})
+    pipeline.global_template_env.update(dict([line.split("=", 1) for line in global_template_env or []]))
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     start = asyncio.get_running_loop().time()

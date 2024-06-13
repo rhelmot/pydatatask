@@ -224,7 +224,7 @@ def local_exec_allocator(quota: Optional[Quota] = None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
     dargs = {
         "nil_ephemeral": "nil_ephemeral",
-        "local_path": LOCK_PATH,
+        "local_path": str(LOCK_PATH),
     }
     if quota is not None:
         dargs["quota"] = quota
@@ -242,7 +242,7 @@ def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None,
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
     dargs = {
         "nil_ephemeral": "nil_ephemeral",
-        "local_path": LOCK_PATH,
+        "local_path": str(LOCK_PATH),
     }
     if local_quota is not None:
         dargs["quota"] = local_quota
