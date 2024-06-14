@@ -187,6 +187,8 @@ class Pipeline:
         if self._opened:
             raise Exception("Pipeline is alredy used")
 
+        await self.session.open()
+
         for task in self.tasks.values():
             task.agent_secret = self.agent_secret
             task.agent_url = f"http://{self.agent_hosts.get(task.host, self.agent_hosts[None])}:{self.agent_port}"
@@ -222,7 +224,6 @@ class Pipeline:
                         **link_attrs,  # type: ignore[arg-type]
                     )
 
-        await self.session.open()
         await self._validate()
         self._opened = True
 
