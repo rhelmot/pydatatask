@@ -20,7 +20,11 @@ import asyncio
 import logging
 
 from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
-from kubernetes_asyncio.config import load_kube_config
+from kubernetes_asyncio.config import (
+    ConfigException,
+    load_incluster_config,
+    load_kube_config,
+)
 from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
 
@@ -70,7 +74,11 @@ def kube_connect(
 
     async def inner():
         config = type.__call__(Configuration)
-        await load_kube_config(config_file, context, config)
+        try:
+            loader = await load_incluster_config()
+        except ConfigException:
+            loader = await load_kube_config(config_file, context)
+        loader.load_and_set(config)
         connection = KubeConnection(config)
         yield connection
         await connection.close()
