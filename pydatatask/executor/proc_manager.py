@@ -559,9 +559,9 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
 
     def __init__(
         self,
-        quota: Quota,
         *,
-        app: str,
+        quota: Quota = LOCALHOST_QUOTA,
+        app: str = "pydatatask",
         image_prefix: str = "",
         nil_ephemeral: Optional[Ephemeral[None]] = None,
         kube_namespace: str = "default",
