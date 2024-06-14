@@ -385,6 +385,9 @@ class LocalLinuxManager(AbstractProcessManager):
 
     def to_container_manager(self) -> AbstractContainerManager:
         if self._local_docker is not None:
+            dir(self._local_docker.docker)
+            return self._local_docker
+        if self._local_docker is not None:
             return self._local_docker
         raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
 
@@ -586,14 +589,20 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
         raise TypeError("Not configured to connect to kubernetes (pass nil_ephemeral, lol)")
 
     def to_container_manager(self):
+        e1 = None
         if self._local_kube is not None:
             try:
                 dir(self._local_kube.cluster.connection)
-            except SessionOpenFailedError:
-                pass
+            except SessionOpenFailedError as e:
+                e1 = e
             else:
                 return self._local_kube
-        return super().to_container_manager()
+        try:
+            return super().to_container_manager()
+        except SessionOpenFailedError as e2:
+            if e1 is not None:
+                raise e1 from e2
+            raise
 
 
 class _SSHLinuxFile:
