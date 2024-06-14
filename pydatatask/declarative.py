@@ -24,6 +24,7 @@ from pydatatask.executor.pod_manager import PodManager, kube_connect
 from pydatatask.executor.proc_manager import (
     InProcessLocalLinuxManager,
     LocalLinuxManager,
+    LocalLinuxOrKubeManager,
     SSHLinuxManager,
 )
 from pydatatask.host import Host, HostOS
@@ -469,6 +470,21 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
                 "local_path": str,
                 "image_prefix": str,
                 "nil_ephemeral": lambda thing: None if thing is None else nil_picker(thing),
+            },
+        ),
+        "LocalLinuxOrKube": make_constructor(
+            "LocalLinuxOrKubeManager",
+            LocalLinuxOrKubeManager,
+            {
+                "quota": quota_constructor,
+                "app": str,
+                "local_path": str,
+                "image_prefix": str,
+                "nil_ephemeral": lambda thing: None if thing is None else nil_picker(thing),
+                "kube_namespace": str,
+                "kube_host": make_picker("Host", hosts),
+                "kube_quota": quota_constructor,
+                "kube_context": lambda thing: thing,
             },
         ),
         "SSHLinux": make_constructor(

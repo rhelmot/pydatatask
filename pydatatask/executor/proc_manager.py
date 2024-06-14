@@ -65,7 +65,13 @@ from ..utils import (
 if TYPE_CHECKING:
     from ..utils import AReadStreamManager, AReadText, AWriteStreamManager, AWriteText
 
-__all__ = ("AbstractProcessManager", "LocalLinuxManager", "SSHLinuxManager", "InProcessLocalLinuxManager")
+__all__ = (
+    "AbstractProcessManager",
+    "LocalLinuxManager",
+    "SSHLinuxManager",
+    "InProcessLocalLinuxManager",
+    "LocalLinuxOrKubeManager",
+)
 
 
 class AbstractProcessManager(Executor):
