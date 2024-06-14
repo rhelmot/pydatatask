@@ -124,4 +124,5 @@ class Session:
                 pass
             else:
                 print("Warning: ephemeral has more than one yield")
-            self.ephemerals.pop(name)
+            self.ephemerals.pop(name, None)
+            self._ephemeral_errors.pop(name, None)
