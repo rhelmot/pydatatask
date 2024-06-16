@@ -75,10 +75,10 @@ def kube_connect(
     async def inner():
         config = type.__call__(Configuration)
         try:
-            loader = await load_incluster_config()
+            load_incluster_config(config)
         except ConfigException:
             loader = await load_kube_config(config_file, context)
-        loader.load_and_set(config)
+            await loader.load_and_set(config)
         connection = KubeConnection(config)
         yield connection
         await connection.close()
