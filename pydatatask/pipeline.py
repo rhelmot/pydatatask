@@ -317,7 +317,7 @@ class Pipeline:
 
             sched.initial_jobs.sort(reverse=True)
             excess = None
-            for (_, task, job) in sched.initial_jobs:
+            for _, task, job in sched.initial_jobs:
                 if (task, job, 0) in base_already:
                     continue
                 alloc = self.tasks[task].job_quota
