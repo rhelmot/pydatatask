@@ -364,6 +364,7 @@ events {{
 http {{
     access_log /dev/stderr combined;
     error_log /dev/stderr info;
+    client_max_body_size 15G;
     upstream custom-domains {{
         {servers}
     }}
