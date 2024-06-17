@@ -1476,8 +1476,7 @@ class ProcessTask(TemplateShellTask):
 class FunctionTaskProtocol(Protocol):
     """The protocol which is expected by the tasks which take a python function to execute."""
 
-    def __call__(self, **kwargs) -> Awaitable[None]:
-        ...
+    def __call__(self, **kwargs) -> Awaitable[None]: ...
 
 
 class InProcessSyncTask(Task):

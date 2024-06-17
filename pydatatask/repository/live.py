@@ -78,7 +78,7 @@ class LiveContainerRepository(Repository):
 
     async def unfiltered_iter(self):
         seen = set()
-        for (name, _) in await self.task.manager.live(self.task.name):
+        for name, _ in await self.task.manager.live(self.task.name):
             if name in seen:
                 continue
             seen.add(name)
@@ -92,7 +92,7 @@ class LiveContainerRepository(Repository):
 
     async def delete(self, job, /):
         """Deleting a job from this repository will delete the pod."""
-        for (jjob, replica) in await self.task.manager.live(self.task.name, job):
+        for jjob, replica in await self.task.manager.live(self.task.name, job):
             await self.task.manager.kill(self.task.name, jjob, replica)
 
 
@@ -117,7 +117,7 @@ class LiveProcessRepository(Repository):
 
     async def unfiltered_iter(self):
         seen = set()
-        for (name, _) in await self.task.manager.live(self.task.name):
+        for name, _ in await self.task.manager.live(self.task.name):
             if name in seen:
                 continue
             seen.add(name)
@@ -132,5 +132,5 @@ class LiveProcessRepository(Repository):
 
     async def delete(self, job, /):
         """Deleting a job from this repository will delete the pod."""
-        for (jjob, replica) in await self.task.manager.live(self.task.name, job):
+        for jjob, replica in await self.task.manager.live(self.task.name, job):
             await self.task.manager.kill(self.task.name, jjob, replica)

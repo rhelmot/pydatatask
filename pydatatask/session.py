@@ -43,8 +43,7 @@ class Ephemeral(Protocol[T_co]):
     Will throw an error if the session is not open.
     """
 
-    def __call__(self) -> T_co:
-        ...
+    def __call__(self) -> T_co: ...
 
     _session: "Session"
 

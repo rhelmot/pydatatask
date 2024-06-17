@@ -332,23 +332,19 @@ class AbstractProcessManager(Executor):
 
     @overload
     @abstractmethod
-    async def _open(self, path: Union[Path, str], mode: Literal["r"]) -> AsyncContextManager["AReadTextProto"]:
-        ...
+    async def _open(self, path: Union[Path, str], mode: Literal["r"]) -> AsyncContextManager["AReadTextProto"]: ...
 
     @overload
     @abstractmethod
-    async def _open(self, path: Union[Path, str], mode: Literal["w"]) -> AsyncContextManager["AWriteTextProto"]:
-        ...
+    async def _open(self, path: Union[Path, str], mode: Literal["w"]) -> AsyncContextManager["AWriteTextProto"]: ...
 
     @overload
     @abstractmethod
-    async def _open(self, path: Union[Path, str], mode: Literal["rb"]) -> AsyncContextManager["AReadStream"]:
-        ...
+    async def _open(self, path: Union[Path, str], mode: Literal["rb"]) -> AsyncContextManager["AReadStream"]: ...
 
     @overload
     @abstractmethod
-    async def _open(self, path: Union[Path, str], mode: Literal["wb"]) -> AsyncContextManager["AWriteStream"]:
-        ...
+    async def _open(self, path: Union[Path, str], mode: Literal["wb"]) -> AsyncContextManager["AWriteStream"]: ...
 
     @abstractmethod
     async def _open(self, path, mode):
