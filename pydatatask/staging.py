@@ -155,7 +155,6 @@ class PipelineChildArgs:
 
     def specify(self, prefix: str = "") -> Tuple[PipelineChildSpec, Dict[str, Dispatcher], Dict[str, Dispatcher]]:
         result = PipelineChildSpec()
-        result_executors_dedup = {id(value): value for value in self.executors.values()}
         result_executors = {f"executor_{id(value)}": value for value in self.executors.values() if value is not None}
         result_repos = {f"{prefix}{name}": value for name, value in self.repos.items() if isinstance(value, Dispatcher)}
         result.executors = {
