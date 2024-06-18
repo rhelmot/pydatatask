@@ -361,7 +361,8 @@ class KubeContainerManager(AbstractContainerManager):
                             "imagePullPolicy": "always",
                             "entrypoint": entrypoint,
                             "command": [cmd],
-                            "env": [{"name": name, "value": value} for name, value in environ.items()],
+                            "env": [{"name": name, "value": value} for name, value in environ.items()]
+                            + [{"name": "NODE_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}],
                             "resources": {
                                 "requests": {
                                     "cpu": str(quota.cpu),
