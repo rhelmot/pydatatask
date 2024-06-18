@@ -352,6 +352,9 @@ def http_agent_multi(pipeline: Pipeline, host: str, count: int) -> None:
 
     servers = "\n        ".join(f"server localhost:{pipeline.agent_port + 1 + i};" for i in range(count))
 
+    client_body_temp_path = Path(f"/tmp/pydatatask-nginx_client_body_temp")
+    client_body_temp_path.mkdir(exist_ok=True)
+
     nginx_config = f"""
 error_log /dev/stderr info;
 pid /dev/null;
@@ -365,6 +368,7 @@ http {{
     access_log /dev/stderr combined;
     error_log /dev/stderr info;
     client_max_body_size 15G;
+    client_body_temp_path {client_body_temp_path};
     upstream custom-domains {{
         {servers}
     }}
