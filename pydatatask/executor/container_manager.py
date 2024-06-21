@@ -347,7 +347,7 @@ class KubeContainerManager(AbstractContainerManager):
     ):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
-        mount_info = {provided_name: (str(Path(provided_name)).replace("/", '-').replace("_", '-'), self._volume_lookup(str(Path(provided_name)))) for provided_name in mounts.values()}
+        mount_info = {provided_name: (str(Path(provided_name)).replace("/", '-').replace("_", '-').strip('-'), self._volume_lookup(str(Path(provided_name)))) for provided_name in mounts.values()}
         await self.cluster.launch(
             task,
             job,
@@ -356,13 +356,14 @@ class KubeContainerManager(AbstractContainerManager):
                 "apiVersion": "v1",
                 "kind": "Pod",
                 "spec": {
+                    "restartPolicy": "Never",
                     "containers": [
                         {
                             "name": "main",
                             "image": self._image_prefix + image,
                             "imagePullPolicy": "Always",
-                            "entrypoint": entrypoint,
-                            "command": [cmd],
+                            "command": entrypoint,
+                            "args": [cmd],
                             "env": [{"name": name, "value": value} for name, value in environ.items()]
                             + [{"name": "NODE_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}],
                             "resources": {
@@ -388,7 +389,7 @@ class KubeContainerManager(AbstractContainerManager):
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         pods = await self.cluster.query(job, task)
-        return {pod.metadata.labels["job"]: pod.metadata.creation_timestamp for pod in pods}
+        return {(pod.metadata.labels["job"], int(pod.metadata.labels["replica"])): pod.metadata.creation_timestamp for pod in pods}
 
     async def kill(self, task: str, job: str, replica: int):
         pods = await self.cluster.query(job, task, replica)

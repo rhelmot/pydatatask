@@ -260,6 +260,7 @@ class PipelineSpec:
     agent_secret: str = "insecure"
     long_running_timeout: Optional[float] = None
     global_template_env: Dict[str, str] = field(default_factory=dict)
+    global_script_env: Dict[str, str] = field(default_factory=dict)
 
     def desugar(self):
         query_repo_classes = {
@@ -552,8 +553,10 @@ class PipelineStaging:
         all_tasks = []
         session = Session()
         global_template_env = {}
+        global_script_env = {}
         for staging in self._iter_children():
             global_template_env.update(staging.spec.global_template_env)
+            global_script_env.update(staging.spec.global_script_env)
 
             ephemerals = {
                 name: session.ephemeral(ephemeral_constructor(asdict(value)), name=name)
@@ -614,6 +617,7 @@ class PipelineStaging:
                 else None
             ),
             global_template_env=global_template_env,
+            global_script_env=global_script_env,
         )
 
     def allocate(

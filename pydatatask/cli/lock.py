@@ -415,6 +415,12 @@ def main():
         help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
     )
     parser.add_argument(
+        "--global-script-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the shell environment for every task with a templatable shell script. This value is not escaped; do your own escaping.",
+    )
+    parser.add_argument(
         "--agent-host",
         help="Specify the default hostname the agent will be running at",
     )
@@ -505,6 +511,9 @@ def main():
         locked.spec.agent_port = parsed.agent_port
     locked.spec.global_template_env.update(
         {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
+    )
+    locked.spec.global_script_env.update(
+        {k: v for k, v in [line.split("=", 1) for line in parsed.global_script_env]}
     )
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("Nil", {})

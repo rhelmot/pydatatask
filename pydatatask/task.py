@@ -1004,6 +1004,9 @@ class Task(ABC):
 
 class TemplateShellTask(Task):
     """A task which templates a shell script to run."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.global_script_env = {}
 
     async def build_template_env(
         self,
@@ -1011,7 +1014,12 @@ class TemplateShellTask(Task):
         env_src: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
-        preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\nexport PDT_AGENT_SECRET='{self.agent_secret}'\n")
+        NEWLINE = "\n"
+        preamble.insert(0, f"{NEWLINE.join(f'export {k}={v}' for k, v in self.global_script_env)}\n")
+        preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\n")
+        preamble.insert(0, f"export PDT_AGENT_SECRET='{self.agent_secret}'\n")
+        preamble.insert(0, f"export CPU_QUOTA='{self.job_quota.cpu}'\n")
+        preamble.insert(0, f"export MEM_QUOTA='{self.job_quota.mem / 1024**3}'\n")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
         return env, preamble, epilogue
@@ -1665,7 +1673,7 @@ class ExecutorTask(Task):
     async def update(self):
         done, _ = wait(self.jobs, 0, FIRST_EXCEPTION)
         coros = []
-        dead = set()
+        dead: Set[str] = set()
         live = set(self.rev_jobs)
         for finished_job in done:
             job, start_time = self.jobs.pop(finished_job)
