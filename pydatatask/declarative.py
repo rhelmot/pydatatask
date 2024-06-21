@@ -20,7 +20,7 @@ import motor.motor_asyncio
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import DockerContainerManager, docker_connect
-from pydatatask.executor.pod_manager import PodManager, kube_connect
+from pydatatask.executor.pod_manager import PodManager, VolumeSpec, kube_connect
 from pydatatask.executor.proc_manager import (
     InProcessLocalLinuxManager,
     LocalLinuxManager,
@@ -306,6 +306,13 @@ def make_annotated_constructor(
     return make_constructor(name, inner_constructor, schema)
 
 
+volumespec_constructor = make_constructor("VolumeSpec", VolumeSpec, {
+    "pvc": lambda thing: thing if thing is None else str(thing),
+    "host_path": lambda thing: thing if thing is None else str(thing),
+    "null": parse_bool,
+})
+
+
 def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
     """Generate a function which will dispatch a dict into all known repository constructors.
 
@@ -485,6 +492,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
                 "kube_host": make_picker("Host", hosts),
                 "kube_quota": quota_constructor,
                 "kube_context": lambda thing: thing,
+                "kube_volumes": make_dict_parser("kube_volumes", str, volumespec_constructor),
             },
         ),
         "SSHLinux": make_constructor(
@@ -507,6 +515,7 @@ def build_executor_picker(hosts: Dict[str, Host], ephemerals: Dict[str, Ephemera
                 "app": str,
                 "namespace": str,
                 "connection": make_picker("KubeConnection", ephemerals),
+                "volumes": make_dict_parser("volumes", str, volumespec_constructor),
             },
         ),
         "Docker": make_constructor(
@@ -749,7 +758,7 @@ def build_task_picker(
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,
-                "host_mounts": make_dict_parser("host_mounts", str, str),
+                "mounts": make_dict_parser("mounts", str, str),
                 # fmt: on
             },
         ),

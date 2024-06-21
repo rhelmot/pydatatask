@@ -4,6 +4,7 @@ needs several resource references.
 the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
+from dataclasses import dataclass
 from typing import (
     Any,
     AsyncIterator,
@@ -18,6 +19,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
+from typing_extensions import Self
 
 from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
 from kubernetes_asyncio.config import (
@@ -86,6 +88,27 @@ def kube_connect(
     return inner
 
 
+@dataclass
+class VolumeSpec:
+    pvc: Optional[str] = None
+    host_path: Optional[str] = None
+    null: bool = False
+
+    @classmethod
+    def parse(cls, data: str) -> Self:
+        if '/' in data:
+            return cls(host_path=data)
+        return cls(pvc=data)
+
+    def to_kube(self, name: str) -> Dict[str, Any]:
+        if self.pvc is not None:
+            return {"name": name, "persistentVolumeClaim": {"claimName": self.pvc}}
+        if self.host_path is not None:
+            return {"name": name, "hostPath": {"path": self.host_path}}
+        assert self.null
+        raise Exception("VolumeSpec is null")
+
+
 class PodManager(Executor):
     """A pod manager allows multiple tasks to share a connection to a kubernetes cluster and manage pods on it."""
 
@@ -102,6 +125,7 @@ class PodManager(Executor):
         app: str,
         namespace: str,
         connection: Ephemeral[KubeConnection],
+        volumes: Optional[Dict[str, VolumeSpec]] = None,
     ):
         """
         :param app: The app name string with which to label all created pods.
@@ -115,6 +139,7 @@ class PodManager(Executor):
         self.app = app
         self.namespace = namespace
         self._connection = connection
+        self.volumes = volumes or {}
 
     @property
     def host(self):

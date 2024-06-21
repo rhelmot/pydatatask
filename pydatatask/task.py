@@ -1905,6 +1905,7 @@ class ContainerTask(TemplateShellTask):
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
+        mounts: Optional[Dict[str, str]] = None,
         long_running: bool = False,
         logs: Optional["repomodule.BlobRepository"] = None,
         ready: Optional["repomodule.Repository"] = None,
@@ -1913,7 +1914,6 @@ class ContainerTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
-        host_mounts: Optional[Dict[str, str]] = None,
     ):
         """
         :param name: The name of this task.
@@ -1958,8 +1958,7 @@ class ContainerTask(TemplateShellTask):
         self.window = window
         self.privileged = privileged
         self.tty = tty
-        self.mount_directives: DefaultDict[str, List[Tuple[str, str]]] = defaultdict(list)
-        self.host_mounts = host_mounts or {}
+        self.mounts: Dict[str, str] = mounts or {}
 
         if logs is not None:
             self.link("logs", logs, None, is_status=True)
@@ -2062,8 +2061,6 @@ class ContainerTask(TemplateShellTask):
             if asyncio.iscoroutine(item):
                 item.close()
 
-        mounts = self.mount_directives.pop(job, [])
-
         privileged = bool(self.privileged)
         tty = bool(self.tty)
         await self.manager.launch(
@@ -2075,10 +2072,9 @@ class ContainerTask(TemplateShellTask):
             exe_txt,
             self.environ,
             self.job_quota,
-            mounts,
+            self.mounts,
             privileged,
             tty,
-            host_mounts=self.host_mounts,
         )
 
     async def kill(self, job, replica):

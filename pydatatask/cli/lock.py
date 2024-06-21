@@ -25,6 +25,7 @@ import urllib.parse
 
 import aiodocker
 
+from pydatatask.executor.pod_manager import VolumeSpec
 from pydatatask.executor.proc_manager import LocalLinuxManager
 from pydatatask.host import Host, HostOS
 from pydatatask.pipeline import Pipeline
@@ -198,6 +199,23 @@ def parse_host(thing: str):
         }[os.lower()],
     )
 
+def parse_volumespec_dict(thing: str):
+    things = thing.split("::")
+    result = {}
+    for thing in things:
+        key, val = thing.split(":")
+        if val == "Null":
+            result[key] = VolumeSpec(null=True)
+        else:
+            ty, val = val.split("@")
+            if ty == "HostPath":
+                result[key] = VolumeSpec(host_path=val)
+            elif ty == "Pvc":
+                result[key] = VolumeSpec(pvc=val)
+            else:
+                raise ValueError(f"Bad volume type {ty}")
+    return result
+
 
 def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], T]]:
     def outer(f):
@@ -222,6 +240,7 @@ def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], 
     return outer
 
 
+
 @subargparse(quota=parse_quota)
 def local_exec_allocator(quota=None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
@@ -240,8 +259,8 @@ def local_exec_allocator(quota=None):
     return inner
 
 
-@subargparse(local_quota=parse_quota, kube_quota=parse_quota, namespace=str, kube_host=parse_host, kube_context=str)
-def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None, kube_host=None, kube_context=None):
+@subargparse(local_quota=parse_quota, kube_quota=parse_quota, namespace=str, kube_host=parse_host, kube_context=str, kube_volumes=parse_volumespec_dict)
+def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None, kube_host=None, kube_context=None, kube_volumes=None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
     dargs = {
         "nil_ephemeral": "nil_ephemeral",
@@ -257,6 +276,8 @@ def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None,
         dargs["kube_host"] = kube_host
     if kube_context is not None:
         dargs["kube_context"] = kube_context
+    if kube_volumes is not None:
+        dargs["kube_volumes"] = kube_volumes
 
     def inner(*, name, image_prefix, **kwargs):
         dargs["app"] = name

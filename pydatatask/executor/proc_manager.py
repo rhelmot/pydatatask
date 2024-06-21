@@ -46,7 +46,7 @@ from pydatatask.executor.container_manager import (
     KubeContainerManager,
     docker_connect,
 )
-from pydatatask.executor.pod_manager import PodManager, kube_connect
+from pydatatask.executor.pod_manager import PodManager, VolumeSpec, kube_connect
 from pydatatask.host import LOCAL_HOST, Host, HostOS
 from pydatatask.quota import LOCALHOST_QUOTA, Quota
 from pydatatask.session import Ephemeral, SessionOpenFailedError
@@ -564,6 +564,7 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
         kube_host: Host = Host("LOCAL_KUBE", HostOS.Linux),
         kube_quota: Optional[Quota] = None,
         kube_context: Optional[str] = None,
+        kube_volumes: Optional[Dict[str, VolumeSpec]] = None,
         **kwargs,
     ):
         super().__init__(quota=quota, app=app, image_prefix=image_prefix, nil_ephemeral=nil_ephemeral, **kwargs)
@@ -579,6 +580,7 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
                     nil_ephemeral._session.ephemeral(
                         kube_connect(context=kube_context), name=f"{app}_local_kube", optional=True
                     ),
+                    volumes=kube_volumes,
                 ),
                 image_prefix=image_prefix,
             )

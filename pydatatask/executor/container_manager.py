@@ -25,6 +25,7 @@ import aiofiles.ospath
 import dateutil.parser
 
 from pydatatask.executor import Executor
+from pydatatask.executor.pod_manager import VolumeSpec
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.quota import Quota
 from pydatatask.session import Ephemeral
@@ -70,10 +71,9 @@ class AbstractContainerManager(ABC, Executor):
         cmd: str,
         environ: Dict[str, str],
         quota: Quota,
-        mounts: List[Tuple[str, str]],
+        mounts: Dict[str, str],
         privileged: bool,
         tty: bool,
-        host_mounts: Optional[Dict[str, str]] = None,
     ):
         """Launch a container with the given parameters.
 
@@ -172,10 +172,9 @@ class DockerContainerManager(AbstractContainerManager):
         cmd: str,
         environ: Dict[str, str],
         quota: Quota,
-        mounts: List[Tuple[str, str]],
+        mounts: Dict[str, str],
         privileged: bool,
         tty: bool,
-        host_mounts: Optional[Dict[str, str]] = None,
     ):
         if self._net is None:
             if await aiofiles.ospath.exists("/.dockerenv"):
@@ -200,7 +199,7 @@ class DockerContainerManager(AbstractContainerManager):
             "Cmd": cmd,
             "Env": [f"{key}={val}" for key, val in environ.items()],
             "HostConfig": {
-                "Binds": [f"{a}:{b}" for a, b in mounts] + [f"{a}:{b}" for a, b in (host_mounts or {}).items()],
+                "Binds": [f"{src}:{mountpoint}" for mountpoint, src in mounts.items()],
                 "Privileged": privileged,
             },
         }
@@ -327,6 +326,11 @@ class KubeContainerManager(AbstractContainerManager):
     def host(self):
         return self.cluster.host
 
+    def _volume_lookup(self, provided_name: str):
+        if provided_name in self.cluster.volumes:
+            return self.cluster.volumes[provided_name]
+        return VolumeSpec.parse(provided_name)
+
     async def launch(
         self,
         task: str,
@@ -337,15 +341,13 @@ class KubeContainerManager(AbstractContainerManager):
         cmd: str,
         environ: Dict[str, str],
         quota: Quota,
-        mounts: List[Tuple[str, str]],
+        mounts: Dict[str, str],
         privileged: bool,
         tty: bool,
-        host_mounts: Optional[Dict[str, str]] = None,
     ):
-        if mounts or host_mounts:
-            raise ValueError("Cannot do mounts from a container on a kube cluster")
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
+        mount_info = {provided_name: (provided_name.replace("/", '-').replace("_", '-'), self._volume_lookup(provided_name)) for provided_name in mounts.values()}
         await self.cluster.launch(
             task,
             job,
@@ -358,7 +360,7 @@ class KubeContainerManager(AbstractContainerManager):
                         {
                             "name": "main",
                             "image": self._image_prefix + image,
-                            "imagePullPolicy": "always",
+                            "imagePullPolicy": "Always",
                             "entrypoint": entrypoint,
                             "command": [cmd],
                             "env": [{"name": name, "value": value} for name, value in environ.items()]
@@ -376,8 +378,10 @@ class KubeContainerManager(AbstractContainerManager):
                             "securityContext": {
                                 "privileged": privileged,
                             },
+                                "volumeMounts": [ {"mountPath": mountpoint, "name": mount_info[name][0]} for mountpoint, name in mounts.items() if not mount_info[name][1].null],
                         }
                     ],
+                    "volumes": [info.to_kube(name) for (name, info) in mount_info.values() if not info.null],
                 },
             },
         )
