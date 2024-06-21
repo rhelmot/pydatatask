@@ -1015,11 +1015,13 @@ class TemplateShellTask(Task):
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
         NEWLINE = "\n"
-        preamble.insert(0, f"{NEWLINE.join(f'export {k}={v}' for k, v in self.global_script_env)}\n")
+        preamble.insert(0, f"{NEWLINE.join(f'export {k}={v}' for k, v in self.global_script_env.items())}\n")
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\n")
         preamble.insert(0, f"export PDT_AGENT_SECRET='{self.agent_secret}'\n")
-        preamble.insert(0, f"export CPU_QUOTA='{self.job_quota.cpu}'\n")
-        preamble.insert(0, f"export MEM_QUOTA='{self.job_quota.mem / 1024**3}'\n")
+        # microseconds per tenth of a second (linux CFS cpu-quota)
+        preamble.insert(0, f"export CPU_QUOTA='{self.job_quota.cpu * 100000}'\n")
+        # bytes
+        preamble.insert(0, f"export MEM_QUOTA='{self.job_quota.mem}'\n")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
         return env, preamble, epilogue
