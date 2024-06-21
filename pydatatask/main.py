@@ -1,4 +1,4 @@
-"""The top-level script you write using pydatatask should call `pydatatask.main.main` in its ``if __name__ ==
+"""The top-level script you write using pydatatask should call `pydatatask.main.main` in its ``if __name__ ==main
 '__main__'`` block. This will parse ``sys.argv`` and display the administration interface for the pipeline.
 
 The help screen should look something like this:
@@ -127,6 +127,12 @@ def main(
         action="append",
         default=[],
         help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
+    )
+    parser_run.add_argument(
+        "--global-script-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the shell environment for the entire pipeline",
     )
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
@@ -428,6 +434,7 @@ async def run(
     debug_trace: bool = False,
     once: bool = False,
     global_template_env: Optional[List[str]] = None,
+    global_script_env: Optional[List[str]] = None,
 ):
     if tasks == []:
         tasks = None
@@ -435,6 +442,7 @@ async def run(
         fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
     )
     pipeline.global_template_env.update(dict([line.split("=", 1) for line in global_template_env or []]))
+    pipeline.global_script_env.update(dict([line.split("=", 1) for line in global_script_env or []]))
     if verbose:
         logging.getLogger("pydatatask").setLevel("DEBUG")
     start = asyncio.get_running_loop().time()
