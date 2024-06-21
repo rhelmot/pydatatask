@@ -25,8 +25,7 @@ import aiodocker.containers
 import aiofiles.ospath
 import dateutil.parser
 
-from pydatatask.executor import Executor
-from pydatatask.executor.pod_manager import VolumeSpec
+from pydatatask.executor import Executor, pod_manager
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.quota import Quota
 from pydatatask.session import Ephemeral
@@ -327,10 +326,10 @@ class KubeContainerManager(AbstractContainerManager):
     def host(self):
         return self.cluster.host
 
-    def _volume_lookup(self, provided_name: str):
+    def _volume_lookup(self, provided_name: str) -> "pod_manager.VolumeSpec":
         if provided_name in self.cluster.volumes:
             return self.cluster.volumes[provided_name]
-        return VolumeSpec.parse(provided_name)
+        return pod_manager.VolumeSpec.parse(provided_name)
 
     async def launch(
         self,

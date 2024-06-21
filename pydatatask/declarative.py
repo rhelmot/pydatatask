@@ -674,6 +674,12 @@ def build_task_picker(
         },
     )
     queries_constructor = make_dict_parser("queries", str, query_constructor)
+    def mk_container_wrapper(initial):
+        def container_wrapper(thing):
+            if 'host_mounts' in thing:
+                thing['mounts'] = thing.pop('host_mounts')
+            return initial(thing)
+        return container_wrapper
     kinds = {
         "Process": make_annotated_constructor(
             "ProcessTask",
@@ -731,7 +737,7 @@ def build_task_picker(
                 # fmt: on
             },
         ),
-        "Container": make_annotated_constructor(
+        "Container": mk_container_wrapper(make_annotated_constructor(
             "ContainerTask",
             ContainerTask,
             {
@@ -761,7 +767,7 @@ def build_task_picker(
                 "mounts": make_dict_parser("mounts", str, str),
                 # fmt: on
             },
-        ),
+        )),
     }
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()
