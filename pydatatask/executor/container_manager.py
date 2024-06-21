@@ -1,5 +1,6 @@
 """This module houses the container manager executors."""
 
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -347,7 +348,7 @@ class KubeContainerManager(AbstractContainerManager):
     ):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
-        mount_info = {provided_name: (provided_name.replace("/", '-').replace("_", '-'), self._volume_lookup(provided_name)) for provided_name in mounts.values()}
+        mount_info = {provided_name: (str(Path(provided_name)).replace("/", '-').replace("_", '-'), self._volume_lookup(str(Path(provided_name)))) for provided_name in mounts.values()}
         await self.cluster.launch(
             task,
             job,
