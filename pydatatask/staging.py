@@ -179,6 +179,8 @@ class PipelineChildArgs:
 
 @_dataclass_serial
 class PipelineChildArgsMissing:
+    my_name: str
+    parent_name: str
     is_top: bool
     repos: Dict[str, "RepoClassSpec"] = field(default_factory=dict)  # {child's name: class spec}
     executors: Set[str] = field(default_factory=set)  # {task name}
@@ -195,7 +197,7 @@ class PipelineChildArgsMissing:
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
             if repo_spec.required and not self.is_top:
-                raise ValueError(f"{repo_name} is manually marked as required but is not fulfilled")
+                raise ValueError(f"{repo_name} is required (since it a repo_class from an imported pipeline) but is not fulfilled - importing {self.my_name} from {self.parent_name}")
             repo_spec.name = repo_name
             result = repo_allocators(repo_spec)
             if result is None:
@@ -505,13 +507,15 @@ class PipelineStaging:
                         result *= factor**replica
         return result
 
-    def missing(self) -> PipelineChildArgsMissing:
+    def missing(self, parent_name: Optional[str] = None) -> PipelineChildArgsMissing:
         """Return a PipelineChildArgsMissing instance for this pipeline.yaml file.
 
         This object indicates which resources need to be allocated before the pipeline can be used. You can call its
         .ready() function to get a boolean for whether it is properly ready.
         """
         return PipelineChildArgsMissing(
+            my_name=str(self.basedir / self.filename),
+            parent_name=str(parent_name),
             is_top=True if self.is_top is None else self.is_top,
             repos={
                 name: cls
@@ -525,7 +529,7 @@ class PipelineStaging:
                 and name not in self.executors_fulfilled_by_parents
                 and name not in self.executors_promised_by_parents
             },
-            imports={name: child.missing() for name, child in self.children.items()},
+            imports={name: child.missing(str(self.basedir / self.filename)) for name, child in self.children.items()},
         )
 
     def _iter_children(self) -> Iterator["PipelineStaging"]:
