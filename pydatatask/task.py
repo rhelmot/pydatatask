@@ -23,6 +23,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
 )
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -851,6 +852,7 @@ class Task(ABC):
     async def build_template_env(
         self,
         orig_job: str,
+        replica: int,
         env_src: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         """Transform an environment source into an environment according to Links.
@@ -863,6 +865,7 @@ class Task(ABC):
         env_src.update(self.links)
         env_src["job"] = orig_job
         env_src["task"] = self.name
+        env_src["replica"] = replica
 
         def subkey(items: List[str]):
             src = result[items[0]]
@@ -957,7 +960,7 @@ class Task(ABC):
             # just assume it's yaml. this is fine.
             data_str = await content.read()
             data = safe_load(data_str)
-            env, _, _ = await self.build_template_env(hostjob)
+            env, _, _ = await self.build_template_env(hostjob, 0)
             rendered = await self._render_auto_values(env, self.links[link].auto_values)
             if isinstance(rendered, dict):
                 if data is None:
@@ -1004,6 +1007,7 @@ class Task(ABC):
 
 class TemplateShellTask(Task):
     """A task which templates a shell script to run."""
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.global_script_env = {}
@@ -1011,9 +1015,10 @@ class TemplateShellTask(Task):
     async def build_template_env(
         self,
         orig_job: str,
+        replica: int,
         env_src: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
-        env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
+        env, preamble, epilogue = await super().build_template_env(orig_job, replica, env_src)
         NEWLINE = "\n"
         preamble.insert(0, f"{NEWLINE.join(f'export {k}={v}' for k, v in self.global_script_env.items())}\n")
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\n")
@@ -1022,6 +1027,8 @@ class TemplateShellTask(Task):
         preamble.insert(0, f"export CPU_QUOTA='{self.job_quota.cpu * 100000}'\n")
         # bytes
         preamble.insert(0, f"export MEM_QUOTA='{self.job_quota.mem}'\n")
+        preamble.insert(0, f"export JOB_ID='{orig_job}'")
+        preamble.insert(0, f"export REPLICA_ID='{replica}'")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
         return env, preamble, epilogue
@@ -1166,17 +1173,17 @@ class KubeTask(TemplateShellTask):
             self._podman = self._executor.to_pod_manager()
         return self._podman
 
-    async def build_template_env(self, orig_job, env_src=None):
+    async def build_template_env(self, orig_job, replica, env_src=None):
         if env_src is None:
             env_src = {}
         env_src.update(vars(self))
         env_src.update(self.template_env)
-        template_env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
+        template_env, preamble, epilogue = await super().build_template_env(orig_job, replica, env_src)
         template_env["argv0"] = os.path.basename(sys.argv[0])
         return template_env, preamble, epilogue
 
     async def launch(self, job, replica):
-        template_env, preamble, epilogue = await self.build_template_env(job)
+        template_env, preamble, epilogue = await self.build_template_env(job, replica)
         manifest = safe_load(await render_template(self.template, template_env))
         await self._test_auto_values(template_env)
         for item in template_env.values():
@@ -1440,7 +1447,7 @@ class ProcessTask(TemplateShellTask):
         return live, set(reaped)
 
     async def launch(self, job: str, replica: int):
-        template_env, preamble, epilogue = await self.build_template_env(job)
+        template_env, preamble, epilogue = await self.build_template_env(job, replica)
         exe_txt = await render_template(self.template, template_env)
         await self._test_auto_values(template_env)
         for item in template_env.values():
@@ -1561,7 +1568,7 @@ class InProcessSyncTask(Task):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching in-process %s:%s...", self.name, job)
-        args, preamble, epilogue = await self.build_template_env(job)
+        args, preamble, epilogue = await self.build_template_env(job, replica)
         try:
             for p in preamble:
                 p(**args)
@@ -1684,7 +1691,7 @@ class ExecutorTask(Task):
             dead.add(job)
         await asyncio.gather(*coros)
         live -= dead
-        return {(job, 0): self.jobs[self.rev_jobs[job]][1] for job in live}, dead
+        return {(job, cast(int, 0)): self.jobs[self.rev_jobs[job]][1] for job in live}, dead
 
     async def _cleanup(self, job_future, job, start_time):
         e = job_future.exception()
@@ -1726,7 +1733,7 @@ class ExecutorTask(Task):
     async def launch(self, job, replica):
         assert replica == 0
         l.info("Launching %s:%s with %s...", self.name, job, self.executor)
-        args, preamble, epilogue = await self.build_template_env(job)
+        args, preamble, epilogue = await self.build_template_env(job, replica)
         start_time = datetime.now(tz=timezone.utc)
         running_job = self.executor.submit(self._timestamped_func, self.func, preamble, args, epilogue)
         if self.synchronous:
@@ -1872,7 +1879,7 @@ class KubeFunctionTask(KubeTask):
         assert self.func is not None
         start_time = datetime.now(tz=timezone.utc)
         l.info("Launching --sync %s:%s...", self.name, job)
-        args, preamble, epilogue = await self.build_template_env(job)
+        args, preamble, epilogue = await self.build_template_env(job, 0)
         try:
             for p in preamble:
                 await p(**args)
@@ -2049,7 +2056,7 @@ class ContainerTask(TemplateShellTask):
         return live, set(reaped)
 
     async def launch(self, job: str, replica: int):
-        template_env, preamble, epilogue = await self.build_template_env(job)
+        template_env, preamble, epilogue = await self.build_template_env(job, replica)
         exe_txt = await render_template(self.template, template_env)
         image = await render_template(self.image, template_env)
         await self._test_auto_values(template_env)
@@ -2092,11 +2099,3 @@ class ContainerTask(TemplateShellTask):
 
     async def killall(self):
         await self.manager.killall(self.name)
-
-    async def build_template_env(
-        self,
-        orig_job: str,
-        env_src: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
-        env, preamble, epilogue = await super().build_template_env(orig_job, env_src)
-        return env, preamble, epilogue
