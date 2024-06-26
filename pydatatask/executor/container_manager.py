@@ -1,6 +1,5 @@
 """This module houses the container manager executors."""
 
-from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -16,6 +15,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from itertools import chain
+from pathlib import Path
 import asyncio
 import logging
 import os
@@ -201,6 +201,9 @@ class DockerContainerManager(AbstractContainerManager):
             "HostConfig": {
                 "Binds": [f"{src}:{mountpoint}" for mountpoint, src in mounts.items()],
                 "Privileged": privileged,
+                "CpuQuota": int(quota.cpu * 100000),
+                "CpuPeriod": 100000,
+                "Memory": int(quota.mem),
             },
         }
         if self._net is not None:
@@ -347,7 +350,13 @@ class KubeContainerManager(AbstractContainerManager):
     ):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
-        mount_info = {provided_name: (str(Path(provided_name)).replace("/", '-').replace("_", '-').strip('-'), self._volume_lookup(str(Path(provided_name)))) for provided_name in mounts.values()}
+        mount_info = {
+            provided_name: (
+                str(Path(provided_name)).replace("/", "-").replace("_", "-").strip("-"),
+                self._volume_lookup(str(Path(provided_name))),
+            )
+            for provided_name in mounts.values()
+        }
         await self.cluster.launch(
             task,
             job,
@@ -379,7 +388,11 @@ class KubeContainerManager(AbstractContainerManager):
                             "securityContext": {
                                 "privileged": privileged,
                             },
-                                "volumeMounts": [ {"mountPath": mountpoint, "name": mount_info[name][0]} for mountpoint, name in mounts.items() if not mount_info[name][1].null],
+                            "volumeMounts": [
+                                {"mountPath": mountpoint, "name": mount_info[name][0]}
+                                for mountpoint, name in mounts.items()
+                                if not mount_info[name][1].null
+                            ],
                         }
                     ],
                     "volumes": [info.to_kube(name) for (name, info) in mount_info.values() if not info.null],
@@ -389,7 +402,10 @@ class KubeContainerManager(AbstractContainerManager):
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         pods = await self.cluster.query(job, task)
-        return {(pod.metadata.labels["job"], int(pod.metadata.labels["replica"])): pod.metadata.creation_timestamp for pod in pods}
+        return {
+            (pod.metadata.labels["job"], int(pod.metadata.labels["replica"])): pod.metadata.creation_timestamp
+            for pod in pods
+        }
 
     async def kill(self, task: str, job: str, replica: int):
         pods = await self.cluster.query(job, task, replica)
