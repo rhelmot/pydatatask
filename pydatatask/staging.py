@@ -197,7 +197,9 @@ class PipelineChildArgsMissing:
         new_imports: Dict[str, PipelineChildArgs] = {}
         for repo_name, repo_spec in self.repos.items():
             if repo_spec.required and not self.is_top:
-                raise ValueError(f"{repo_name} is required (since it a repo_class from an imported pipeline) but is not fulfilled - importing {self.my_name} from {self.parent_name}")
+                raise ValueError(
+                    f"{repo_name} is required (since it a repo_class from an imported pipeline) but is not fulfilled - importing {self.my_name} from {self.parent_name}"
+                )
             repo_spec.name = repo_name
             result = repo_allocators(repo_spec)
             if result is None:
@@ -687,3 +689,22 @@ def find_config() -> Optional[Path]:
             return None
         else:
             root = newroot
+
+
+def get_current_directory_pipeline() -> Pipeline:
+    cfgpath = find_config()
+    if cfgpath is None:
+        raise ValueError("Cannot find pipeline.yaml")
+    lockfile = cfgpath.with_suffix(".lock")
+    if lockfile.is_file():
+        spec = PipelineStaging(lockfile)
+    else:
+        spec = PipelineStaging(cfgpath)
+    if not spec.missing().ready():
+        raise ValueError(
+            "Cannot start this pipeline - it has unsatisfied dependencies. "
+            "Try locking it with `python -m pydatatask.lock`"
+        )
+
+    pipeline = spec.instantiate()
+    return pipeline
