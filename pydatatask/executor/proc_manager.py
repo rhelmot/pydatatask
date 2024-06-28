@@ -401,6 +401,7 @@ class LocalLinuxManager(AbstractProcessManager):
         local_path: Union[Path, str] = f"{os.environ.get('TEMP', '/tmp')}/pydatatask-{getpass.getuser()}",
         image_prefix: str = "",
         nil_ephemeral: Optional[Ephemeral[None]] = None,
+        host_path_overrides: Optional[Dict[str, str]] = None,
     ):
         super().__init__(quota, Path(local_path) / app)
         self.app = app
@@ -412,6 +413,7 @@ class LocalLinuxManager(AbstractProcessManager):
                 app=app,
                 docker=nil_ephemeral._session.ephemeral(docker_connect(), optional=True, name=f"{app}_local_docker"),
                 image_prefix=image_prefix,
+                host_path_overrides=host_path_overrides,
             )
         else:
             self._local_docker = None
@@ -567,7 +569,15 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
         kube_volumes: Optional[Dict[str, VolumeSpec]] = None,
         **kwargs,
     ):
-        super().__init__(quota=quota, app=app, image_prefix=image_prefix, nil_ephemeral=nil_ephemeral, **kwargs)
+        host_path_overrides = {x: y.host_path for x, y in (kube_volumes or {}).items() if y.host_path is not None}
+        super().__init__(
+            quota=quota,
+            app=app,
+            image_prefix=image_prefix,
+            nil_ephemeral=nil_ephemeral,
+            host_path_overrides=host_path_overrides,
+            **kwargs,
+        )
 
         if nil_ephemeral is not None:
             self._local_kube: Optional[KubeContainerManager] = KubeContainerManager(

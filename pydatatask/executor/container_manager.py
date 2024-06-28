@@ -135,12 +135,15 @@ class DockerContainerManager(AbstractContainerManager):
         docker: Ephemeral[aiodocker.Docker],
         host: Host = LOCAL_HOST,
         image_prefix: str = "",
+        host_path_overrides: Optional[Dict[str, str]] = None,
     ):
         super().__init__(quota, image_prefix=image_prefix)
         self._docker = docker
         self.app = app
         self._host = host
         self._net = None
+        self._host_path_overrides = host_path_overrides or {}
+        self._host_path_overrides = {str(Path(x)).strip("/"): y for x, y in self._host_path_overrides.items()}
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -199,7 +202,10 @@ class DockerContainerManager(AbstractContainerManager):
             "Cmd": cmd,
             "Env": [f"{key}={val}" for key, val in environ.items()],
             "HostConfig": {
-                "Binds": [f"{src}:{mountpoint}" for mountpoint, src in mounts.items()],
+                "Binds": [
+                    f"{self._host_path_overrides.get(str(Path(src)).strip('/'), src)}:{mountpoint}"
+                    for mountpoint, src in mounts.items()
+                ],
                 "Privileged": privileged,
                 "CpuQuota": int(quota.cpu * 100000),
                 "CpuPeriod": 100000,
