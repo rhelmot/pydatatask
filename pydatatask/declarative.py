@@ -306,11 +306,15 @@ def make_annotated_constructor(
     return make_constructor(name, inner_constructor, schema)
 
 
-volumespec_constructor = make_constructor("VolumeSpec", VolumeSpec, {
-    "pvc": lambda thing: thing if thing is None else str(thing),
-    "host_path": lambda thing: thing if thing is None else str(thing),
-    "null": parse_bool,
-})
+volumespec_constructor = make_constructor(
+    "VolumeSpec",
+    VolumeSpec,
+    {
+        "pvc": lambda thing: thing if thing is None else str(thing),
+        "host_path": lambda thing: thing if thing is None else str(thing),
+        "null": parse_bool,
+    },
+)
 
 
 def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Callable[[Any], Repository]:
@@ -674,12 +678,15 @@ def build_task_picker(
         },
     )
     queries_constructor = make_dict_parser("queries", str, query_constructor)
+
     def mk_container_wrapper(initial):
         def container_wrapper(thing):
-            if 'host_mounts' in thing:
-                thing['mounts'] = thing.pop('host_mounts')
+            if "host_mounts" in thing:
+                thing["mounts"] = thing.pop("host_mounts")
             return initial(thing)
+
         return container_wrapper
+
     kinds = {
         "Process": make_annotated_constructor(
             "ProcessTask",
@@ -737,11 +744,12 @@ def build_task_picker(
                 # fmt: on
             },
         ),
-        "Container": mk_container_wrapper(make_annotated_constructor(
-            "ContainerTask",
-            ContainerTask,
-            {
-                # fmt: off
+        "Container": mk_container_wrapper(
+            make_annotated_constructor(
+                "ContainerTask",
+                ContainerTask,
+                {
+                    # fmt: off
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
@@ -765,9 +773,10 @@ def build_task_picker(
                 "privileged": parse_bool,
                 "tty": parse_bool,
                 "mounts": make_dict_parser("mounts", str, str),
-                # fmt: on
-            },
-        )),
+                    # fmt: on
+                },
+            )
+        ),
     }
     for ep in entry_points(group="pydatatask.task_constructors"):
         maker = ep.load()

@@ -199,6 +199,7 @@ def parse_host(thing: str):
         }[os.lower()],
     )
 
+
 def parse_volumespec_dict(thing: str):
     things = thing.split("::")
     result = {}
@@ -240,7 +241,6 @@ def subargparse(**outer_kwargs) -> Callable[[Callable[..., T]], Callable[[str], 
     return outer
 
 
-
 @subargparse(quota=parse_quota)
 def local_exec_allocator(quota=None):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
@@ -259,8 +259,17 @@ def local_exec_allocator(quota=None):
     return inner
 
 
-@subargparse(local_quota=parse_quota, kube_quota=parse_quota, namespace=str, kube_host=parse_host, kube_context=str, kube_volumes=parse_volumespec_dict)
-def local_exec_kube_allocator(local_quota=None, kube_quota=None, namespace=None, kube_host=None, kube_context=None, kube_volumes=None):
+@subargparse(
+    local_quota=parse_quota,
+    kube_quota=parse_quota,
+    namespace=str,
+    kube_host=parse_host,
+    kube_context=str,
+    kube_volumes=parse_volumespec_dict,
+)
+def local_exec_kube_allocator(
+    local_quota=None, kube_quota=None, namespace=None, kube_host=None, kube_context=None, kube_volumes=None
+):
     LOCK_PATH.mkdir(exist_ok=True, parents=True)
     dargs = {
         "nil_ephemeral": "nil_ephemeral",
@@ -512,9 +521,7 @@ def main():
     locked.spec.global_template_env.update(
         {k: v for k, v in [line.split("=", 1) for line in parsed.global_template_env]}
     )
-    locked.spec.global_script_env.update(
-        {k: v for k, v in [line.split("=", 1) for line in parsed.global_script_env]}
-    )
+    locked.spec.global_script_env.update({k: v for k, v in [line.split("=", 1) for line in parsed.global_script_env]})
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("Nil", {})
     locked.save()
