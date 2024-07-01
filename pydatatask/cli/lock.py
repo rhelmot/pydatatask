@@ -443,6 +443,11 @@ def main():
         action="store_true",
         help="Allocate all missing repos - do not respect the required: True attribute",
     )
+    parser.add_argument(
+        "--max-job-quota",
+        type=parse_quota,
+        help="Set the resources which will be consumed by a job which requests maximum quota",
+    )
     parsed = parser.parse_args()
 
     if not parsed.repo_allocator:
@@ -524,6 +529,7 @@ def main():
     locked.spec.global_script_env.update({k: v for k, v in [line.split("=", 1) for line in parsed.global_script_env]})
     locked.spec.ephemerals.update(dict(EPHEMERALS.values()))
     locked.spec.ephemerals["nil_ephemeral"] = Dispatcher("Nil", {})
+    locked.spec.max_job_quota = parsed.max_job_quota
     locked.save()
 
     locked = PipelineStaging(locked.basedir / locked.filename)

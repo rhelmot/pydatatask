@@ -58,7 +58,7 @@ import pydatatask
 
 from . import executor as execmodule
 from . import repository as repomodule
-from .quota import Quota
+from .quota import Quota, _MaxQuotaType
 from .utils import (
     STDOUT,
     AReadStreamBase,
@@ -230,6 +230,7 @@ class Task(ABC):
         self.success = pydatatask.query.repository.QueryRepository(
             "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
+        self._max_quota: Optional[Quota] = None
 
         self.link(
             "done",
@@ -1285,7 +1286,7 @@ class ProcessTask(TemplateShellTask):
         template: str,
         done: "repomodule.MetadataRepository",
         executor: Optional[execmodule.Executor] = None,
-        job_quota: Optional["Quota"] = None,
+        job_quota: Union[Quota, _MaxQuotaType, None] = None,
         timeout: Optional[timedelta] = None,
         window: timedelta = timedelta(minutes=1),
         environ: Optional[Dict[str, str]] = None,
@@ -1341,8 +1342,7 @@ class ProcessTask(TemplateShellTask):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self._job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
-        self._job_quota.launches = 1
+        self._job_quota = job_quota or Quota.parse(1, "256Mi", 1)
         self._executor = executor or execmodule.localhost_manager
         self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
@@ -1362,7 +1362,12 @@ class ProcessTask(TemplateShellTask):
 
     @property
     def job_quota(self):
-        return self._job_quota
+        if isinstance(self._job_quota, _MaxQuotaType):
+            r = copy.copy(self._max_quota or self.resource_limit)
+        else:
+            r = copy.copy(self._job_quota)
+        r.launches = 1
+        return r
 
     @property
     def resource_limit(self):
@@ -1615,7 +1620,7 @@ class ExecutorTask(Task):
         self,
         name: str,
         executor: FuturesExecutor,
-        job_quota: Quota,
+        job_quota: Union[Quota, _MaxQuotaType],
         resource_limit: Quota,
         done: "repomodule.MetadataRepository",
         host: Optional[Host] = None,
@@ -1661,7 +1666,12 @@ class ExecutorTask(Task):
 
     @property
     def job_quota(self):
-        return self._job_quota
+        if isinstance(self._job_quota, _MaxQuotaType):
+            r = copy.copy(self._max_quota or self.resource_limit)
+        else:
+            r = copy.copy(self._job_quota)
+        r.launches = 1
+        return r
 
     @property
     def resource_limit(self):
@@ -1918,7 +1928,7 @@ class ContainerTask(TemplateShellTask):
         done: "repomodule.MetadataRepository",
         executor: execmodule.Executor,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
-        job_quota: Optional["Quota"] = None,
+        job_quota: Union[Quota, _MaxQuotaType, None] = None,
         window: timedelta = timedelta(minutes=1),
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
@@ -1967,8 +1977,7 @@ class ContainerTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._job_quota = copy.copy(job_quota or Quota.parse(1, "256Mi", 1))
-        self._job_quota.launches = 1
+        self._job_quota = job_quota or Quota.parse(1, "256Mi", 1)
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
@@ -1993,7 +2002,12 @@ class ContainerTask(TemplateShellTask):
 
     @property
     def job_quota(self):
-        return self._job_quota
+        if isinstance(self._job_quota, _MaxQuotaType):
+            r = copy.copy(self._max_quota or self.resource_limit)
+        else:
+            r = copy.copy(self._job_quota)
+        r.launches = 1
+        return r
 
     @property
     def resource_limit(self):

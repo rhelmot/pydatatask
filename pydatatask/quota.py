@@ -21,7 +21,7 @@ from kubernetes.utils import parse_quantity
 from typing_extensions import Self
 import psutil
 
-__all__ = ("QuotaType", "Quota", "parse_quantity")
+__all__ = ("QuotaType", "Quota", "parse_quantity", "_MaxQuotaType", "MAX_QUOTA")
 
 
 class QuotaType(Enum):
@@ -90,3 +90,10 @@ class Quota:
 
 
 LOCALHOST_QUOTA = Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)
+
+
+class _MaxQuotaType:
+    pass
+
+
+MAX_QUOTA = _MaxQuotaType()

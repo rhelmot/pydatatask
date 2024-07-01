@@ -1,7 +1,7 @@
 """This module contains parsing methods for transforming various dict and list schemas into Repository, Task, and
 other kinds of pydatatask classes."""
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar, Union
 from datetime import timedelta
 from enum import Enum
 import base64
@@ -35,7 +35,7 @@ from pydatatask.query.repository import (
     QueryMetadataRepository,
     QueryRepository,
 )
-from pydatatask.quota import Quota
+from pydatatask.quota import MAX_QUOTA, Quota, _MaxQuotaType
 from pydatatask.repository import (
     DirectoryRepository,
     DockerRepository,
@@ -273,7 +273,15 @@ def _build_ssh_connection(
     return ssh
 
 
-quota_constructor = make_constructor("quota", Quota.parse, {"cpu": str, "mem": str, "launches": str})
+quota_constructor_inner = make_constructor("quota", Quota.parse, {"cpu": str, "mem": str, "launches": str})
+
+
+def quota_constructor(thing: Any) -> Union[Quota, _MaxQuotaType]:
+    if thing == "MAX":
+        return MAX_QUOTA
+    return quota_constructor_inner(thing)
+
+
 timedelta_constructor = make_constructor(
     "timedelta",
     timedelta,

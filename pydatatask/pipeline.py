@@ -95,6 +95,7 @@ class Pipeline:
         long_running_timeout: Optional[timedelta] = None,
         global_template_env: Optional[Dict[str, str]] = None,
         global_script_env: Optional[Dict[str, str]] = None,
+        max_job_quota: Optional[Quota] = None,
     ):
         """
         :param tasks: The tasks which make up this pipeline.
@@ -119,6 +120,7 @@ class Pipeline:
         self.long_running_timeout = long_running_timeout
         self.global_template_env = global_template_env or {}
         self.global_script_env = global_script_env or {}
+        self.max_job_quota = max_job_quota
 
         for task in tasks:
             if task is not self.tasks[task.name]:
@@ -195,6 +197,7 @@ class Pipeline:
             task.agent_secret = self.agent_secret
             task.agent_url = f"http://{self.agent_hosts.get(task.host, self.agent_hosts[None])}:{self.agent_port}"
             task.global_template_env = self.global_template_env
+            task._max_quota = self.max_job_quota
             if isinstance(task, taskmodule.TemplateShellTask):
                 task.global_script_env = self.global_script_env
             if (

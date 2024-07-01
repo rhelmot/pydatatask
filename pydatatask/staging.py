@@ -265,6 +265,7 @@ class PipelineSpec:
     long_running_timeout: Optional[float] = None
     global_template_env: Dict[str, str] = field(default_factory=dict)
     global_script_env: Dict[str, str] = field(default_factory=dict)
+    max_job_quota: Optional[Quota] = None
 
     def desugar(self):
         query_repo_classes = {
@@ -624,6 +625,7 @@ class PipelineStaging:
             ),
             global_template_env=global_template_env,
             global_script_env=global_script_env,
+            max_job_quota=self.spec.max_job_quota,
         )
 
     def allocate(
