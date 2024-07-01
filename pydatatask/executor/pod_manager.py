@@ -4,7 +4,6 @@ needs several resource references.
 the `PodManager` simplifies tracking the lifetimes of these resources.
 """
 
-from dataclasses import dataclass
 from typing import (
     Any,
     AsyncIterator,
@@ -16,10 +15,10 @@ from typing import (
     Tuple,
 )
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
-from typing_extensions import Self
 
 from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
 from kubernetes_asyncio.config import (
@@ -29,6 +28,7 @@ from kubernetes_asyncio.config import (
 )
 from kubernetes_asyncio.config.kube_config import Configuration
 from kubernetes_asyncio.stream import WsApiClient
+from typing_extensions import Self
 
 from pydatatask.executor import Executor
 from pydatatask.executor.container_manager import KubeContainerManager
@@ -96,7 +96,7 @@ class VolumeSpec:
 
     @classmethod
     def parse(cls, data: str) -> Self:
-        if '/' in data:
+        if "/" in data:
             return cls(host_path=data)
         return cls(pvc=data)
 
