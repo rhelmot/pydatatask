@@ -151,6 +151,7 @@ class Repository(ABC):
         link_name: str,
         hostjob: Optional[str] = None,
         force_path: Optional[str] = None,
+        DANGEROUS_filename_is_key: bool = False,
     ) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
@@ -192,6 +193,7 @@ class Repository(ABC):
                 link_name,
                 hostjob,
                 mkdir=force_path is None,
+                DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
@@ -252,9 +254,10 @@ class MetadataRepository(Repository, ABC):
         link_name: str,
         hostjob: Optional[str] = None,
         force_path: Optional[str] = None,
+        DANGEROUS_filename_is_key: bool = False,
     ) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind, link_name, hostjob, force_path)
+            return await super().template(job, task, kind, link_name, hostjob, force_path, DANGEROUS_filename_is_key)
         info = await self.info(job)
         return taskmodule.TemplateInfo(info)
 

@@ -190,6 +190,7 @@ class Link:
     inhibits_output: bool = False
     required_for_output: bool = False
     force_path: Optional[str] = None
+    DANGEROUS_filename_is_key: Optional[bool] = False
 
 
 class Task(ABC):
@@ -430,6 +431,7 @@ class Task(ABC):
         hostjob: Optional[str],
         force_upload_dir: Optional[str] = None,
         mkdir: bool = True,
+        DANGEROUS_filename_is_key: bool = False,
     ) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
@@ -458,12 +460,8 @@ class Task(ABC):
             else:
                 return f"ln -s {cokeydir}/$f {upload}"
 
-        templated_preamble = f"""
-        {self.host.mk_mkdir(filepath) if mkdir else ""}
-        {self.host.mk_mkdir(scratch)}
-        {self.host.mk_mkdir(lock)}
-        {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
-        idgen() {{
+        idgen_function = """
+        idgen() {
           echo $(($(shuf -i0-255 -n1) +
                   $(shuf -i0-255 -n1)*0x100 +
                   $(shuf -i0-255 -n1)*0x10000 +
@@ -472,7 +470,22 @@ class Task(ABC):
                   $(shuf -i0-255 -n1)*0x10000000000 +
                   $(shuf -i0-255 -n1)*0x1000000000000 +
                   $(shuf -i0-127 -n1)*0x100000000000000))
-        }}
+        }
+        """
+        if DANGEROUS_filename_is_key:
+            idgen_function = """
+            idgen() {
+                f="$1"
+                echo $(basename "$f")
+            }
+            """
+
+        templated_preamble = f"""
+        {self.host.mk_mkdir(filepath) if mkdir else ""}
+        {self.host.mk_mkdir(scratch)}
+        {self.host.mk_mkdir(lock)}
+        {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
+        {idgen_function}
         watcher() {{
           WATCHER_LAST=
           while ! [ -d {filepath} ]; do
@@ -486,7 +499,7 @@ class Task(ABC):
             fi
             for f in *; do
               if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ] && [ "$(($(date +%s) - $(stat -c %Y "$f")))" -ge 5 ]; then
-                ID=$(idgen)
+                ID=$(idgen "$f")
                 ln -sf "$PWD/$f" {upload}
                 {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
                 rm {upload}
@@ -905,7 +918,9 @@ class Task(ABC):
 
             arg = self.instrument_arg(
                 orig_job,
-                await link.repo.template(subjob, self, link.kind, env_name, orig_job, link.force_path),
+                await link.repo.template(
+                    subjob, self, link.kind, env_name, orig_job, link.force_path, link.DANGEROUS_filename_is_key
+                ),
                 link.kind,
             )
             result[env_name] = arg.arg
@@ -920,7 +935,15 @@ class Task(ABC):
                     subjob = str(subkey(link.key.split(".")))
                     arg = self.instrument_arg(
                         orig_job,
-                        await link.repo.template(subjob, self, link.kind, env_name2, orig_job, link.force_path),
+                        await link.repo.template(
+                            subjob,
+                            self,
+                            link.kind,
+                            env_name2,
+                            orig_job,
+                            link.force_path,
+                            link.DANGEROUS_filename_is_key,
+                        ),
                         link.kind,
                     )
                     result[env_name2] = arg.arg

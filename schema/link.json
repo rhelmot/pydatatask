@@ -38,6 +38,12 @@
     },
     "required_for_output": {
       "type": "boolean"
+    },
+    "force_path": {
+      "type": "boolean"
+    },
+    "DANGEROUS_filename_is_key": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false,
