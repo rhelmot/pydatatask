@@ -1072,9 +1072,9 @@ class TemplateShellTask(Task):
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\n")
         preamble.insert(0, f"export PDT_AGENT_SECRET='{self.agent_secret}'\n")
         # microseconds per tenth of a second (linux CFS cpu-quota)
-        preamble.insert(0, f"export CPU_QUOTA='{self.job_quota.cpu * 100000}'\n")
+        preamble.insert(0, f"export CPU_QUOTA='{int(self.job_quota.cpu * 100000)}'\n")
         # bytes
-        preamble.insert(0, f"export MEM_QUOTA='{self.job_quota.mem}'\n")
+        preamble.insert(0, f"export MEM_QUOTA='{int(self.job_quota.mem)}'\n")
         preamble.insert(0, f"export JOB_ID='{orig_job}'")
         preamble.insert(0, f"export REPLICA_ID='{replica}'")
         if self.debug_trace:
