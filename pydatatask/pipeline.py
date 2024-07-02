@@ -330,7 +330,7 @@ class Pipeline:
                 alloc = self.tasks[task].job_quota
                 excess = (used + alloc).excess(quota)
                 if excess is not None:
-                    l.warning(
+                    l.debug(
                         "Not enough quota %s to allocate task %s:%s which required %s already used %s",
                         quota,
                         task,
