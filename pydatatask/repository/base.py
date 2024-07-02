@@ -160,6 +160,10 @@ class Repository(ABC):
         """
 
         force_path = task.links[link_name].force_path
+        content_keyed_sha256 = task.links[link_name].content_keyed_sha256
+        assert not content_keyed_sha256 or (
+            kind == taskmodule.LinkKind.StreamingOutputFilepath and isinstance(self, repomodule.BlobRepository)
+        )
 
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
