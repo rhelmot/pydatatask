@@ -341,11 +341,23 @@ class Task(ABC):
         """
         is_filesystem = isinstance(self.links[link_name].repo, repomodule.FilesystemRepository)
         payload_filename = self.mktemp(job + "-zip") if is_filesystem else filename
-        url = f"{self.agent_url}/data/{self.name}/{link_name}/{job}" + (
+        url = f"{self.agent_url}/data/{self.name}/{link_name}/$UPLOAD_JOB" + (
             f"?hostjob={hostjob}" if hostjob is not None else ""
         )
         headers = {"Cookie": "secret=" + self.agent_secret}
-        result = self.host.mk_http_post(
+
+        content_keyed_sha256 = self.links[link_name].content_keyed_sha256
+        DANGEROUS_filename_is_key = self.links[link_name].DANGEROUS_filename_is_key
+        assert not (
+            content_keyed_sha256 and DANGEROUS_filename_is_key
+        ), "content_keyed_sha256 and DANGEROUS_filename_is_key are mutually exclusive"
+        if self.links[link_name].content_keyed_sha256:
+            result = f"UPLOAD_JOB=$(sha256sum {filename} | cut -d' ' -f1)\n"
+        elif self.links[link_name].DANGEROUS_filename_is_key:
+            result = f"UPLOAD_JOB=$(basename {filename}\n"
+        else:
+            result = f"UPLOAD_JOB={job}\n"
+        result += self.host.mk_http_post(
             payload_filename, url, headers, verbose=self.debug_trace, handle_err=self.mk_error_handler(url, headers)
         )
         if is_filesystem:
