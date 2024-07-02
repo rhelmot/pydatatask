@@ -36,7 +36,7 @@
     "inhibits_output": {
       "type": "boolean"
     },
-    "required_for_output": {
+    "required_for_success": {
       "type": "boolean"
     },
     "force_path": {

@@ -68,6 +68,7 @@ class Host:
         output_filename: Optional[str] = None,
         verbose: bool = False,
         handle_err: str = "",
+        required_for_success: bool = True,
     ) -> str:
         """Generate a shell script to perform an http upload for the host system."""
         if self.os == HostOS.Linux:
@@ -78,13 +79,28 @@ class Host:
             FILENAME="{filename}"
              {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
             ERR_FILENAME=$(mktemp)
-            if ! [ -e "$FILENAME" ]; then echo "mk_http_post target $FILENAME does not exist" && false; fi
-            if ! [ -f "$FILENAME" ]; then echo "mk_http_post target $FILENAME is not a file" && false; fi
-            wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
-                curl -f {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
-                (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}
-                {handle_err}
-                false)
+            ANY_UPLOADS_FAILED=${{ANY_UPLOADS_FAILED:-0}}
+            if ! [ -e "$FILENAME" ]; then echo "mk_http_post target $FILENAME does not exist" && exit 1; fi
+            if [ -f "$FILENAME" ]; then 
+                for i in $(seq 1 3); do
+                    wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
+                        curl -f {'-v' if verbose else ''} $URL {headers_str} -T $FILENAME -X POST 2>>$ERR_FILENAME {output_redirect} || \\
+                        (echo "upload of $URL failed:" && cat $ERR_FILENAME {'$OUTPUT_FILENAME ' if output_filename else ''}
+                        {handle_err}
+                        false)
+                    CUR_UPLOAD_FAILED=$?
+                    if [ $CUR_UPLOAD_FAILED -eq 0 ]; then break; fi
+                    RETRY_DELAY=$((i * 10))
+                    echo "upload failed, retrying in $RETRY_DELAY seconds"
+                    sleep $RETRY_DELAY
+                done
+                if [ $CUR_UPLOAD_FAILED -ne 0 ]; then
+                    ANY_UPLOADS_FAILED=1
+                fi
+            else
+                echo "mk_http_post target $FILENAME is not a file"
+                {'ANY_UPLOADS_FAILED=1' if required_for_success else ''}
+            fi
             rm $ERR_FILENAME
             {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
             """

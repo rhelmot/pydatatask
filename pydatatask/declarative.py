@@ -280,7 +280,7 @@ def quota_constructor(thing: Any) -> Union[Quota, _MaxQuotaType]:
     if thing == "MAX":
         return MAX_QUOTA
     if thing.get("max", None):
-        return _MaxQuotaType(float(thing['max']))
+        return _MaxQuotaType(float(thing["max"]))
     return quota_constructor_inner(thing)
 
 
@@ -661,7 +661,7 @@ def build_task_picker(
             "inhibits_start": parse_optional_bool,
             "required_for_start": parse_optional_bool,
             "inhibits_output": parse_optional_bool,
-            "required_for_output": parse_optional_bool,
+            "required_for_success": parse_optional_bool,
             "force_path": lambda thing: str(thing) if thing is not None else None,
             "DANGEROUS_filename_is_key": parse_optional_bool,
             "content_keyed_sha256": parse_optional_bool,

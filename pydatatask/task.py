@@ -177,21 +177,21 @@ class Link:
     """
 
     repo: "repomodule.Repository"
-    kind: Optional[LinkKind] = None
-    key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None
-    cokeyed: Dict[str, "repomodule.Repository"] = field(default_factory=dict)
-    auto_meta: Optional[str] = None
-    auto_values: Optional[Any] = None
-    is_input: bool = False
-    is_output: bool = False
-    is_status: bool = False
-    inhibits_start: bool = False
-    required_for_start: Union[bool, str] = False
-    inhibits_output: bool = False
-    required_for_output: bool = False
-    force_path: Optional[str] = None
-    DANGEROUS_filename_is_key: Optional[bool] = False
-    content_keyed_sha256: Optional[bool] = False
+    kind: Optional[LinkKind]
+    key: Optional[Union[str, Callable[[str], Awaitable[str]]]]
+    cokeyed: Dict[str, "repomodule.Repository"]
+    auto_meta: Optional[str]
+    auto_values: Optional[Any]
+    is_input: bool
+    is_output: bool
+    is_status: bool
+    inhibits_start: bool
+    required_for_start: Union[bool, str]
+    inhibits_output: bool
+    required_for_success: bool
+    force_path: Optional[str]
+    DANGEROUS_filename_is_key: Optional[bool]
+    content_keyed_sha256: Optional[bool]
 
 
 class Task(ABC):
@@ -240,7 +240,7 @@ class Task(ABC):
             None,
             is_status=True,
             inhibits_start=True,
-            required_for_output=failure_ok,
+            required_for_success=failure_ok,
         )
 
         self.link(
@@ -248,7 +248,7 @@ class Task(ABC):
             self.success,
             None,
             is_status=True,
-            required_for_output=not failure_ok,
+            required_for_success=not failure_ok,
         )
 
     def __repr__(self):
@@ -306,13 +306,20 @@ class Task(ABC):
         return self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace, handle_err=handle_err)
 
     def mk_http_post(
-        self, filename: str, url: str, headers: Dict[str, str], output_filename: Optional[str] = None
+        self,
+        filename: str,
+        url: str,
+        headers: Dict[str, str],
+        output_filename: Optional[str] = None,
+        required_for_success: bool = True,
     ) -> Any:
         """Generate logic to perform an http upload for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_post(filename, url, headers, output_filename, verbose=self.debug_trace)
+        return self.host.mk_http_post(
+            filename, url, headers, output_filename, verbose=self.debug_trace, required_for_success=required_for_success
+        )
 
     def mk_repo_get(self, filename: str, link_name: str, job: str) -> Any:
         """Generate logic to perform an repository download for the task host system.
@@ -358,7 +365,12 @@ class Task(ABC):
         else:
             result = f"UPLOAD_JOB={job}\n"
         result += self.host.mk_http_post(
-            payload_filename, url, headers, verbose=self.debug_trace, handle_err=self.mk_error_handler(url, headers)
+            payload_filename,
+            url,
+            headers,
+            verbose=self.debug_trace,
+            handle_err=self.mk_error_handler(url, headers),
+            required_for_success=self.links[link_name].required_for_success,
         )
         if is_filesystem:
             result = self.host.mk_zip(payload_filename, filename) + result
@@ -389,6 +401,7 @@ class Task(ABC):
                 headers,
                 "/dev/stdout",
                 verbose=self.debug_trace,
+                required_for_success=False,
             )}
             rm $INPUT_FILE
         }}
@@ -425,6 +438,7 @@ class Task(ABC):
             url,
             headers,
             verbose=self.debug_trace,
+            required_for_success=self.links[link_name].required_for_success,
         )
         if is_filesystem:
             result = self.host.mk_zip(payload_filename, filename) + result
@@ -649,7 +663,7 @@ class Task(ABC):
         inhibits_start: Optional[bool] = None,
         required_for_start: Optional[Union[bool, str]] = None,
         inhibits_output: Optional[bool] = None,
-        required_for_output: Optional[bool] = None,
+        required_for_success: Optional[bool] = None,
         force_path: Optional[str] = None,
         DANGEROUS_filename_is_key: Optional[bool] = None,
         content_keyed_sha256: Optional[bool] = None,
@@ -675,8 +689,8 @@ class Task(ABC):
             repository to allow jobs to be launched. If unspecified, defaults to ``is_input``.
         :param inhibits_output: Whether this repository should become ``inhibits_start`` in tasks this task is plugged
             into. Default False.
-        :param required_for_output: Whether this repository should become `required_for_start` in tasks this task is
-            plugged into. If unspecified, defaults to ``is_output``.
+        :param required_for_success: Whether this repository should become `required_for_start` in tasks this task is
+            plugged into.
         """
         if is_input is None:
             is_input = kind in INPUT_KINDS
@@ -690,8 +704,8 @@ class Task(ABC):
             required_for_start = is_input
         if inhibits_start is None:
             inhibits_start = False
-        if required_for_output is None:
-            required_for_output = False
+        if required_for_success is None:
+            required_for_success = is_output
         if inhibits_output is None:
             inhibits_output = False
         if key == "ALLOC" and is_input:
@@ -710,7 +724,7 @@ class Task(ABC):
             inhibits_start=inhibits_start,
             required_for_start=required_for_start,
             inhibits_output=inhibits_output,
-            required_for_output=required_for_output,
+            required_for_success=required_for_success,
             force_path=force_path,
             DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
             content_keyed_sha256=content_keyed_sha256,
@@ -847,9 +861,9 @@ class Task(ABC):
         return {name: self._repo_related(name) for name, link in self.links.items() if link.inhibits_output}
 
     @property
-    def required_for_output(self):
-        """A mapping from link name to repository for all links marked ``required_for_output``."""
-        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_output}
+    def required_for_success(self):
+        """A mapping from link name to repository for all links marked ``required_for_success``."""
+        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_success}
 
     async def validate(self):
         """Raise an exception if for any reason the task is misconfigured.
@@ -1146,7 +1160,7 @@ class KubeTask(TemplateShellTask):
         :param logs: Optional: A BlobRepository to dump pod logs to on completion. Linked as "logs" with
             ``is_status``.
         :param done: A MetadataRepository in which to dump some information about the pod's lifetime and
-            termination on completion. Linked as "done" with ``inhibits_start, required_for_output, is_status``.
+            termination on completion. Linked as "done" with ``inhibits_start, required_for_success, is_status``.
         :param window:  Optional: How far back into the past to look in order to determine whether we have recently
             launched too many pods too quickly.
         :param timeout: Optional: When a pod is found to have been running continuously for this amount of time, it
@@ -1259,7 +1273,12 @@ class KubeTask(TemplateShellTask):
             {execute}
             )
             RETCODE=$?
+            ANY_UPLOADS_FAILED=0
             {"; ".join(epilogue)}
+            if [ $ANY_UPLOADS_FAILED -ne 0 ]; then
+                echo "Some uploads failed. Exiting."
+                exit 1
+            fi
             exit $RETCODE
             """,
             ]
@@ -1359,7 +1378,7 @@ class ProcessTask(TemplateShellTask):
                        rate-limiting.
         :param done: metadata repository in which to dump some information about the process's lifetime and
                      termination on completion. Linked as "done" with
-                     ``inhibits_start, required_for_output, is_status``.
+                     ``inhibits_start, required_for_success, is_status``.
         :param stdin: Optional: A blob repository from which to source the process' standard input. The content will be
                       preloaded and transferred to the target environment, so the target does not need to be
                       authenticated to this repository. Linked as "stdin" with ``is_input``.
@@ -1524,7 +1543,12 @@ class ProcessTask(TemplateShellTask):
           {exe_txt}
         )
         RETCODE=$?
+        ANY_UPLOADS_FAILED=0
         {NEWLINE.join(epilogue)}
+        if [ $ANY_UPLOADS_FAILED -ne 0 ]; then
+            echo "Some uploads failed. Exiting."
+            exit 1
+        fi
         exit $RETCODE
         """
 
@@ -1901,10 +1925,10 @@ class KubeFunctionTask(KubeTask):
                                ``is_status``.
         :param kube_done: A MetadataRepository in which to dump some information about the pod's lifetime and
                           termination on completion. Linked as "done" with
-                          ``inhibits_start, required_for_output, is_status``.
+                          ``inhibits_start, required_for_success, is_status``.
         :param func_done: Optional: A MetadataRepository in which to dump some information about the function's lifetime
                           and termination on completion. Linked as "func_done" with
-                          ``inhibits_start, required_for_output, is_status``.
+                          ``inhibits_start, required_for_success, is_status``.
         :param template_env:     Optional: Additional keys to add to the template environment.
         :param ready:   Optional: A repository from which to read task-ready status.
         :param func: Optional: The async function to run as the task body, if you don't want to use this task as a
@@ -1918,7 +1942,7 @@ class KubeFunctionTask(KubeTask):
                 "func_done",
                 func_done,
                 None,
-                required_for_output=True,
+                required_for_success=True,
                 is_status=True,
                 inhibits_start=True,
             )
@@ -2019,7 +2043,7 @@ class ContainerTask(TemplateShellTask):
         :param timeout: How long a task can take before it is killed for taking too long, or None for no timeout.
         :param done: Optional: A metadata repository in which to dump some information about the container's lifetime
                                and termination on completion. Linked as "done" with
-                               ``inhibits_start, required_for_output, is_status``.
+                               ``inhibits_start, required_for_success, is_status``.
         :param logs: Optional: A blob repository into which to dump the container's logs. Linked as "logs" with
                                ``is_status``.
         :param ready:  Optional: A repository from which to read task-ready status.
@@ -2155,7 +2179,12 @@ class ContainerTask(TemplateShellTask):
                 exe_txt,
                 ")",
                 "RETCODE=$?",
+                "ANY_UPLOADS_FAILED=0",
                 *epilogue,
+                "if [ $ANY_UPLOADS_FAILED -ne 0 ]; then",
+                '    echo "Some uploads failed. Exiting."',
+                "    exit 1",
+                "fi",
                 "exit $RETCODE",
             ]
         )

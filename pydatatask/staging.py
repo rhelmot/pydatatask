@@ -101,7 +101,7 @@ class LinkSpec:
     auto_meta: Optional[str] = None
     auto_values: Optional[Any] = None
     required_for_start: Optional[bool] = None
-    required_for_output: Optional[bool] = None
+    required_for_success: Optional[bool] = None
     inhibits_start: Optional[bool] = None
     inhibits_output: Optional[bool] = None
     is_input: Optional[bool] = None
