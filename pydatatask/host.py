@@ -80,7 +80,10 @@ class Host:
              {'OUTPUT_FILENAME="$(mktemp)"' if output_filename else ''}
             ERR_FILENAME=$(mktemp)
             ANY_UPLOADS_FAILED=${{ANY_UPLOADS_FAILED:-0}}
-            if ! [ -e "$FILENAME" ]; then echo "mk_http_post target $FILENAME does not exist" && exit 1; fi
+            if ! [ -e "$FILENAME" ]; then
+                echo "mk_http_post target $FILENAME does not exist"
+                {'ANY_UPLOADS_FAILED=1' if required_for_success else ''}
+            fi
             if [ -f "$FILENAME" ]; then 
                 for i in $(seq 1 3); do
                     wget {'-v' if verbose else '-q'} -O- $URL {headers_str} --post-file $FILENAME 2>>$ERR_FILENAME {output_redirect} || \\
