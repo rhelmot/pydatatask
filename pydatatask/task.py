@@ -712,7 +712,7 @@ class Task(ABC):
             inhibits_output=inhibits_output,
             required_for_output=required_for_output,
             force_path=force_path,
-            DANGEROUS_filename_is_key=DANGER_filename_is_key,
+            DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
             content_keyed_sha256=content_keyed_sha256,
         )
 
