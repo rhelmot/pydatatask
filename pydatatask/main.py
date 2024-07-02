@@ -112,6 +112,8 @@ def main(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
     parser_run.add_argument(
+        "--disable-quota", action="store_true", help="Prevent local quota from ever preventing a task from running")
+    parser_run.add_argument(
         "--require-success",
         action="store_true",
         help="Raise an error when workers fail instead of marking them as completed-but-failed",
@@ -435,11 +437,12 @@ async def run(
     once: bool = False,
     global_template_env: Optional[List[str]] = None,
     global_script_env: Optional[List[str]] = None,
+    disable_quota: bool = False,
 ):
     if tasks == []:
         tasks = None
     pipeline.settings(
-        fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
+        fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success, disable_quota=disable_quota
     )
     pipeline.global_template_env.update(dict([line.split("=", 1) for line in global_template_env or []]))
     pipeline.global_script_env.update(dict([line.split("=", 1) for line in global_script_env or []]))
