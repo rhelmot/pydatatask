@@ -117,6 +117,7 @@ class Pipeline:
         self.agent_hosts: Dict[Optional[Host], str] = agent_hosts or {None: "localhost"}
         self.source_file = source_file
         self.fail_fast = False
+        self.disable_quota = False
         self.long_running_timeout = long_running_timeout
         self.global_template_env = global_template_env or {}
         self.global_script_env = global_script_env or {}
