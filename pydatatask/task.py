@@ -1414,6 +1414,13 @@ class ProcessTask(TemplateShellTask):
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
+        if r.excess(self.resource_limit):
+            l.warning(
+                "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
+                self.name,
+                self.resource_limit,
+            )
+            self._job_quota = r
         return r
 
     @property
@@ -1718,6 +1725,13 @@ class ExecutorTask(Task):
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
+        if r.excess(self.resource_limit):
+            l.warning(
+                "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
+                self.name,
+                self.resource_limit,
+            )
+            self._job_quota = r
         return r
 
     @property
@@ -2054,6 +2068,13 @@ class ContainerTask(TemplateShellTask):
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
+        if r.excess(self.resource_limit):
+            l.warning(
+                "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
+                self.name,
+                self.resource_limit,
+            )
+            self._job_quota = r
         return r
 
     @property
