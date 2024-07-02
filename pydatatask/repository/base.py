@@ -150,8 +150,6 @@ class Repository(ABC):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
-        force_path: Optional[str] = None,
-        DANGEROUS_filename_is_key: bool = False,
     ) -> taskmodule.TemplateInfo:
         """Returns an arbitrary piece of data related to job.
 
@@ -160,6 +158,9 @@ class Repository(ABC):
 
         TODO: this docstring is woefully outdated. See LinkKind.
         """
+
+        force_path = task.links[link_name].force_path
+
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
         if kind in (taskmodule.LinkKind.InputRepo, taskmodule.LinkKind.OutputRepo):
@@ -193,7 +194,8 @@ class Repository(ABC):
                 link_name,
                 hostjob,
                 mkdir=force_path is None,
-                DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
+                DANGEROUS_filename_is_key=task.links[link_name].DANGEROUS_filename_is_key,
+                content_keyed_sha256=task.links[link_name].content_keyed_sha256,
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
@@ -253,11 +255,9 @@ class MetadataRepository(Repository, ABC):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
-        force_path: Optional[str] = None,
-        DANGEROUS_filename_is_key: bool = False,
     ) -> taskmodule.TemplateInfo:
         if kind != taskmodule.LinkKind.InputMetadata:
-            return await super().template(job, task, kind, link_name, hostjob, force_path, DANGEROUS_filename_is_key)
+            return await super().template(job, task, kind, link_name, hostjob)
         info = await self.info(job)
         return taskmodule.TemplateInfo(info)
 
@@ -342,7 +342,6 @@ class MapRepository(MetadataRepository):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
-        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 
@@ -417,7 +416,6 @@ class FilterRepository(Repository):
         kind: taskmodule.LinkKind,
         link_name: str,
         hostjob: Optional[str] = None,
-        force_path: Optional[str] = None,
     ) -> taskmodule.TemplateInfo:
         raise TypeError("Not supported yet")
 

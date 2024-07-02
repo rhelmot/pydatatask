@@ -191,6 +191,7 @@ class Link:
     required_for_output: bool = False
     force_path: Optional[str] = None
     DANGEROUS_filename_is_key: Optional[bool] = False
+    content_keyed_sha256: Optional[bool] = False
 
 
 class Task(ABC):
@@ -432,6 +433,7 @@ class Task(ABC):
         force_upload_dir: Optional[str] = None,
         mkdir: bool = True,
         DANGEROUS_filename_is_key: bool = False,
+        content_keyed_sha256: bool = False,
     ) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
@@ -472,11 +474,21 @@ class Task(ABC):
                   $(shuf -i0-127 -n1)*0x100000000000000))
         }
         """
+        assert not (
+            DANGEROUS_filename_is_key and content_keyed_sha256
+        ), "DANGEROUS_filename_is_key and content_keyed_sha256 are mutually exclusive"
         if DANGEROUS_filename_is_key:
             idgen_function = """
             idgen() {
                 f="$1"
                 echo $(basename "$f")
+            }
+            """
+        elif content_keyed_sha256:
+            idgen_function = """
+            idgen() {
+                f="$1"
+                echo $(sha256sum "$f" | cut -d' ' -f1)
             }
             """
 
@@ -627,6 +639,8 @@ class Task(ABC):
         inhibits_output: Optional[bool] = None,
         required_for_output: Optional[bool] = None,
         force_path: Optional[str] = None,
+        DANGER_filename_is_key: Optional[bool] = None,
+        content_keyed_sha256: Optional[bool] = None,
     ):
         """Create a link between this task and a repository.
 
@@ -686,6 +700,8 @@ class Task(ABC):
             inhibits_output=inhibits_output,
             required_for_output=required_for_output,
             force_path=force_path,
+            DANGEROUS_filename_is_key=DANGER_filename_is_key,
+            content_keyed_sha256=content_keyed_sha256,
         )
 
     def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":
@@ -918,9 +934,7 @@ class Task(ABC):
 
             arg = self.instrument_arg(
                 orig_job,
-                await link.repo.template(
-                    subjob, self, link.kind, env_name, orig_job, link.force_path, link.DANGEROUS_filename_is_key
-                ),
+                await link.repo.template(subjob, self, link.kind, env_name, orig_job),
                 link.kind,
             )
             result[env_name] = arg.arg
@@ -941,8 +955,6 @@ class Task(ABC):
                             link.kind,
                             env_name2,
                             orig_job,
-                            link.force_path,
-                            link.DANGEROUS_filename_is_key,
                         ),
                         link.kind,
                     )
