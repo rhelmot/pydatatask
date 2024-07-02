@@ -407,4 +407,4 @@ def run_viz(pipeline):
 
     Starts the visualizer and runs the dash server.
     """
-    TaskVisualizer(pipeline).app.run_server(debug=True)
+    TaskVisualizer(pipeline).app.run_server(debug=True, host="0.0.0.0")
