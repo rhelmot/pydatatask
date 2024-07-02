@@ -280,7 +280,7 @@ def quota_constructor(thing: Any) -> Union[Quota, _MaxQuotaType]:
     if thing == "MAX":
         return MAX_QUOTA
     if thing.get("max", None):
-        return _MaxQuotaType(float(thing))
+        return _MaxQuotaType(float(thing['max']))
     return quota_constructor_inner(thing)
 
 
