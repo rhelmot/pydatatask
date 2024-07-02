@@ -2,6 +2,7 @@
 
 from typing import Any, Callable, Dict, Optional, Union
 
+from bson import Int64
 import motor.core
 import motor.motor_asyncio
 
@@ -59,10 +60,22 @@ class MongoMetadataRepository(MetadataRepository):
         result: Optional[Any] = await self.collection.find_one({"_id": job})  # type: ignore[func-returns-value]
         if result is None:
             result = {}
-        return result
+        return self._fix_bson(result)
 
     async def info_all(self) -> Dict[str, Any]:
-        return {entry["_id"]: entry async for entry in self.collection.find({})}
+        return {entry["_id"]: self._fix_bson(entry) async for entry in self.collection.find({})}
+
+    @classmethod
+    def _fix_bson(cls, thing):
+        if isinstance(thing, dict):
+            for k, v in thing.items():
+                thing[k] = cls._fix_bson(v)
+        elif isinstance(thing, list):
+            for i, v in enumerate(thing):
+                thing[i] = cls._fix_bson(v)
+        elif isinstance(thing, Int64):
+            return int(thing)
+        return thing
 
     @job_getter
     async def dump(self, job, data, /):
