@@ -651,7 +651,7 @@ class Task(ABC):
         inhibits_output: Optional[bool] = None,
         required_for_output: Optional[bool] = None,
         force_path: Optional[str] = None,
-        DANGER_filename_is_key: Optional[bool] = None,
+        DANGEROUS_filename_is_key: Optional[bool] = None,
         content_keyed_sha256: Optional[bool] = None,
     ):
         """Create a link between this task and a repository.

@@ -108,8 +108,8 @@ class LinkSpec:
     is_output: Optional[bool] = None
     is_status: Optional[bool] = None
     force_path: Optional[str] = None
-    DANGEROUS_filename_is_key = None
-    content_keyed_sha256 = None
+    DANGEROUS_filename_is_key: Optional[bool] = None
+    content_keyed_sha256: Optional[bool] = None
 
 
 @_dataclass_serial
