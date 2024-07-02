@@ -1410,15 +1410,16 @@ class ProcessTask(TemplateShellTask):
     @property
     def job_quota(self):
         if isinstance(self._job_quota, _MaxQuotaType):
-            r = copy.copy(self._max_quota or self.resource_limit)
+            r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
         if r.excess(self.resource_limit):
+            r = self.resource_limit * 0.9
             l.warning(
                 "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
                 self.name,
-                self.resource_limit,
+                r,
             )
             self._job_quota = r
         return r
@@ -1721,15 +1722,16 @@ class ExecutorTask(Task):
     @property
     def job_quota(self):
         if isinstance(self._job_quota, _MaxQuotaType):
-            r = copy.copy(self._max_quota or self.resource_limit)
+            r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
         if r.excess(self.resource_limit):
+            r = self.resource_limit * 0.9
             l.warning(
                 "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
                 self.name,
-                self.resource_limit,
+                r,
             )
             self._job_quota = r
         return r
@@ -2064,15 +2066,16 @@ class ContainerTask(TemplateShellTask):
     @property
     def job_quota(self):
         if isinstance(self._job_quota, _MaxQuotaType):
-            r = copy.copy(self._max_quota or self.resource_limit)
+            r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
         r.launches = 1
         if r.excess(self.resource_limit):
+            r = self.resource_limit * 0.9
             l.warning(
                 "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
                 self.name,
-                self.resource_limit,
+                r,
             )
             self._job_quota = r
         return r

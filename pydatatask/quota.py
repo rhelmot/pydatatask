@@ -68,8 +68,9 @@ class Quota:
     def __add__(self, other: Self):
         return type(self)(cpu=self.cpu + other.cpu, mem=self.mem + other.mem, launches=self.launches + other.launches)
 
-    def __mul__(self, other: int):
-        return type(self)(cpu=self.cpu * other, mem=self.mem * other, launches=self.launches * other)
+    def __mul__(self, other: Union[int, float, Decimal]):
+        other_d = Decimal(other)
+        return type(self)(cpu=self.cpu * other_d, mem=self.mem * other_d, launches=int(self.launches * other_d))
 
     def __sub__(self, other: Self):
         return self + other * -1
@@ -92,8 +93,8 @@ class Quota:
 LOCALHOST_QUOTA = Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)
 
 
-class _MaxQuotaType:
+class _MaxQuotaType(float):
     pass
 
 
-MAX_QUOTA = _MaxQuotaType()
+MAX_QUOTA = _MaxQuotaType(1.0)
