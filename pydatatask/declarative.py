@@ -279,7 +279,7 @@ quota_constructor_inner = make_constructor("quota", Quota.parse, {"cpu": str, "m
 def quota_constructor(thing: Any) -> Union[Quota, _MaxQuotaType]:
     if thing == "MAX":
         return MAX_QUOTA
-    if thing["max"]:
+    if thing.get("max", None):
         return _MaxQuotaType(float(thing))
     return quota_constructor_inner(thing)
 
