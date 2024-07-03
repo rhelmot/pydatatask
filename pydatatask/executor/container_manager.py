@@ -144,6 +144,7 @@ class DockerContainerManager(AbstractContainerManager):
         self._net = None
         self._host_path_overrides = host_path_overrides or {}
         self._host_path_overrides = {str(Path(x)).strip("/"): y for x, y in self._host_path_overrides.items()}
+        self._deleted_containers = set()
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -258,11 +259,12 @@ class DockerContainerManager(AbstractContainerManager):
         await cont.delete()
 
     async def update(self, task: str, timeout: Optional[timedelta] = None):
-        containers = await self.docker.containers.list(all=1)
-        infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
-        infos_and_names = [
-            (self._name_to_id(task, info["Name"]), info) for info in infos if not isinstance(info, BaseException)
+        containers = [x for x in await self.docker.containers.list(all=1) if x not in self._deleted_containers]
+        infos = [
+            {"Name": "not_your_business", "State": {"Status": "exception"}} if isinstance(x, BaseException) else x
+            for x in await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
         ]
+        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos]
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
@@ -285,21 +287,21 @@ class DockerContainerManager(AbstractContainerManager):
             and not (timeout and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout)
         }
         live_jobs = {job for job, _ in live_replicas}
-        await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out))
+        await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out), return_exceptions=True)
         results = await asyncio.gather(
             *(self._cleanup(container, info) for info, container, _ in dead),
             *(self._cleanup(container, info, True) for info, container, _ in timed_out),
         )
         final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for (_, _, (job, replica)), result in zip(chain(dead, timed_out), results):
-            if job not in live_jobs:
+            if job not in live_jobs and result is not None:
                 final[job][replica] = result
 
         return live_replicas, dict(final)
 
     async def _cleanup(
         self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
-    ) -> Tuple[Optional[bytes], Dict[str, Any]]:
+    ) -> Optional[Tuple[Optional[bytes], Dict[str, Any]]]:
         try:
             log = "".join(
                 line for line in await cast(Awaitable[List[str]], container.log(stdout=True, stderr=True))
@@ -309,8 +311,9 @@ class DockerContainerManager(AbstractContainerManager):
             log = None
         try:
             await container.delete()
+            self._deleted_containers.add(container.id)
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            return None
         info["timed_out"] = timed_out
         now = datetime.now(tz=timezone.utc)
         meta = {
