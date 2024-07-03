@@ -6,6 +6,7 @@ This is the only hammer you will ever need, if you are okay with that hammer kin
 from __future__ import annotations
 
 from typing import Dict, Tuple
+import logging
 import time
 import traceback
 
@@ -21,6 +22,8 @@ from pydatatask.utils import (
 
 from . import repository as repomodule
 from .pipeline import Pipeline
+
+l = logging.getLogger(__name__)
 
 
 class _DeferredResponse:
@@ -216,6 +219,10 @@ async def cat_fs_entry(item: repomodule.FilesystemRepository, job: str, stream: 
 
 async def inject_data(item: repomodule.Repository, job: str, stream: AReadStreamBase):
     """Ingest one job of a repository from a stream."""
+    if await item.contains(job):
+        l.warning(f"{item} already contains {job}")
+        return
+
     if isinstance(item, repomodule.BlobRepository):
         async with await item.open(job, "wb") as fp:
             await async_copyfile(stream, fp)
