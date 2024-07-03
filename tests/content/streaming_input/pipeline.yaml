@@ -41,7 +41,7 @@ tasks:
             for f in $(ls {{ input | shquote }}); do
               full={{input | shquote}}/$f
               touch {{ output.lock_dir | shquote}}/$f
-              echo "parent: $f" > {{ output.cokeyed_dirs.meta | shquote }}/$f
+              echo "parent: $f" > {{ output.cokeyed.meta | shquote }}/$f
               cat /tmp/hoo $full >{{ output | shquote }}/$f
               rm {{ output.lock_dir | shquote}}/$f
               if [ "$(cat $full)" = "done" ]; then

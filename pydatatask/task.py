@@ -478,6 +478,7 @@ class Task(ABC):
         dict_result["lock_dir"] = lock
         dict_result["uploaded_dir"] = scratch
         dict_result["cokeyed_dirs"] = cokeyed
+        dict_result["cokeyed"] = cokeyed
         # auto_values = self.links[link_name].auto_values is not None
         auto_cokey = self.links[link_name].auto_meta
         nonce = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
