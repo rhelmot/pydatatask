@@ -361,7 +361,7 @@ class Task(ABC):
         if self.links[link_name].content_keyed_sha256:
             result = f"UPLOAD_JOB=$(sha256sum {filename} | cut -d' ' -f1)\n"
         elif self.links[link_name].DANGEROUS_filename_is_key:
-            result = f"UPLOAD_JOB=$(basename {filename}\n"
+            result = f"UPLOAD_JOB=$(basename {filename})\n"
         else:
             result = f"UPLOAD_JOB={job}\n"
         result += self.host.mk_http_post(
