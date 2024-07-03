@@ -158,6 +158,14 @@ class TaskVisualizer:
     async def get_task_info(self, nodes):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
 
+        async def get_info_from_job(repo, job):
+            info = await repo.info(job) or {}
+            is_valid = info.get("success", False)
+            if not is_valid:
+                return False
+            else:
+                return True
+
         async def get_node_info(node):
             repo_entry_counts: Dict[Any, int] = {}
             for link in node.links:
@@ -166,12 +174,8 @@ class TaskVisualizer:
                     if link == "done":
                         if job not in self.exit_codes[node]:
                             is_valid = True
-                            for repo in node.success.footprint():
-                                info = await repo.info(job) or {}
-                                is_valid &= info.get("success", False)
-                                if not is_valid:
-                                    break
-
+                            success = await asyncio.gather(*[get_info_from_job(repo, job) for repo in node.success.footprint()])
+                            is_valid = all(success)
                             exit_code = 0 if is_valid else 1
                             if exit_code is not None:
                                 self.exit_codes[node][job] = exit_code
