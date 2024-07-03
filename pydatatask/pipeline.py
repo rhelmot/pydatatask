@@ -115,11 +115,11 @@ class _LaunchRecordC:
     @property
     def emoji(self):
         if self.reaped:
-            return "💀"
+            return "🌙"
         return {
             (False, False): "💤",
             (False, True): "☀️",
-            (True, False): "❌",
+            (True, False): "🤡",
             (True, True): "▶️ ",
         }[(self.prev_live, self.now_live)]
 
