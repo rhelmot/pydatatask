@@ -25,6 +25,7 @@ import asyncio
 import heapq
 import logging
 
+from typing_extensions import Self
 import networkx.algorithms.traversal.depth_first_search
 import networkx.classes.digraph
 
@@ -77,6 +78,53 @@ class _JobPrioritizer:
 class _SchedState:
     initial_jobs: List[Tuple[float, str, str]] = field(default_factory=list)
     replica_heap: List[_JobPrioritizer] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _LaunchRecordA:
+    task: str
+    job: str
+    replica: int
+
+
+@dataclass
+class _LaunchRecordB:
+    priority: float
+    prev_live: bool
+    now_live: bool
+    reaped: bool
+
+
+@dataclass
+class _LaunchRecordC:
+    task: str
+    job: str
+    replica: int
+    priority: float
+    prev_live: bool
+    now_live: bool
+    reaped: bool
+
+    @property
+    def _sort_tuple(self):
+        return (2 if self.replica != 0 else 1 if not self.prev_live else 0, -self.priority)
+
+    def __lt__(self, other: Self):
+        return self._sort_tuple < other._sort_tuple
+
+    @property
+    def emoji(self):
+        if self.reaped:
+            return "✅"
+        return {
+            (False, False): "💤",
+            (False, True): "🎉",
+            (True, False): "❌",
+            (True, True): "▶️ ",
+        }[(self.prev_live, self.now_live)]
+
+    def __str__(self):
+        return f"{self.emoji} {self.task}:{self.job}.{self.replica} {self.priority:+}"
 
 
 class Pipeline:
@@ -286,6 +334,7 @@ class Pipeline:
         task_list = list(self.tasks.values())
         # l.debug("Collecting launchable jobs")
         to_gather = await asyncio.gather(*(self._gather_ready_jobs(task) for task in self.tasks.values()))
+        entries = {}
 
         by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
         for job_list, task in zip(to_gather, task_list):
@@ -293,9 +342,25 @@ class Pipeline:
                 prio = _JobPrioritizer(self.priority, task, job)
                 sched = by_manager[task.resource_limit]
                 sched.initial_jobs.append((prio.peek(), task.name, job))
+                entries[_LaunchRecordA(task.name, job, 0)] = _LaunchRecordB(prio.peek(), False, False, False)
                 prio.advance()
                 if task.replicable:
                     heapq.heappush(sched.replica_heap, prio)
+
+        entries.update(
+            {
+                _LaunchRecordA(task, job, 0): _LaunchRecordB(self.priority(task, job, 0), True, False, True)
+                for task, tinfo in info.items()
+                for job in tinfo[1]
+            }
+        )
+        entries.update(
+            {
+                _LaunchRecordA(task, job, replica): _LaunchRecordB(self.priority(task, job, replica), True, True, False)
+                for task, tinfo in info.items()
+                for job, replica in tinfo[0]
+            }
+        )
 
         if all(not sched.initial_jobs for sched in by_manager.values()):
             self.cache_flush()
@@ -324,7 +389,7 @@ class Pipeline:
 
             sched.initial_jobs.sort(reverse=True)
             excess = None
-            for _, task, job in sched.initial_jobs:
+            for prio, task, job in sched.initial_jobs:
                 if (task, job, 0) in base_already:
                     continue
                 alloc = self.tasks[task].job_quota
@@ -341,6 +406,7 @@ class Pipeline:
                     break
                 used += alloc
                 await queue.put((task, job, 0, False))
+                entries[_LaunchRecordA(task, job, 0)] = _LaunchRecordB(prio, False, True, False)
             else:
                 # schedule replicas
                 while sched.replica_heap:
@@ -354,6 +420,7 @@ class Pipeline:
                         tup = (next_guy.task.name, next_guy.job, next_guy.replica)
                         if tup not in to_kill:
                             await queue.put((*tup, False))
+                            entries[_LaunchRecordA(*tup)] = _LaunchRecordB(next_guy.peek(), False, True, False)
                         else:
                             to_kill.remove(tup)
                         next_guy.advance()
@@ -361,6 +428,9 @@ class Pipeline:
             # kill!!
             for task, job, replica in to_kill:
                 await queue.put((task, job, replica, True))
+                entries[_LaunchRecordA(task, job, replica)] = _LaunchRecordB(
+                    self.priority(task, job, replica), True, False, False
+                )
             # terminate
             for _ in range(N_WORKERS):
                 await queue.put(None)
@@ -395,6 +465,15 @@ class Pipeline:
         await asyncio.gather(
             *(leader(manager, sched) for manager, sched in by_manager.items()), *(worker() for _ in range(N_WORKERS))
         )
+
+        entries_list = [
+            _LaunchRecordC(a.task, a.job, a.replica, b.priority, b.prev_live, b.now_live, b.reaped)
+            for a, b in entries.items()
+        ]
+        entries_list.sort()
+        l.debug("Scheduling status:")
+        for entry in entries_list:
+            l.debug("%s", entry)
 
         self.cache_flush()
         return True
