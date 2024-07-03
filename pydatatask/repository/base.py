@@ -181,11 +181,26 @@ class Repository(ABC):
             preamble = (
                 task.mk_mkdir(filepath)
                 if isinstance(task.links[link_name].repo, repomodule.FilesystemRepository)
-                else None
+                else ""
             )
-            return taskmodule.TemplateInfo(
-                filepath, epilogue=task.mk_repo_put(filepath, link_name, job), preamble=preamble
-            )
+            put = task.mk_repo_put(filepath, link_name, job)
+
+            if content_keyed_sha256:
+                cokey_dirs = {}
+                for k in task.links[link_name].cokeyed:
+                    cofilepath = task.mktemp(f"output-{link_name}-{k}-{job}")
+                    cokey_dirs[k] = cofilepath
+                    preamble += (
+                        task.mk_mkdir(cofilepath)
+                        if isinstance(task.links[link_name].cokeyed[k], repomodule.FilesystemRepository)
+                        else ""
+                    )
+                    put += task.mk_repo_put_cokey(cofilepath, link_name, k, "$UPLOAD_JOB", hostjob=job)
+                result = StrDict(filepath, {"cokeyed": cokey_dirs})
+            else:
+                result = filepath
+            return taskmodule.TemplateInfo(result, epilogue=put, preamble=preamble)
+
         if kind == taskmodule.LinkKind.StreamingOutputFilepath:
             if force_path is None:
                 filepath = task.mktemp(f"streaming-output-{link_name}-{job}")

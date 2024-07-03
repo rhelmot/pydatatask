@@ -190,8 +190,8 @@ class Link:
     inhibits_output: bool
     required_for_success: bool
     force_path: Optional[str]
-    DANGEROUS_filename_is_key: Optional[bool]
-    content_keyed_sha256: Optional[bool]
+    DANGEROUS_filename_is_key: bool
+    content_keyed_sha256: bool
 
 
 class Task(ABC):
@@ -665,8 +665,8 @@ class Task(ABC):
         inhibits_output: Optional[bool] = None,
         required_for_success: Optional[bool] = None,
         force_path: Optional[str] = None,
-        DANGEROUS_filename_is_key: Optional[bool] = None,
-        content_keyed_sha256: Optional[bool] = None,
+        DANGEROUS_filename_is_key: bool = False,
+        content_keyed_sha256: bool = False,
     ):
         """Create a link between this task and a repository.
 
