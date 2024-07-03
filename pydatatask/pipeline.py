@@ -115,16 +115,16 @@ class _LaunchRecordC:
     @property
     def emoji(self):
         if self.reaped:
-            return "✅"
+            return "💀"
         return {
             (False, False): "💤",
-            (False, True): "🎉",
+            (False, True): "☀️",
             (True, False): "❌",
             (True, True): "▶️ ",
         }[(self.prev_live, self.now_live)]
 
     def __str__(self):
-        return f"{self.emoji} {self.task}:{self.job}.{self.replica} {self.priority:+}"
+        return f"{self.emoji} {self.task}:{self.job}#{self.replica} {self.priority:+}"
 
 
 class Pipeline:
