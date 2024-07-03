@@ -335,6 +335,9 @@ class MapRepository(MetadataRepository):
     def footprint(self):
         yield from self.base.footprint()
 
+    def cache_flush(self):
+        self.base.cache_flush()
+
     def __getstate__(self):
         return (self.base, self.func, self.filter, self.allow_deletes)
 
@@ -411,6 +414,9 @@ class FilterRepository(Repository):
 
     def footprint(self):
         yield from self.base.footprint()
+
+    def cache_flush(self):
+        self.base.cache_flush()
 
     async def contains(self, item, /):
         if self.filter is None or await self.filter(item):
@@ -609,6 +615,9 @@ class FunctionCallMetadataRepository(MetadataRepository):
     def footprint(self):
         yield from self._domain.footprint()
 
+    def cache_flush(self):
+        self._domain.cache_flush()
+
     def __getstate__(self):
         return (self._info, self._domain)
 
@@ -663,6 +672,10 @@ class RelatedItemRepository(Repository):
     def footprint(self):
         yield from self.base_repository.footprint()
         yield from self.translator_repository.footprint()
+
+    def cache_flush(self):
+        self.base_repository.cache_flush()
+        self.translator_repository.cache_flush()
 
     def __getstate__(self):
         return (self.base_repository, self.translator_repository, self.allow_deletes, self.prefetch_lookup_setting)
@@ -783,6 +796,10 @@ class AggregateAndRepository(Repository):
         for child in self.children.values():
             yield from child.footprint()
 
+    def cache_flush(self):
+        for child in self.children.values():
+            child.cache_flush()
+
     def __getstate__(self):
         return (self.children,)
 
@@ -816,6 +833,10 @@ class AggregateOrRepository(Repository):
     def footprint(self):
         for child in self.children.values():
             yield from child.footprint()
+
+    def cache_flush(self):
+        for child in self.children.values():
+            child.cache_flush()
 
     def __getstate__(self):
         return (self.children,)
@@ -853,6 +874,10 @@ class BlockingRepository(Repository):
     def footprint(self):
         yield from self.source.footprint()
         yield from self.unless.footprint()
+
+    def cache_flush(self):
+        self.source.cache_flush()
+        self.unless.cache_flush()
 
     def __getstate__(self):
         return (self.source, self.unless, self.enumerate_unless)
@@ -892,6 +917,9 @@ class YamlMetadataRepository(MetadataRepository, ABC):
     # better backup
     def footprint(self):
         yield self
+
+    def cache_flush(self):
+        self.blob.cache_flush()
 
     def __getstate__(self):
         return (self.blob,)
@@ -1110,6 +1138,13 @@ class CacheInProcessMetadataRepository(MetadataRepository):
     def footprint(self):
         yield from self.base.footprint()
 
+    def cache_flush(self):
+        self.base.cache_flush()
+        self._cache.clear()
+        self._negative_cache.clear()
+        self._complete_keys = False
+        self._complete_values = False
+
     async def info(self, job: str, /):
         # EXPERIMENT
         # if not self._complete_values:
@@ -1227,6 +1262,9 @@ class CompressedBlobRepository(BlobRepository):
 
     def footprint(self):
         yield self
+
+    def cache_flush(self):
+        self.inner.cache_flush()
 
     async def validate(self):
         await self.inner.validate()

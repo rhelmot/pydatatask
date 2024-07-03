@@ -431,6 +431,10 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         # This COULD be split out into a more base level footprint. however this produces a more legible backup result
         yield self
 
+    def cache_flush(self):
+        self.blobs.cache_flush()
+        self.meta.cache_flush()
+
     def __getstate__(self):
         return (self.blobs, self.meta, self.pathsep)
 
@@ -627,6 +631,9 @@ class TarfileFilesystemRepository(FilesystemRepository):
     def footprint(self):
         # This COULD be split out into a more base level footprint. however this produces a more legible backup result
         yield self
+
+    def cache_flush(self):
+        self.inner.cache_flush()
 
     def __getstate__(self):
         return (self.inner,)

@@ -42,6 +42,8 @@ class QueryRepository(Repository):
 
     def cache_flush(self):
         self._cached = None
+        for repo in self.query.repos.values():
+            repo.cache_flush()
 
     async def _resolve(self) -> Repository:
         if self._cached is None:
