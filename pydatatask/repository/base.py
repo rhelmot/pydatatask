@@ -688,6 +688,7 @@ class RelatedItemRepository(Repository):
     def cache_flush(self):
         self.base_repository.cache_flush()
         self.translator_repository.cache_flush()
+        self.prefetch_lookup = None
 
     def __getstate__(self):
         return (self.base_repository, self.translator_repository, self.allow_deletes, self.prefetch_lookup_setting)
