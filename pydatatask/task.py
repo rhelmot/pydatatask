@@ -260,6 +260,8 @@ class Task(ABC):
         self._related_cache.clear()
         for link in self.links.values():
             link.repo.cache_flush()
+        if self._ready is not None:
+            self._ready.cache_flush()
 
     @property
     @abstractmethod
@@ -784,6 +786,10 @@ class Task(ABC):
         else:
             result = repomodule.RelatedItemRepository(link.repo, mapped, prefetch_lookup=prefetch_lookup)
 
+        if isinstance(result, repomodule.MetadataRepository) and not isinstance(
+            result, repomodule.CacheInProcessMetadataRepository
+        ):
+            result = repomodule.CacheInProcessMetadataRepository(result)
         self._related_cache[linkname] = result
         return result
 
