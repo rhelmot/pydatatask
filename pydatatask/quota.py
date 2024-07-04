@@ -27,12 +27,11 @@ __all__ = ("QuotaType", "Quota", "parse_quantity", "_MaxQuotaType", "MAX_QUOTA")
 class QuotaType(Enum):
     """An enum class indicating a type of resource.
 
-    Presently can be CPU, MEM, or RATE.
+    Presently can be CPU or MEM.
     """
 
     CPU = auto()
     MEM = auto()
-    RATE = auto()
 
 
 @dataclass(eq=False)
@@ -43,34 +42,30 @@ class Quota:
 
     .. code:: python
 
-        r = pydatatask.Quota.parse(1, 1, 100)
-        r += pydatatask.Quota.parse(2, 3, 0)
-        r -= pydatatask.Quota.parse(1, 1, 0)
-        assert r == pydatatask.Quota.parse(2, 3, 100)
+        r = pydatatask.Quota.parse(1, 1)
+        r += pydatatask.Quota.parse(2, 3)
+        r -= pydatatask.Quota.parse(1, 1)
+        assert r == pydatatask.Quota.parse(2, 3)
     """
 
     cpu: Decimal = field(default=Decimal(0))
     mem: Decimal = field(default=Decimal(0))
-    launches: int = 1
 
     @classmethod
     def parse(
         cls,
         cpu: Union[str, float, int, Decimal],
         mem: Union[str, float, int, Decimal],
-        launches: Union[str, float, int, Decimal, None] = None,
     ) -> Self:
-        """Construct a :class:`Quota` instance by parsing the given quantities of CPU, memory, and launches."""
-        if launches is None:
-            launches = 999999999
-        return cls(cpu=parse_quantity(cpu), mem=parse_quantity(mem), launches=int(launches))
+        """Construct a :class:`Quota` instance by parsing the given quantities of CPU and memory."""
+        return cls(cpu=parse_quantity(cpu), mem=parse_quantity(mem))
 
     def __add__(self, other: Self):
-        return type(self)(cpu=self.cpu + other.cpu, mem=self.mem + other.mem, launches=self.launches + other.launches)
+        return type(self)(cpu=self.cpu + other.cpu, mem=self.mem + other.mem)
 
     def __mul__(self, other: Union[int, float, Decimal]):
         other_d = Decimal(other)
-        return type(self)(cpu=self.cpu * other_d, mem=self.mem * other_d, launches=int(self.launches * other_d))
+        return type(self)(cpu=self.cpu * other_d, mem=self.mem * other_d)
 
     def __sub__(self, other: Self):
         return self + other * -1
@@ -84,13 +79,11 @@ class Quota:
             return QuotaType.CPU
         elif self.mem > limit.mem:
             return QuotaType.MEM
-        elif self.launches > limit.launches:
-            return QuotaType.RATE
         else:
             return None
 
 
-LOCALHOST_QUOTA = Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total, launches=1000)
+LOCALHOST_QUOTA = Quota.parse(cpu=psutil.cpu_count(), mem=psutil.virtual_memory().total)
 
 
 class _MaxQuotaType(float):

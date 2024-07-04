@@ -7,9 +7,6 @@
     },
     "mem": {
       "type": "string"
-    },
-    "launches": {
-      "type": "string"
     }
   },
   "additionalProperties": false

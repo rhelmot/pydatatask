@@ -20,7 +20,7 @@ class TestScaling(unittest.IsolatedAsyncioTestCase):
         staging = PipelineStaging(test_root / "content" / "replication" / "pipeline.yaml")
         allocated = staging.allocate(
             TempAllocator().allocate,
-            Dispatcher("TempLinux", {"app": "test_streaming", "quota": {"cpu": 8, "mem": 1024**4, "launches": 9999}}),
+            Dispatcher("TempLinux", {"app": "test_streaming", "quota": {"cpu": 8, "mem": 1024**4}}),
         )
         pipeline = allocated.instantiate()
 

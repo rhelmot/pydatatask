@@ -1473,7 +1473,6 @@ class ProcessTask(TemplateShellTask):
             r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
-        r.launches = 1
         if r.excess(self.resource_limit):
             r = self.resource_limit * 0.9
             l.warning(
@@ -1790,7 +1789,6 @@ class ExecutorTask(Task):
             r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
-        r.launches = 1
         if r.excess(self.resource_limit):
             r = self.resource_limit * 0.9
             l.warning(
@@ -2134,7 +2132,6 @@ class ContainerTask(TemplateShellTask):
             r = (self._max_quota or self.resource_limit) * self._job_quota
         else:
             r = copy.copy(self._job_quota)
-        r.launches = 1
         if r.excess(self.resource_limit):
             r = self.resource_limit * 0.9
             l.warning(

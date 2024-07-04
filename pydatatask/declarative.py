@@ -273,7 +273,7 @@ def _build_ssh_connection(
     return ssh
 
 
-quota_constructor_inner = make_constructor("quota", Quota.parse, {"cpu": str, "mem": str, "launches": str})
+quota_constructor_inner = make_constructor("quota", Quota.parse, {"cpu": str, "mem": str})
 
 
 def quota_constructor(thing: Any) -> Union[Quota, _MaxQuotaType]:

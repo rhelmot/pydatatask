@@ -186,8 +186,8 @@ def _subargparse(url: str):
 
 
 def parse_quota(thing: str):
-    cpu, mem, launches = thing.split("/")
-    return {"cpu": cpu, "mem": mem, "launches": launches}
+    cpu, mem = thing.split("/")
+    return {"cpu": cpu, "mem": mem}
 
 
 def parse_host(thing: str):
