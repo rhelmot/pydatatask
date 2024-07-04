@@ -101,39 +101,40 @@ def main(
     """
     logging.basicConfig()
     parser = argparse.ArgumentParser()
+    parser.add_argument("--verbose", action="store_true", help="Enable more verbose logging")
+    parser.add_argument(
+        "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
+    )
+    parser.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
+    parser.add_argument(
+        "--debug-trace",
+        action="store_true",
+        help="Make every worker script print out its execution trace for debugging",
+    )
+    parser.add_argument(
+        "--require-success",
+        action="store_true",
+        help="Raise an error when workers fail instead of marking them as completed-but-failed",
+    )
+    parser.add_argument(
+        "--global-template-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
+    )
+    parser.add_argument(
+        "--global-script-env",
+        action="append",
+        default=[],
+        help="Add a value (KEY=VALUE) to the shell environment for the entire pipeline",
+    )
+
     subparsers = parser.add_subparsers(dest=argparse.SUPPRESS, required=True)
 
     parser_run = subparsers.add_parser("run", help="Run update in a loop until everything is quiet")
     parser_run.add_argument("--once", action="store_true", help="Run only a single loop of updates")
     parser_run.add_argument("--forever", action="store_true", help="Run forever")
     parser_run.add_argument("--launch-once", action="store_true", help="Only evaluates tasks-to-launch once")
-    parser_run.add_argument("--verbose", action="store_true", help="Enable more verbose logging")
-    parser_run.add_argument(
-        "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
-    )
-    parser_run.add_argument(
-        "--require-success",
-        action="store_true",
-        help="Raise an error when workers fail instead of marking them as completed-but-failed",
-    )
-    parser_run.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
-    parser_run.add_argument(
-        "--debug-trace",
-        action="store_true",
-        help="Make every worker script print out its execution trace for debugging",
-    )
-    parser_run.add_argument(
-        "--global-template-env",
-        action="append",
-        default=[],
-        help="Add a value (KEY=VALUE) to the template environment for the entire pipeline",
-    )
-    parser_run.add_argument(
-        "--global-script-env",
-        action="append",
-        default=[],
-        help="Add a value (KEY=VALUE) to the shell environment for the entire pipeline",
-    )
     parser_run.set_defaults(func=run)
     parser_run.set_defaults(timeout=None)
 
@@ -295,6 +296,16 @@ def main(
     args = parser.parse_args()
     ns = vars(args)
     func = ns.pop("func")
+    pipeline.settings(
+        fail_fast=ns.pop("fail_fast"),
+        task_allowlist=ns.pop("tasks") or None,
+        debug_trace=ns.pop("debug_trace"),
+        require_success=ns.pop("require_success"),
+    )
+    pipeline.global_template_env.update(dict([line.split("=", 1) for line in ns.pop("global_template_env") or []]))
+    pipeline.global_script_env.update(dict([line.split("=", 1) for line in ns.pop("global_script_env") or []]))
+    if ns.pop("verbose"):
+        logging.getLogger("pydatatask").setLevel("DEBUG")
     result_or_coro = func(pipeline, **ns)
 
     uvloop.install()
@@ -427,24 +438,8 @@ async def run(
     forever: bool,
     launch_once: bool,
     timeout: Optional[float],
-    verbose: bool = False,
-    fail_fast: bool = False,
-    require_success: bool = False,
-    tasks: Optional[List[str]] = None,
-    debug_trace: bool = False,
     once: bool = False,
-    global_template_env: Optional[List[str]] = None,
-    global_script_env: Optional[List[str]] = None,
 ):
-    if tasks == []:
-        tasks = None
-    pipeline.settings(
-        fail_fast=fail_fast, task_allowlist=tasks, debug_trace=debug_trace, require_success=require_success
-    )
-    pipeline.global_template_env.update(dict([line.split("=", 1) for line in global_template_env or []]))
-    pipeline.global_script_env.update(dict([line.split("=", 1) for line in global_script_env or []]))
-    if verbose:
-        logging.getLogger("pydatatask").setLevel("DEBUG")
     start = asyncio.get_running_loop().time()
     do_launch = True
     while await pipeline.update(do_launch) or forever:
