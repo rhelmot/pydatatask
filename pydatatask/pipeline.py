@@ -636,6 +636,8 @@ class Pipeline:
                         v,
                         follow=follow,
                         rfollow=rfollow,
+                        follow_footprint=udata["follow_footprint"] + vdata["follow_footprint"],
+                        rfollow_footprint=vdata["rfollow_footprint"] + udata["rfollow_footprint"],
                         repo=repo,
                         ulink=udata["link_name"],
                         vlink=vdata["link_name"],
