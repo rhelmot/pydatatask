@@ -316,6 +316,7 @@ def make_annotated_constructor(
     schema["annotations"] = lambda x: x
     schema["compress_backup"] = lambda x: x
     schema["schema"] = lambda x: x
+    schema["max_concurrent_jobs"] = lambda x: x
     return make_constructor(name, inner_constructor, schema)
 
 
