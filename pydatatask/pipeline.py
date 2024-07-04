@@ -19,7 +19,7 @@ from typing import (
 )
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import asyncio
 import heapq
@@ -382,6 +382,11 @@ class Pipeline:
                 Quota.parse(0, 0),
             )
             live_jobs = {taskname: {job for job, _ in live} for taskname, (live, _) in info.items()}
+            now = datetime.now(tz=timezone.utc)
+            last_period = {
+                taskname: sum(1 for _, time in live.items() if time + self.tasks[taskname].max_spawn_jobs_period > now)
+                for taskname, (live, _) in info.items()
+            }
             base_already = {
                 (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica == 0
             }
@@ -411,7 +416,18 @@ class Pipeline:
                         used,
                     )
                     break
+                if last_period[task] >= self.tasks[task].max_spawn_jobs:
+                    l.debug(
+                        "Rate limit launching %s:%s: %d/%d",
+                        task,
+                        job,
+                        last_period[task],
+                        self.tasks[task].max_spawn_jobs,
+                    )
+                    continue
+                last_period[task] += 1
                 used += alloc
+                live_jobs[task].add(job)
                 await queue.put((task, job, 0, False))
                 entries[_LaunchRecordA(task, job, 0)] = _LaunchRecordB(prio, False, True, False)
             else:
@@ -420,9 +436,19 @@ class Pipeline:
                     next_guy = sched.replica_heap[0]
                     alloc = self.tasks[next_guy.task.name].job_quota
                     excess = (used + alloc).excess(quota)
-                    if excess is not None:
+                    mcj = self.tasks[next_guy.task.name].max_concurrent_jobs
+                    if (
+                        excess is not None
+                        or last_period[next_guy.task.name] >= self.tasks[next_guy.task.name].max_spawn_jobs
+                        or (
+                            next_guy.job not in live_jobs[next_guy.task.name]
+                            and mcj is not None
+                            and len(live_jobs[next_guy.task.name]) > mcj
+                        )
+                    ):
                         heapq.heappop(sched.replica_heap)
                     else:
+                        last_period[next_guy.task.name] += 1
                         used += alloc
                         tup = (next_guy.task.name, next_guy.job, next_guy.replica)
                         if tup not in to_kill:

@@ -140,6 +140,8 @@ class TaskSpec:
     priority_addend: Optional[int] = None
     priority: float = 0.0
     max_concurrent_jobs: Optional[int] = None
+    max_spawn_jobs: int = 100
+    max_spawn_jobs_period: Dict[str, Union[str, int]] = field(default_factory=lambda: {"minutes": 1})
 
 
 @_dataclass_serial

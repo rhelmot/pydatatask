@@ -236,6 +236,8 @@ class Task(ABC):
         )
         self._max_quota: Optional[Quota] = None
         self.max_concurrent_jobs: Optional[int] = None
+        self.max_spawn_jobs = 100
+        self.max_spawn_jobs_period = timedelta(minutes=1)
 
         self.link(
             "done",

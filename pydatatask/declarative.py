@@ -302,6 +302,8 @@ def make_annotated_constructor(
         compress = kwargs.pop("compress_backup", False)
         schema = kwargs.pop("schema", None)
         max_concurrent_jobs = kwargs.pop("max_concurrent_jobs", None)
+        max_spawn_jobs = kwargs.pop("max_spawn_jobs", None)
+        max_spawn_jobs_period = kwargs.pop("max_spawn_jobs_period", None)
         result = constructor(**kwargs)
         result.annotations.update(annotations)  # type: ignore
         # sketchy...
@@ -311,12 +313,18 @@ def make_annotated_constructor(
             result.schema = schema  # type: ignore
         if max_concurrent_jobs:
             result.max_concurrent_jobs = max_concurrent_jobs  # type: ignore
+        if max_spawn_jobs:
+            result.max_spawn_jobs = max_spawn_jobs  # type: ignore
+        if max_spawn_jobs_period:
+            result.max_spawn_jobs_period = max_spawn_jobs_period  # type: ignore
         return result
 
     schema["annotations"] = lambda x: x
     schema["compress_backup"] = lambda x: x
     schema["schema"] = lambda x: x
     schema["max_concurrent_jobs"] = lambda x: x
+    schema["max_spawn_jobs"] = lambda x: x
+    schema["max_spawn_jobs_period"] = timedelta_constructor
     return make_constructor(name, inner_constructor, schema)
 
 
