@@ -607,6 +607,7 @@ class Task(ABC):
         return templated_preamble, {
             "main_dir": filepath,
             "lock_dir": lock,
+            "download_file": download,
         }
 
     def _make_ready(self):
