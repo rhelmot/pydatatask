@@ -269,7 +269,7 @@ class Pipeline:
                     link_attrs["required_for_start"] = attrs["vlink"]
                 if link_attrs:
                     v.link(
-                        f"{u.name}_{name}",
+                        f"INHIBITION_{u.name}_{name}",
                         link.repo,
                         None,
                         self._make_single_func(attrs["rfollow"]),
