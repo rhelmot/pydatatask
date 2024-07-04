@@ -118,9 +118,9 @@ class _LaunchRecordC:
             return "🌙"
         return {
             (False, False): "💤",
-            (False, True): "☀️",
+            (False, True): "🌅",
             (True, False): "🤡",
-            (True, True): "▶️ ",
+            (True, True): "☀️ ",
         }[(self.prev_live, self.now_live)]
 
     def __str__(self):
@@ -381,6 +381,7 @@ class Pipeline:
                 ),
                 Quota.parse(0, 0, 0),
             )
+            live_jobs = {taskname: {job for job, _ in live} for taskname, (live, _) in info.items()}
             base_already = {
                 (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica == 0
             }
@@ -393,6 +394,11 @@ class Pipeline:
             for prio, task, job in sched.initial_jobs:
                 if (task, job, 0) in base_already:
                     continue
+                if job not in live_jobs[task]:
+                    mcj = self.tasks[task].max_concurrent_jobs
+                    if mcj is not None and len(live_jobs[task]) >= mcj:
+                        l.debug("Too many concurrent jobs (%d) to launch %s:%s ", mcj, task, job)
+                        continue
                 alloc = self.tasks[task].job_quota
                 excess = (used + alloc).excess(quota)
                 if excess is not None:

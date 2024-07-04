@@ -301,6 +301,7 @@ def make_annotated_constructor(
         annotations = kwargs.pop("annotations", {})
         compress = kwargs.pop("compress_backup", False)
         schema = kwargs.pop("schema", None)
+        max_concurrent_jobs = kwargs.pop("max_concurrent_jobs", None)
         result = constructor(**kwargs)
         result.annotations.update(annotations)  # type: ignore
         # sketchy...
@@ -308,6 +309,8 @@ def make_annotated_constructor(
             result.compress_backup = compress  # type: ignore
         if schema:
             result.schema = schema  # type: ignore
+        if max_concurrent_jobs:
+            result.max_concurrent_jobs = max_concurrent_jobs  # type: ignore
         return result
 
     schema["annotations"] = lambda x: x

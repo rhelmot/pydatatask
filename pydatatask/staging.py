@@ -139,6 +139,7 @@ class TaskSpec:
     priority_factor: Optional[float] = None
     priority_addend: Optional[int] = None
     priority: float = 0.0
+    max_concurrent_jobs: Optional[int] = None
 
 
 @_dataclass_serial

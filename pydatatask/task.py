@@ -235,6 +235,7 @@ class Task(ABC):
             "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
         self._max_quota: Optional[Quota] = None
+        self.max_concurrent_jobs: Optional[int] = None
 
         self.link(
             "done",
