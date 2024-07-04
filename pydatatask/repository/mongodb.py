@@ -60,14 +60,16 @@ class MongoMetadataRepository(MetadataRepository):
         result: Optional[Any] = await self.collection.find_one({"_id": job})  # type: ignore[func-returns-value]
         if result is None:
             result = {}
-        return self._fix_bson(result)
+        return self._fix_bson(result, root=True)
 
     async def info_all(self) -> Dict[str, Any]:
-        return {entry["_id"]: self._fix_bson(entry) async for entry in self.collection.find({})}
+        return {entry["_id"]: self._fix_bson(entry, root=True) async for entry in self.collection.find({})}
 
     @classmethod
-    def _fix_bson(cls, thing):
+    def _fix_bson(cls, thing, root=False):
         if isinstance(thing, dict):
+            if root:
+                thing.pop("_id")
             for k, v in thing.items():
                 thing[k] = cls._fix_bson(v)
         elif isinstance(thing, list):
