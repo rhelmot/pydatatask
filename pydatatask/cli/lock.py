@@ -29,7 +29,7 @@ from pydatatask.executor.pod_manager import VolumeSpec
 from pydatatask.executor.proc_manager import LocalLinuxManager
 from pydatatask.host import Host, HostOS
 from pydatatask.pipeline import Pipeline
-from pydatatask.quota import LOCALHOST_QUOTA, Quota
+from pydatatask.quota import LOCALHOST_QUOTA
 from pydatatask.session import Session
 from pydatatask.staging import Dispatcher, PipelineStaging, RepoClassSpec, find_config
 
