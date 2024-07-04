@@ -257,6 +257,11 @@ def main(
 
         parser_backup = subparsers.add_parser("backup", help="Copy contents of repositories to a given folder")
         parser_backup.add_argument("--all", dest="all_repos", action="store_true", help="Backup all repositories")
+        parser_backup.add_argument(
+            "--shallow",
+            action="store_true",
+            help="Back up in a way that disregards being able to restore complex repositories",
+        )
         parser_backup.add_argument("backup_dir", help="The directory to backup to")
         parser_backup.add_argument("repos", nargs="*", help="The repositories to back up")
         parser_backup.set_defaults(func=action_backup)
@@ -679,7 +684,9 @@ async def launch(
         return 1
 
 
-async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False):
+async def action_backup(
+    pipeline: Pipeline, backup_dir: str, repos: List[str], all_repos: bool = False, shallow: bool = False
+):
     backup_base = Path(backup_dir)
     if all_repos:
         if repos:
@@ -698,14 +705,15 @@ async def action_backup(pipeline: Pipeline, backup_dir: str, repos: List[str], a
 
     # generate special names to unambiguously refer to repositories with no direct name
     # these names are only valid within backup and restore, for now
-    for name, repo in list(new_repos.items()):
-        footprint = list(repo.footprint())
-        if len(footprint) == 1 and footprint[0] is repo:
-            continue
-        for i, footprint_repo in enumerate(footprint):
-            footprint_name = f"{name}.__footprint.{i}"
-            new_repos[footprint_name] = footprint_repo
-        new_repos.pop(name)
+    if not shallow:
+        for name, repo in list(new_repos.items()):
+            footprint = list(repo.footprint())
+            if len(footprint) == 1 and footprint[0] is repo:
+                continue
+            for i, footprint_repo in enumerate(footprint):
+                footprint_name = f"{name}.__footprint.{i}"
+                new_repos[footprint_name] = footprint_repo
+            new_repos.pop(name)
 
     jobs = []
     canonical: Dict[repomodule.Repository, str] = {}
