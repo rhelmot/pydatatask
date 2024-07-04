@@ -341,7 +341,9 @@ class Task(ABC):
             result += self.host.mk_unzip(filename, payload_filename)
         return result
 
-    def mk_repo_put(self, filename: str, link_name: str, job: str, hostjob: Optional[str] = None) -> Any:
+    def mk_repo_put(
+        self, filename: str, link_name: str, job: str, hostjob: Optional[str] = None, bypass_dangerous: bool = False
+    ) -> Any:
         """Generate logic to perform an repository insert for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
@@ -360,7 +362,7 @@ class Task(ABC):
         ), "content_keyed_sha256 and DANGEROUS_filename_is_key are mutually exclusive"
         if self.links[link_name].content_keyed_sha256:
             result = f"UPLOAD_JOB=$(sha256sum {filename} | cut -d' ' -f1)\n"
-        elif self.links[link_name].DANGEROUS_filename_is_key:
+        elif self.links[link_name].DANGEROUS_filename_is_key and not bypass_dangerous:
             result = f"UPLOAD_JOB=$(basename {filename})\n"
         else:
             result = f"UPLOAD_JOB={job}\n"
@@ -540,7 +542,7 @@ class Task(ABC):
               if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ] && [ "$(($(date +%s) - $(stat -c %Y "$f")))" -ge 5 ]; then
                 ID=$(idgen "$f")
                 ln -sf "$PWD/$f" {upload}
-                {self.mk_repo_put(upload, link_name, "$ID", hostjob)}
+                {self.mk_repo_put(upload, link_name, "$ID", hostjob, bypass_dangerous=True)}
                 rm {upload}
                 {'; '.join(
                   f'{prep_upload(cokey, cokeydir)}'
