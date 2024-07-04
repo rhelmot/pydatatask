@@ -31,7 +31,7 @@ from concurrent.futures import FIRST_EXCEPTION
 from concurrent.futures import Executor as FuturesExecutor
 from concurrent.futures import Future as ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from pathlib import Path
@@ -40,6 +40,7 @@ import copy
 import inspect
 import json
 import logging
+import math
 import os
 import random
 import shlex
@@ -1096,9 +1097,32 @@ class TemplateShellTask(Task):
     ) -> Tuple[Dict[str, Any], List[Any], List[Any]]:
         env, preamble, epilogue = await super().build_template_env(orig_job, replica, env_src)
         NEWLINE = "\n"
+        shutdown_script = self.mktemp("shutdown_script")
+        shutting_down = self.mktemp("shutting_down")
+        preamble.insert(
+            0,
+            f"""
+        export SHUTDOWN_SCRIPT={shutdown_script}
+        export SHUTTING_DOWN={shutting_down}
+        echo "export IN_SHUTDOWN_SCRIPT=1" >$SHUTDOWN_SCRIPT
+        touch $SHUTDOWN_SCRIPT
+        shutdown_func() {{
+            touch $SHUTTING_DOWN
+            echo "Shutting down now"
+            set +e
+            . $SHUTDOWN_SCRIPT
+        }}
+        sigterm_func() {{
+            shutdown_func
+            exit 1
+        }}
+        trap 'sigterm_func' TERM
+        """,
+        )
         preamble.insert(0, f"{NEWLINE.join(f'export {k}={v}' for k, v in self.global_script_env.items())}\n")
         preamble.insert(0, f"export PDT_AGENT_URL='{self.agent_url}'\n")
         preamble.insert(0, f"export PDT_AGENT_SECRET='{self.agent_secret}'\n")
+        preamble.insert(0, f"export NPROC_VAL='{int(math.ceil(self.job_quota.cpu))}'\n")
         # microseconds per tenth of a second (linux CFS cpu-quota)
         preamble.insert(0, f"export CPU_QUOTA='{int(self.job_quota.cpu * 100000)}'\n")
         # bytes
@@ -1107,6 +1131,7 @@ class TemplateShellTask(Task):
         preamble.insert(0, f"export REPLICA_ID='{replica}'")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
+        epilogue.append("shutdown_func")
         return env, preamble, epilogue
 
 
