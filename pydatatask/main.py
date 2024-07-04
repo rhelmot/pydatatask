@@ -114,6 +114,7 @@ def main(
     parser.add_argument(
         "--require-success",
         action="store_true",
+        default=None,
         help="Raise an error when workers fail instead of marking them as completed-but-failed",
     )
     parser.add_argument(
