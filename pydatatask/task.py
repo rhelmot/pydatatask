@@ -1253,12 +1253,11 @@ class KubeTask(TemplateShellTask):
             manifest = safe_load(self.template)
         except Exception as e:
             raise Exception("KubeTask pod manfest template MUST parse as yaml WITHOUT templating") from e
-        request = Quota.parse(0, 0, 0)
+        request = Quota.parse(0, 0)
         for container in manifest["spec"]["containers"]:
             request += Quota.parse(
                 container["resources"]["requests"]["cpu"],
                 container["resources"]["requests"]["memory"],
-                0,
             )
         return request
 
@@ -1449,7 +1448,7 @@ class ProcessTask(TemplateShellTask):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self._job_quota = job_quota or Quota.parse(1, "256Mi", 1)
+        self._job_quota = job_quota or Quota.parse(1, "256Mi")
         self._executor = executor or execmodule.localhost_manager
         self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
@@ -1656,11 +1655,11 @@ class InProcessSyncTask(Task):
 
     @property
     def job_quota(self):
-        return Quota.parse(0, 0, 0)
+        return Quota.parse(0, 0)
 
     @property
     def resource_limit(self):
-        return Quota.parse(0, 0, 0)
+        return Quota.parse(0, 0)
 
     @property
     def host(self):
@@ -2103,7 +2102,7 @@ class ContainerTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._job_quota = job_quota or Quota.parse(1, "256Mi", 1)
+        self._job_quota = job_quota or Quota.parse(1, "256Mi")
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False

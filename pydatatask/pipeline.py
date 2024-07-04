@@ -379,7 +379,7 @@ class Pipeline:
                     for (_, replica) in live
                     if replica == 0
                 ),
-                Quota.parse(0, 0, 0),
+                Quota.parse(0, 0),
             )
             live_jobs = {taskname: {job for job, _ in live} for taskname, (live, _) in info.items()}
             base_already = {

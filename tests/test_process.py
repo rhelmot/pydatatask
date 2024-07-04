@@ -30,7 +30,7 @@ class TestLocalProcess(unittest.IsolatedAsyncioTestCase):
 
     async def test_local_process(self):
         session = pydatatask.Session()
-        quota = pydatatask.Quota.parse(1, 1, 99999)
+        quota = pydatatask.Quota.parse(1, 1)
 
         repo_input = pydatatask.FileRepository(self.dir / "input")
         await repo_input.validate()
@@ -136,7 +136,7 @@ class TestSSHProcess(unittest.IsolatedAsyncioTestCase):
             ) as s:
                 yield s
 
-        quota = pydatatask.Quota.parse(1, 1, 99999)
+        quota = pydatatask.Quota.parse(1, 1)
         procman = pydatatask.SSHLinuxManager(quota, self.test_id, ssh, Host("remote", HostOS.Linux))
 
         repo_stdin = pydatatask.InProcessBlobRepository({str(i): str(i).encode() for i in range(self.n)})

@@ -16,7 +16,7 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
 
         executor = ThreadPoolExecutor(1)
 
-        @pydatatask.ExecutorTask("phase0", executor, Quota.parse(1, 1, 0), LOCALHOST_QUOTA, phase0_done)
+        @pydatatask.ExecutorTask("phase0", executor, Quota.parse(1, 1), LOCALHOST_QUOTA, phase0_done)
         async def phase0(
             repo_zero,
             repo_one,
@@ -25,7 +25,7 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
             print(repo_zero)
             await repo_one.dump(await repo_zero.info() + "!")
 
-        @pydatatask.ExecutorTask("phase1", executor, Quota.parse(1, 1, 0), LOCALHOST_QUOTA, phase1_done)
+        @pydatatask.ExecutorTask("phase1", executor, Quota.parse(1, 1), LOCALHOST_QUOTA, phase1_done)
         async def phase1(repo_one, repo_two, **kwargs):
             await repo_two.dump(await repo_one.info() + "?")
 

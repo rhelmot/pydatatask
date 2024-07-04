@@ -58,7 +58,7 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
         session = pydatatask.Session()
         kube = session.ephemeral(kube_connect(context=self.kube_context))
 
-        cluster_quota = pydatatask.Quota.parse("1", "1Gi", 99999)
+        cluster_quota = pydatatask.Quota.parse("1", "1Gi")
 
         podman = pydatatask.PodManager(
             cluster_quota,
