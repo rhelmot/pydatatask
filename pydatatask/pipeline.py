@@ -273,6 +273,7 @@ class Pipeline:
                         link.repo,
                         None,
                         self._make_single_func(attrs["rfollow"]),
+                        key_footprint=attrs["rfollow_footprint"],
                         cokeyed=None,
                         auto_meta=None,
                         auto_values=None,
@@ -508,34 +509,34 @@ class Pipeline:
 
     def _make_follow_func(
         self, task: taskmodule.Task, link_name: str, along: bool
-    ) -> Optional[Callable[[str], Awaitable[List[str]]]]:
+    ) -> Tuple[Optional[Callable[[str], Awaitable[List[str]]]], List["repomodule.Repository"]]:
         link = task.links[link_name]
         if link.key is None:
 
             async def result1(job):
                 return [job]
 
-            return result1
+            return result1, []
 
         if link.key == "ALLOC":
 
             async def result2(job):
                 return [task.derived_hash(job, link_name, along)]
 
-            return result2
+            return result2, []
 
         if callable(link.key):
             if not along:
-                return None
+                return None, []
 
             async def result4(job):
                 assert callable(link.key)
                 return [await link.key(job)]
 
-            return result4
+            return result4, link.key_footprint
 
         if along ^ link.is_output:
-            return None
+            return None, []
 
         splitkey = link.key.split(".")
         related = task._repo_related(splitkey[0])
@@ -545,12 +546,12 @@ class Pipeline:
         async def mapper(_job, info):
             return str(supergetattr_path(info, splitkey[1:]))
 
-        mapped = related.map(mapper)
+        mapped = related.map(mapper, [])
 
         async def result3(job):
             return [str(await mapped.info(job))]
 
-        return result3
+        return result3, [mapped]
 
     @property
     def graph(self) -> "networkx.classes.digraph.DiGraph":
@@ -569,8 +570,8 @@ class Pipeline:
                     taskmodule.LinkKind.StreamingInputFilepath,
                     taskmodule.LinkKind.StreamingOutputFilepath,
                 )
-                follow = self._make_follow_func(task, link_name, True)
-                rfollow = self._make_follow_func(task, link_name, False)
+                follow, follow_footprint = self._make_follow_func(task, link_name, True)
+                rfollow, rfollow_footprint = self._make_follow_func(task, link_name, False)
                 attrs = dict(vars(link))
 
                 cokeyed = attrs.pop("cokeyed")
@@ -579,6 +580,8 @@ class Pipeline:
                 attrs["link_name"] = link_name
                 attrs["follow"] = follow
                 attrs["rfollow"] = rfollow
+                attrs["follow_footprint"] = follow_footprint
+                attrs["rfollow_footprint"] = rfollow_footprint
                 attrs["multi"] = multi
                 repo = attrs.pop("repo")
                 edges = []

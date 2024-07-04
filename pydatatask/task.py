@@ -179,6 +179,7 @@ class Link:
     repo: "repomodule.Repository"
     kind: Optional[LinkKind]
     key: Optional[Union[str, Callable[[str], Awaitable[str]]]]
+    key_footprint: List["repomodule.Repository"]
     cokeyed: Dict[str, "repomodule.Repository"]
     auto_meta: Optional[str]
     auto_values: Optional[Any]
@@ -658,6 +659,7 @@ class Task(ABC):
         repo: "repomodule.Repository",
         kind: Optional[LinkKind],
         key: Optional[Union[str, Callable[[str], Awaitable[str]]]] = None,
+        key_footprint: Optional[Iterable["repomodule.Repository"]] = None,
         cokeyed: Optional[Dict[str, "repomodule.Repository"]] = None,
         auto_meta: Optional[str] = None,
         auto_values: Optional[Any] = None,
@@ -718,6 +720,7 @@ class Task(ABC):
         self.links[name] = Link(
             repo=repo,
             key=key,
+            key_footprint=list(key_footprint or ()),
             kind=kind,
             cokeyed=cokeyed or {},
             auto_meta=auto_meta,
@@ -750,12 +753,13 @@ class Task(ABC):
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
                 lambda job: self.derived_hash(job, linkname),
                 repomodule.AggregateAndRepository(**self.required_for_start_basic),
+                [],
             )
             prefetch_lookup = False
 
         elif callable(link.key):
             mapped = repomodule.FunctionCallMetadataRepository(
-                link.key, repomodule.AggregateAndRepository(**self.required_for_start_basic)
+                link.key, repomodule.AggregateAndRepository(**self.required_for_start_basic), link.key_footprint
             )
             prefetch_lookup = False
         else:
@@ -770,7 +774,7 @@ class Task(ABC):
                 except:
                     return ""
 
-            mapped = related.map(mapper)
+            mapped = related.map(mapper, [])
             prefetch_lookup = True
 
         if isinstance(link.repo, repomodule.MetadataRepository):
@@ -802,7 +806,7 @@ class Task(ABC):
         async def mapper(_job, info):
             return str(supergetattr_path(info, splitkey[1:]))
 
-        mapped = related.map(mapper)
+        mapped = related.map(mapper, [])
 
         async def filterer(subjob: str) -> bool:
             return await mapped.info(subjob) == job

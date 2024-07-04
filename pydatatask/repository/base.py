@@ -11,7 +11,7 @@ from typing import (
     Callable,
 )
 from typing import Counter as TypedCounter
-from typing import Dict, List, Literal, Optional, Set, Union, overload
+from typing import Dict, Iterable, List, Literal, Optional, Set, Union, overload
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
@@ -299,11 +299,12 @@ class MetadataRepository(Repository, ABC):
     def map(
         self,
         func: Callable[[str, Any], Awaitable[Any]],
+        extra_footprint: Iterable[Repository],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
     ) -> "MapRepository":
         """Generate a :class:`MapRepository` based on this repository and the given parameters."""
-        return MapRepository(self, func, filt, allow_deletes=allow_deletes)
+        return MapRepository(self, func, extra_footprint, filt, allow_deletes=allow_deletes)
 
 
 class MapRepository(MetadataRepository):
@@ -314,6 +315,7 @@ class MapRepository(MetadataRepository):
         self,
         base: MetadataRepository,
         func: Callable[[str, Any], Awaitable[Any]],
+        extra_footprint: Iterable[Repository],
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterable[str]]] = None,
         allow_deletes=False,
@@ -331,12 +333,17 @@ class MapRepository(MetadataRepository):
         self.filter = filt
         self.filter_all = filter_all
         self.allow_deletes = allow_deletes
+        self.extra_footprint = extra_footprint
 
     def footprint(self):
         yield from self.base.footprint()
+        for child in self.extra_footprint:
+            yield from child.footprint()
 
     def cache_flush(self):
         self.base.cache_flush()
+        for child in self.extra_footprint:
+            child.cache_flush()
 
     def __getstate__(self):
         return (self.base, self.func, self.filter, self.allow_deletes)
@@ -607,16 +614,21 @@ class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
 class FunctionCallMetadataRepository(MetadataRepository):
     """A metadata repository which contains a function used to generate the info for each job."""
 
-    def __init__(self, info: Callable[[str], Any], domain: Repository):
+    def __init__(self, info: Callable[[str], Any], domain: Repository, extra_footprint: Iterable[Repository]):
         super().__init__()
         self._info = info
         self._domain = domain
+        self._extra_footprint = extra_footprint
 
     def footprint(self):
         yield from self._domain.footprint()
+        for child in self._extra_footprint:
+            yield from child.footprint()
 
     def cache_flush(self):
         self._domain.cache_flush()
+        for child in self._extra_footprint:
+            child.cache_flush()
 
     def __getstate__(self):
         return (self._info, self._domain)
