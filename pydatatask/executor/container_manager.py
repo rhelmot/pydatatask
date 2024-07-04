@@ -253,7 +253,7 @@ class DockerContainerManager(AbstractContainerManager):
     async def kill(self, task: str, job: str, replica: int):
         cont = await self.docker.containers.get(self._id_to_name(task, job, replica))
         try:
-            await cont.kill()
+            await cont.stop(t=30)
         except aiodocker.exceptions.DockerError:
             pass
         await cont.delete()
@@ -287,7 +287,7 @@ class DockerContainerManager(AbstractContainerManager):
             and not (timeout and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout)
         }
         live_jobs = {job for job, _ in live_replicas}
-        await asyncio.gather(*(cont.kill() for _, cont, _ in timed_out), return_exceptions=True)
+        await asyncio.gather(*(cont.stop(t=30) for _, cont, _ in timed_out), return_exceptions=True)
         results = await asyncio.gather(
             *(self._cleanup(container, info) for info, container, _ in dead),
             *(self._cleanup(container, info, True) for info, container, _ in timed_out),
