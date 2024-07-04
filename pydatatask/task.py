@@ -1128,6 +1128,7 @@ class TemplateShellTask(Task):
         # bytes
         preamble.insert(0, f"export MEM_QUOTA='{int(self.job_quota.mem)}'\n")
         preamble.insert(0, f"export JOB_ID='{orig_job}'")
+        preamble.insert(0, f"export TASK_NAME='{self.name}'")
         preamble.insert(0, f"export REPLICA_ID='{replica}'")
         if self.debug_trace:
             preamble.insert(0, "set -x\n")
