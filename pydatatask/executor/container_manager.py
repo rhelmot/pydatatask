@@ -235,7 +235,7 @@ class DockerContainerManager(AbstractContainerManager):
             # if not info["State"]["Status"] in ('exited',)
         ]
         return {
-            name: dateutil.parser.isoparse(info["State"]["StartedAt"])
+            name: datetime.fromtimestamp(info["Created"], timezone.utc)
             for info, name in live
             if name is not None and (job is None or name == job)
         }
@@ -254,23 +254,23 @@ class DockerContainerManager(AbstractContainerManager):
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
-            if info["State"]["Status"] in ("exited",) and name is not None
+            if info["State"] in ("exited",) and name is not None
         ]
         now = datetime.now(tz=timezone.utc)
         timed_out = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
-            if info["State"]["Status"] not in ("exited",)
+            if info["State"] not in ("exited",)
             and name is not None
             and timeout
-            and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout
+            and now - datetime.fromtimestamp(info["Created"], timezone.utc) > timeout
         ]
         live_replicas = {
-            name: dateutil.parser.isoparse(info["State"]["StartedAt"])
+            name: datetime.fromtimestamp(info["Created"], timezone.utc)
             for (name, info), _ in zip(infos_and_names, containers)
-            if info["State"]["Status"] not in ("exited",)
+            if info["State"] not in ("exited",)
             and name is not None
-            and not (timeout and now - dateutil.parser.isoparse(info["State"]["StartedAt"]) > timeout)
+            and not (timeout and now - datetime.fromtimestamp(info["Created"], timezone.utc) > timeout)
         }
         live_jobs = {job for job, _ in live_replicas}
         await asyncio.gather(*(cont.stop(t=30) for _, cont, _ in timed_out), return_exceptions=True)
@@ -301,13 +301,29 @@ class DockerContainerManager(AbstractContainerManager):
         except Exception:  # pylint: disable=broad-exception-caught
             return None
         now = datetime.now(tz=timezone.utc)
+        status = container["Status"]
+        if status.startswith("Exited ("):
+            code = int(status.split("(")[1].split(")")[0])
+        else:
+            code = 1
+        delta = timedelta()
+        if status.endswith(" ago"):
+            numeral = int(status.split()[-3])
+            if "second" in status:
+                delta = timedelta(seconds=numeral)
+            if "minute" in status:
+                delta = timedelta(minutes=numeral)
+            if "hour" in status:
+                delta = timedelta(hours=numeral)
+            if "day" in status:
+                delta = timedelta(days=numeral)
         meta = {
-            "success": not timed_out and container["State"]["ExitCode"] == 0,
-            "start_time": dateutil.parser.isoparse(container["State"]["StartedAt"]),
-            "end_time": now if timed_out else dateutil.parser.isoparse(container["State"]["FinishedAt"]),
+            "success": not timed_out and code == 0,
+            "start_time": datetime.fromtimestamp(container["Created"], timezone.utc),
+            "end_time": now if timed_out else now - delta,
             "timeout": timed_out,
-            "exit_code": -1 if timed_out else container["State"]["ExitCode"],
-            "image": container["Config"]["Image"],
+            "exit_code": -1 if timed_out else code,
+            "image": container["Image"],
         }
         return (log, meta)
 
