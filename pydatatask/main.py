@@ -288,6 +288,8 @@ def main(
     parser_http_multi.add_argument("--count", help="The number of agents to use", default=4, type=int)
 
     parser_viz = subparsers.add_parser("viz", help="Show Visualization of Running Pipeline")
+    parser_viz.add_argument("--port", type=int, help="The port to serve on", default=8050)
+    parser_viz.add_argument("--host", help="The host to bind on", default="0.0.0.0")
     parser_viz.set_defaults(func=run_viz)
 
     if fuse is not None:
@@ -430,7 +432,7 @@ http {{
     config_filename = f"/tmp/pydatatask-nginx-{pipeline.agent_port}.conf"
     with open(config_filename, "w", encoding="utf-8") as f:
         f.write(nginx_config)
-    process_result = subprocess.run([nginx, "-c", config_filename], check=False)
+    process_result = subprocess.run([nginx, "-c", config_filename], check=False, stderr=subprocess.STDOUT)
     for agent in agents:
         agent.terminate()
         agent.wait()

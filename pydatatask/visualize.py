@@ -2,10 +2,12 @@
 
 from typing import Any, DefaultDict, Dict, List
 from collections import defaultdict
-from multiprocessing import Process, Queue
 import asyncio
 import json
 import os
+import queue
+import threading
+import time
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
@@ -79,12 +81,27 @@ class TaskVisualizer:
         }
         self.nodes = {}
 
-        # maps node -> job -> exit code
-        self.exit_codes: DefaultDict[Any, Dict[str, int]] = defaultdict(dict)
-
         self.app = dash.Dash("pydatatask", index_string=_default_index)
         self.app.layout = self.generate_layout()
         self.register_callbacks()
+
+        self.request = None
+        self.response = None
+        self.thread = threading.Thread(target=self._thread, daemon=True)
+        self.thread.start()
+
+    def _thread(self):
+        asyncio.run(self._async_thread())
+
+    async def _async_thread(self):
+        async with self.pipeline:
+            while True:
+                while self.request is None:
+                    await asyncio.sleep(0.1)
+                request = self.request
+                self.request = None
+                self.pipeline.cache_flush()
+                self.response = await self.get_task_info(request)
 
     def left_to_right_layout(self, G):
         """This doesn't really need docs, does it?"""
@@ -158,44 +175,13 @@ class TaskVisualizer:
     async def get_task_info(self, nodes):
         """Retrieve the info about a given node from the repositories it is attached to and return it as a dict."""
 
-        async def get_info_from_job(repo, job):
-            info = await repo.info(job) or {}
-            is_valid = info.get("success", False)
-            if not is_valid:
-                return False
-            else:
-                return True
-
         async def get_node_info(node):
-            repo_entry_counts: Dict[Any, int] = {}
-            for link in node.links:
-                if node.links[link].is_status and link not in {"done", "live", "success"}:
-                    continue
-                if link.startswith("INHIBITION_"):
-                    continue
-                print("\t" + link)
-                count = 0
+            return {linkname: len(await link.repo.keys()) for linkname, link in node.links.items()}
 
-                if link == "done":
-                    async for job in node.links[link].repo:
-                        if job not in self.exit_codes[node]:
-                            is_valid = True
-                            success = await asyncio.gather(
-                                *[get_info_from_job(repo, job) for repo in node.success.footprint()]
-                            )
-                            is_valid = all(success)
-                            exit_code = 0 if is_valid else 1
-                            if exit_code is not None:
-                                self.exit_codes[node][job] = exit_code
-                        else:
-                            exit_code = self.exit_codes[node][job]
-                        count += 1
-                else:
-                    count += len(await node.links[link].repo.keys())
-                repo_entry_counts[link] = count
-            return self.exit_codes[node], repo_entry_counts, node.name
-
-        all_node_info = await asyncio.gather(*[get_node_info(node) for node in nodes])
+        all_node_info = {
+            node.name: result
+            for node, result in zip(nodes, await asyncio.gather(*(get_node_info(node) for node in nodes)))
+        }
         return all_node_info
 
     def run_async(self, queue, coroutine, *args):
@@ -213,18 +199,11 @@ class TaskVisualizer:
 
         This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
         """
-        queue: Queue = Queue()
-
-        process = Process(target=self.run_async, args=(queue, self.get_task_info, nodes))
-        process.start()
-        process.join()
-
-        results = queue.get(block=True)
-        for exit_codes, result, node_name in results:
-            node = next((x for x in nodes if x.name == node_name), None)
-            if node:
-                self.nodes[node] = result
-                self.exit_codes[node] = exit_codes
+        self.request = nodes
+        while self.response is None:
+            time.sleep(0.1)
+        self.nodes = self.response
+        self.response = None
 
     @staticmethod
     def generate_file_tree_html(path):
@@ -344,11 +323,11 @@ class TaskVisualizer:
             fig = go.Figure()
             annotations = []
             self.populate_all_node_info(list(pos.keys()))
+            print(self.nodes)
 
             for node, (x, y) in pos.items():
-                exit_codes = self.exit_codes[node]
-                results = self.nodes[node]
-                any_failed = any(x != 0 for x in exit_codes.values())
+                results = self.nodes[node.name]
+                any_failed = results["success"] != results["done"]
                 if results is not None:
                     if results["live"] > 0:
                         node_color = self.status_colors["running"]
@@ -373,7 +352,7 @@ class TaskVisualizer:
                         "bordercolor": border_color,
                         "borderwidth": 2,
                         "borderpad": 4,
-                        "hovertext": "<br>".join(f"{k}:{v}" for k, v in self.nodes[node].items()),
+                        "hovertext": "<br>".join(f"{k}:{v}" for k, v in self.nodes[node.name].items()),
                     }
                 )
 
@@ -381,14 +360,14 @@ class TaskVisualizer:
                 x0, y0 = pos[edge[0]]
                 x1, y1 = pos[edge[1]]
 
-                if edge[0] in self.nodes and self.nodes[edge[0]]["live"] > 0:
+                if edge[0] in self.nodes and self.nodes[edge[0].name]["live"] > 0:
                     line_color = self.status_colors["running"]
-                elif edge[0] in self.nodes and self.nodes[edge[0]]["done"] > 0:
+                elif edge[0] in self.nodes and self.nodes[edge[0].name]["done"] > 0:
                     line_color = self.status_colors["success"]
                 else:
                     line_color = self.status_colors["pending"]
 
-                max_size = max(x for x in self.nodes[edge[0]].values() if isinstance(x, int))
+                max_size = max(x for x in self.nodes[edge[0].name].values() if isinstance(x, int))
                 width = max(max_size.bit_length(), 1)
 
                 fig.add_trace(
@@ -416,9 +395,13 @@ class TaskVisualizer:
             return fig
 
 
-def run_viz(pipeline):
+def run_viz(pipeline, host, port):
     """Entrypoint for "pd viz".
 
     Starts the visualizer and runs the dash server.
     """
-    TaskVisualizer(pipeline).app.run_server(debug=True, host="0.0.0.0")
+    tv = TaskVisualizer(pipeline)
+    try:
+        tv.app.run_server(debug=True, host=host, port=port)
+    except KeyboardInterrupt:
+        pass
