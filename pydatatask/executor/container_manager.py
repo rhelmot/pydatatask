@@ -359,6 +359,10 @@ class KubeContainerManager(AbstractContainerManager):
             return self.cluster.volumes[provided_name]
         return pod_manager.VolumeSpec.parse(provided_name)
 
+    def cache_flush(self):
+        super().cache_flush()
+        self.cluster.cache_flush()
+
     async def launch(
         self,
         task: str,

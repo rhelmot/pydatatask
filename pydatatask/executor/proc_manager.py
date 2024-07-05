@@ -393,6 +393,11 @@ class LocalLinuxManager(AbstractProcessManager):
             return self._local_docker
         raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
 
+    def cache_flush(self):
+        super().cache_flush()
+        if self._local_docker is not None:
+            self._local_docker.cache_flush()
+
     def __init__(
         self,
         *,
@@ -596,6 +601,11 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
             )
         else:
             self._local_kube = None
+
+    def cache_flush(self):
+        super().cache_flush()
+        if self._local_kube is not None:
+            self._local_kube.cache_flush()
 
     def to_pod_manager(self):
         if self._local_kube is not None:
