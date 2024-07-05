@@ -146,21 +146,14 @@ class DockerContainerManager(AbstractContainerManager):
         self._host_path_overrides = {str(Path(x)).strip("/"): y for x, y in self._host_path_overrides.items()}
         self._deleted_containers = set()
         self._cached_containers: Optional[List[aiodocker.containers.DockerContainer]] = None
-        self._cached_infos: Dict[str, Dict[str, Any]] = {}
 
     async def _all_containers(self) -> List[aiodocker.containers.DockerContainer]:
         if self._cached_containers is None:
             self._cached_containers = await self.docker.containers.list(all=1)
         return self._cached_containers
 
-    async def _show(self, container: aiodocker.containers.DockerContainer) -> Dict[str, Any]:
-        if container.id not in self._cached_infos:
-            self._cached_infos[container.id] = await container.show()
-        return self._cached_infos[container.id]
-
     def cache_flush(self):
         self._cached_containers = None
-        self._cached_infos = {}
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -205,8 +198,7 @@ class DockerContainerManager(AbstractContainerManager):
                     pass
                 else:
                     self_container = await self.docker.containers.get(hostname)
-                    config = await self._show(self_container)
-                    self._net = config["HostConfig"]["NetworkMode"]
+                    self._net = self_container["HostConfig"]["NetworkMode"]
 
         config = {
             "Image": self._image_prefix + image,
@@ -236,28 +228,10 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         containers = await self._all_containers()
-        infos = await asyncio.gather(*(self._show(c) for c in containers), return_exceptions=True)
-
-        # avoid docker errors, as they usually come from race-conditions like the container
-        # being deleted between the list and the show
-        docker_exceptions = []
-        other_exceptions = []
-        non_exception_infos = []
-        for info in infos:
-            if isinstance(info, DockerError):
-                docker_exceptions.append(info)
-            elif isinstance(info, BaseException):
-                other_exceptions.append(info)
-            else:
-                non_exception_infos.append(info)
-
-        # ignore docker exceptions, raise other exceptions, and continue with non-exceptions
-        if other_exceptions:
-            raise other_exceptions[0]
 
         live = [
             (info, self._name_to_id(task, info["Name"]))
-            for info in non_exception_infos
+            for info in containers
             # if not info["State"]["Status"] in ('exited',)
         ]
         return {
@@ -276,11 +250,7 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def update(self, task: str, timeout: Optional[timedelta] = None):
         containers = [x for x in await self._all_containers() if x.id not in self._deleted_containers]
-        infos = [
-            {"Name": "not_your_business", "State": {"Status": "exception"}} if isinstance(x, BaseException) else x
-            for x in await asyncio.gather(*(self._show(c) for c in containers), return_exceptions=True)
-        ]
-        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos]
+        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in containers]
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
@@ -305,8 +275,8 @@ class DockerContainerManager(AbstractContainerManager):
         live_jobs = {job for job, _ in live_replicas}
         await asyncio.gather(*(cont.stop(t=30) for _, cont, _ in timed_out), return_exceptions=True)
         results = await asyncio.gather(
-            *(self._cleanup(container, info) for info, container, _ in dead),
-            *(self._cleanup(container, info, True) for info, container, _ in timed_out),
+            *(self._cleanup(container) for _, container, _ in dead),
+            *(self._cleanup(container, True) for _, container, _ in timed_out),
         )
         final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for (_, _, (job, replica)), result in zip(chain(dead, timed_out), results):
@@ -316,7 +286,7 @@ class DockerContainerManager(AbstractContainerManager):
         return live_replicas, dict(final)
 
     async def _cleanup(
-        self, container: aiodocker.containers.DockerContainer, info: Dict[str, Any], timed_out: bool = False
+        self, container: aiodocker.containers.DockerContainer, timed_out: bool = False
     ) -> Optional[Tuple[Optional[bytes], Dict[str, Any]]]:
         try:
             log = "".join(
@@ -330,15 +300,14 @@ class DockerContainerManager(AbstractContainerManager):
             self._deleted_containers.add(container.id)
         except Exception:  # pylint: disable=broad-exception-caught
             return None
-        info["timed_out"] = timed_out
         now = datetime.now(tz=timezone.utc)
         meta = {
-            "success": not timed_out and info["State"]["ExitCode"] == 0,
-            "start_time": dateutil.parser.isoparse(info["State"]["StartedAt"]),
-            "end_time": now if timed_out else dateutil.parser.isoparse(info["State"]["FinishedAt"]),
+            "success": not timed_out and container["State"]["ExitCode"] == 0,
+            "start_time": dateutil.parser.isoparse(container["State"]["StartedAt"]),
+            "end_time": now if timed_out else dateutil.parser.isoparse(container["State"]["FinishedAt"]),
             "timeout": timed_out,
-            "exit_code": -1 if timed_out else info["State"]["ExitCode"],
-            "image": info["Config"]["Image"],
+            "exit_code": -1 if timed_out else container["State"]["ExitCode"],
+            "image": container["Config"]["Image"],
         }
         return (log, meta)
 
