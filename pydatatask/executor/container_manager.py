@@ -230,7 +230,7 @@ class DockerContainerManager(AbstractContainerManager):
         containers = await self._all_containers()
 
         live = [
-            (info, self._name_to_id(task, info["Name"]))
+            (info, self._name_to_id(task, info["Names"][0]))
             for info in containers
             # if not info["State"]["Status"] in ('exited',)
         ]
@@ -250,7 +250,7 @@ class DockerContainerManager(AbstractContainerManager):
 
     async def update(self, task: str, timeout: Optional[timedelta] = None):
         containers = [x for x in await self._all_containers() if x.id not in self._deleted_containers]
-        infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in containers]
+        infos_and_names = [(self._name_to_id(task, info["Names"][0]), info) for info in containers]
         dead = [
             (info, container, name)
             for (name, info), container in zip(infos_and_names, containers)
