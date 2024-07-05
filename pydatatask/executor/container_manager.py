@@ -146,11 +146,13 @@ class DockerContainerManager(AbstractContainerManager):
         self._host_path_overrides = {str(Path(x)).strip("/"): y for x, y in self._host_path_overrides.items()}
         self._deleted_containers = set()
         self._cached_containers: Optional[List[aiodocker.containers.DockerContainer]] = None
+        self._lock = asyncio.Lock()
 
     async def _all_containers(self) -> List[aiodocker.containers.DockerContainer]:
-        if self._cached_containers is None:
-            self._cached_containers = await self.docker.containers.list(all=1)
-        return self._cached_containers
+        async with self._lock:
+            if self._cached_containers is None:
+                self._cached_containers = await self.docker.containers.list(all=1)
+            return self._cached_containers
 
     def cache_flush(self):
         self._cached_containers = None
@@ -301,29 +303,13 @@ class DockerContainerManager(AbstractContainerManager):
         except Exception:  # pylint: disable=broad-exception-caught
             return None
         now = datetime.now(tz=timezone.utc)
-        status = container["Status"]
-        if status.startswith("Exited ("):
-            code = int(status.split("(")[1].split(")")[0])
-        else:
-            code = 1
-        delta = timedelta()
-        if status.endswith(" ago"):
-            numeral = int(status.split()[-3])
-            if "second" in status:
-                delta = timedelta(seconds=numeral)
-            if "minute" in status:
-                delta = timedelta(minutes=numeral)
-            if "hour" in status:
-                delta = timedelta(hours=numeral)
-            if "day" in status:
-                delta = timedelta(days=numeral)
         meta = {
-            "success": not timed_out and code == 0,
-            "start_time": datetime.fromtimestamp(container["Created"], timezone.utc),
-            "end_time": now if timed_out else now - delta,
+            "success": not timed_out and container["State"]["ExitCode"] == 0,
+            "start_time": dateutil.parser.isoparse(container["State"]["StartedAt"]),
+            "end_time": now if timed_out else dateutil.parser.isoparse(container["State"]["FinishedAt"]),
             "timeout": timed_out,
-            "exit_code": -1 if timed_out else code,
-            "image": container["Image"],
+            "exit_code": -1 if timed_out else container["State"]["ExitCode"],
+            "image": container["Config"]["Image"],
         }
         return (log, meta)
 
