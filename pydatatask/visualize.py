@@ -169,19 +169,29 @@ class TaskVisualizer:
         async def get_node_info(node):
             repo_entry_counts: Dict[Any, int] = {}
             for link in node.links:
+                if node.links[link].is_status and link not in {"done", "live", "success"}:
+                    continue
+                if link.startswith("INHIBITION_"):
+                    continue
+                print("\t" + link)
                 count = 0
-                async for job in node.links[link].repo:
-                    if link == "done":
+
+                if link == "done":
+                    async for job in node.links[link].repo:
                         if job not in self.exit_codes[node]:
                             is_valid = True
-                            success = await asyncio.gather(*[get_info_from_job(repo, job) for repo in node.success.footprint()])
+                            success = await asyncio.gather(
+                                *[get_info_from_job(repo, job) for repo in node.success.footprint()]
+                            )
                             is_valid = all(success)
                             exit_code = 0 if is_valid else 1
                             if exit_code is not None:
                                 self.exit_codes[node][job] = exit_code
                         else:
                             exit_code = self.exit_codes[node][job]
-                    count += 1
+                        count += 1
+                else:
+                    count += len(await node.links[link].repo.keys())
                 repo_entry_counts[link] = count
             return self.exit_codes[node], repo_entry_counts, node.name
 
