@@ -290,26 +290,27 @@ class DockerContainerManager(AbstractContainerManager):
     async def _cleanup(
         self, container: aiodocker.containers.DockerContainer, timed_out: bool = False
     ) -> Optional[Tuple[Optional[bytes], Dict[str, Any]]]:
+        mutated = aiodocker.containers.DockerContainer(container.docker, **container._container)
         try:
             log = "".join(
-                line for line in await cast(Awaitable[List[str]], container.log(stdout=True, stderr=True))
+                line for line in await cast(Awaitable[List[str]], mutated.log(stdout=True, stderr=True))
             ).encode()
         except DockerError:
             l.warning("Failed to obtain logs", exc_info=True)
             log = None
         try:
-            await container.delete()
-            self._deleted_containers.add(container.id)
+            await mutated.delete()
+            self._deleted_containers.add(mutated.id)
         except Exception:  # pylint: disable=broad-exception-caught
             return None
         now = datetime.now(tz=timezone.utc)
         meta = {
-            "success": not timed_out and container["State"]["ExitCode"] == 0,
-            "start_time": dateutil.parser.isoparse(container["State"]["StartedAt"]),
-            "end_time": now if timed_out else dateutil.parser.isoparse(container["State"]["FinishedAt"]),
+            "success": not timed_out and mutated["State"]["ExitCode"] == 0,
+            "start_time": dateutil.parser.isoparse(mutated["State"]["StartedAt"]),
+            "end_time": now if timed_out else dateutil.parser.isoparse(mutated["State"]["FinishedAt"]),
             "timeout": timed_out,
-            "exit_code": -1 if timed_out else container["State"]["ExitCode"],
-            "image": container["Config"]["Image"],
+            "exit_code": -1 if timed_out else mutated["State"]["ExitCode"],
+            "image": mutated["Config"]["Image"],
         }
         return (log, meta)
 
