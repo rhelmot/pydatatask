@@ -231,15 +231,11 @@ class DockerContainerManager(AbstractContainerManager):
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         containers = await self._all_containers()
 
-        live = [
-            (info, self._name_to_id(task, info["Names"][0]))
-            for info in containers
-            # if not info["State"]["Status"] in ('exited',)
-        ]
+        live = [(info, self._name_to_id(task, info["Names"][0])) for info in containers]
         return {
             name: datetime.fromtimestamp(info["Created"], timezone.utc)
             for info, name in live
-            if name is not None and (job is None or name == job)
+            if name is not None and (job is None or name[0] == job)
         }
 
     async def kill(self, task: str, job: str, replica: int):
