@@ -595,6 +595,7 @@ class Pipeline:
             return self._graph
 
         result: networkx.classes.digraph.DiGraph = networkx.classes.digraph.DiGraph()
+
         for task in self.tasks.values():
             result.add_node(task)
             for link_name, link in task.links.items():
@@ -619,6 +620,9 @@ class Pipeline:
                 edges = []
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
                     edges.append((repo, task))
+                    for footprint in repo.footprint():
+                        if footprint is not repo:
+                            edges.append((footprint, task))
                     if attrs["is_output"] or attrs["is_status"]:
                         edges.append((task, repo))
                 else:

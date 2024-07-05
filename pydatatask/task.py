@@ -717,7 +717,7 @@ class Task(ABC):
         if inhibits_start is None:
             inhibits_start = False
         if required_for_success is None:
-            required_for_success = is_output
+            required_for_success = False
         if inhibits_output is None:
             inhibits_output = False
         if key == "ALLOC" and is_input:
