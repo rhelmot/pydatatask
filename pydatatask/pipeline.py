@@ -107,7 +107,7 @@ class _LaunchRecordC:
 
     @property
     def _sort_tuple(self):
-        return (2 if self.replica != 0 else 1 if not self.prev_live else 0, -self.priority)
+        return (2 if self.replica != 0 else 1 if not self.prev_live else 0, -self.priority, self.replica)
 
     def __lt__(self, other: Self):
         return self._sort_tuple < other._sort_tuple
