@@ -48,11 +48,12 @@ class KubeConnection:
     configuration from standard paths, then rather than instantiating one directly, you should use kube_connect.
     """
 
-    def __init__(self, config: Configuration):
+    def __init__(self, config: Configuration, incluster: bool = False):
         self.api: ApiClient = ApiClient(config)
         self.api_ws: WsApiClient = WsApiClient(config)
         self.v1 = CoreV1Api(self.api)
         self.v1_ws = CoreV1Api(self.api_ws)
+        self.incluster = incluster
 
     async def close(self):
         """Clean up the connection."""
@@ -78,10 +79,12 @@ def kube_connect(
         config = type.__call__(Configuration)
         try:
             load_incluster_config(config)
+            incluster = True
         except ConfigException:
             loader = await load_kube_config(config_file, context)
             await loader.load_and_set(config)
-        connection = KubeConnection(config)
+            incluster = False
+        connection = KubeConnection(config, incluster)
         yield connection
         await connection.close()
 
@@ -123,7 +126,7 @@ class PodManager(Executor):
         quota: Quota,
         host: Host,
         app: str,
-        namespace: str,
+        namespace: Optional[str],
         connection: Ephemeral[KubeConnection],
         volumes: Optional[Dict[str, VolumeSpec]] = None,
     ):
@@ -137,7 +140,12 @@ class PodManager(Executor):
         super().__init__(quota)
         self._host = host
         self.app = app
-        self.namespace = namespace
+        try:
+            with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace", "r") as fp:
+                default_namespace = fp.read().strip()
+        except FileNotFoundError:
+            default_namespace = "default"
+        self.namespace = namespace or default_namespace
         self._connection = connection
         self.volumes = volumes or {}
         self._cached_pods: Optional[List[Any]] = None
