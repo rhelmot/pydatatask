@@ -1245,6 +1245,11 @@ class KubeTask(TemplateShellTask):
                 is_status=True,
             )
 
+    def cache_flush(self):
+        super().cache_flush()
+        if self._podman is not None:
+            self._podman.cache_flush()
+
     @property
     def host(self):
         return self.podman.host
@@ -1463,6 +1468,11 @@ class ProcessTask(TemplateShellTask):
             self.link("stdout", stdout, None, is_status=True)
         if isinstance(stderr, repomodule.BlobRepository):
             self.link("stderr", stderr, None, is_status=True)
+
+    def cache_flush(self):
+        super().cache_flush()
+        if self._executor is not None:
+            self._executor.cache_flush()
 
     @property
     def host(self):
@@ -2122,6 +2132,11 @@ class ContainerTask(TemplateShellTask):
             is_status=True,
             inhibits_output=True,
         )
+
+    def cache_flush(self):
+        super().cache_flush()
+        if self._executor is not None:
+            self._executor.cache_flush()
 
     @property
     def host(self):

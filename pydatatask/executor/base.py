@@ -60,3 +60,7 @@ class Executor:
     async def teardown_agent(self) -> None:
         """Kill the pydatatask http agent that was spawned using this executor."""
         raise TypeError("Not supported, yikes")
+
+    def cache_flush(self) -> None:
+        """Flush any cached data."""
+        pass

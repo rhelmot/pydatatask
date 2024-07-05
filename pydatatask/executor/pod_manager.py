@@ -140,6 +140,11 @@ class PodManager(Executor):
         self.namespace = namespace
         self._connection = connection
         self.volumes = volumes or {}
+        self._cached_pods: Optional[List[Any]] = None
+
+    def cache_flush(self):
+        super().cache_flush()
+        self._cached_pods = None
 
     @property
     def host(self):
@@ -264,15 +269,19 @@ class PodManager(Executor):
 
     async def query(self, job=None, task=None, replica=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
-        selectors = ["app=" + self.app]
-        if job is not None:
-            selectors.append("job=" + job)
-        if task is not None:
-            selectors.append("task=" + task.replace("_", "-"))
-        if replica is not None:
-            selectors.append("replica=" + str(replica))
-        selector = ",".join(selectors)
-        return (await self.v1.list_namespaced_pod(self.namespace, label_selector=selector)).items
+        if self._cached_pods is None:
+            self._cached_pods = (
+                await self.v1.list_namespaced_pod(self.namespace, label_selector=f"app={self.app}")
+            ).items
+
+        assert self._cached_pods is not None
+        return [
+            pod
+            for pod in self._cached_pods
+            if (job is None or pod.metadata.labels["job"] == job)
+            and (task is None or pod.metadata.labels["task"] == task)
+            and (replica is None or pod.metadata.labels["replica"] == str(replica))
+        ]
 
     async def delete(self, pod: Any):
         """Destroy the given pod."""

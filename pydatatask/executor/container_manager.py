@@ -145,6 +145,22 @@ class DockerContainerManager(AbstractContainerManager):
         self._host_path_overrides = host_path_overrides or {}
         self._host_path_overrides = {str(Path(x)).strip("/"): y for x, y in self._host_path_overrides.items()}
         self._deleted_containers = set()
+        self._cached_containers: Optional[List[aiodocker.containers.DockerContainer]] = None
+        self._cached_infos: Dict[str, Dict[str, Any]] = {}
+
+    async def _all_containers(self) -> List[aiodocker.containers.DockerContainer]:
+        if self._cached_containers is None:
+            self._cached_containers = await self.docker.containers.list(all=1)
+        return self._cached_containers
+
+    async def _show(self, container: aiodocker.containers.DockerContainer) -> Dict[str, Any]:
+        if container.id not in self._cached_infos:
+            self._cached_infos[container.id] = await container.show()
+        return self._cached_infos[container.id]
+
+    def cache_flush(self):
+        self._cached_containers = None
+        self._cached_infos = {}
 
     @property
     def docker(self) -> aiodocker.Docker:
@@ -189,7 +205,7 @@ class DockerContainerManager(AbstractContainerManager):
                     pass
                 else:
                     self_container = await self.docker.containers.get(hostname)
-                    config = await self_container.show()
+                    config = await self._show(self_container)
                     self._net = config["HostConfig"]["NetworkMode"]
 
         config = {
@@ -219,8 +235,8 @@ class DockerContainerManager(AbstractContainerManager):
         await self.docker.containers.run(config, name=self._id_to_name(task, job, replica))
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
-        containers = await self.docker.containers.list(all=1)
-        infos = await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
+        containers = await self._all_containers()
+        infos = await asyncio.gather(*(self._show(c) for c in containers), return_exceptions=True)
 
         # avoid docker errors, as they usually come from race-conditions like the container
         # being deleted between the list and the show
@@ -259,10 +275,10 @@ class DockerContainerManager(AbstractContainerManager):
         await cont.delete()
 
     async def update(self, task: str, timeout: Optional[timedelta] = None):
-        containers = [x for x in await self.docker.containers.list(all=1) if x not in self._deleted_containers]
+        containers = [x for x in await self._all_containers() if x.id not in self._deleted_containers]
         infos = [
             {"Name": "not_your_business", "State": {"Status": "exception"}} if isinstance(x, BaseException) else x
-            for x in await asyncio.gather(*(c.show() for c in containers), return_exceptions=True)
+            for x in await asyncio.gather(*(self._show(c) for c in containers), return_exceptions=True)
         ]
         infos_and_names = [(self._name_to_id(task, info["Name"]), info) for info in infos]
         dead = [
