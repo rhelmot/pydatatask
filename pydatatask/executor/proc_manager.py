@@ -567,7 +567,7 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
         app: str = "pydatatask",
         image_prefix: str = "",
         nil_ephemeral: Optional[Ephemeral[None]] = None,
-        kube_namespace: str = "default",
+        kube_namespace: Optional[str] = None,
         kube_host: Host = Host("LOCAL_KUBE", HostOS.Linux),
         kube_quota: Optional[Quota] = None,
         kube_context: Optional[str] = None,
