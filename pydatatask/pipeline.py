@@ -259,7 +259,7 @@ class Pipeline:
         u: taskmodule.Task
         v: taskmodule.Task
         for u, v, attrs in graph.edges(data=True):  # type: ignore[misc]
-            if u is v or u.long_running or attrs["multi"]:
+            if u is v or u.long_running or attrs["multi"] or attrs["content_keyed"]:
                 continue
             for name, link in list(u.links.items()):
                 link_attrs = {}
@@ -616,6 +616,7 @@ class Pipeline:
                 attrs["follow_footprint"] = follow_footprint
                 attrs["rfollow_footprint"] = rfollow_footprint
                 attrs["multi"] = multi
+                attrs["content_keyed"] = link.content_keyed_sha256
                 repo = attrs.pop("repo")
                 edges = []
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:
@@ -678,6 +679,7 @@ class Pipeline:
                         ulink=udata["link_name"],
                         vlink=vdata["link_name"],
                         multi=udata["multi"] or vdata["multi"],
+                        content_keyed=udata["content_keyed"] or vdata["content_keyed"],
                     )
         return result
 
