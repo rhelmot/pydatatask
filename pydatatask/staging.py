@@ -37,6 +37,7 @@ from pydatatask.declarative import (
     build_repository_picker,
     build_task_picker,
     host_constructor,
+    quota_constructor,
 )
 from pydatatask.executor import Executor
 from pydatatask.pipeline import Pipeline
@@ -613,6 +614,8 @@ class PipelineStaging:
                 all_tasks.append(task_constructor(task_name, dict_spec))
 
         root_hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in self.spec.hosts.items()}
+        mjq = quota_constructor(self.spec.max_job_quota)
+        assert isinstance(mjq, Quota)
         return Pipeline(
             all_tasks,
             session,
@@ -631,7 +634,7 @@ class PipelineStaging:
             ),
             global_template_env=global_template_env,
             global_script_env=global_script_env,
-            max_job_quota=self.spec.max_job_quota,
+            max_job_quota=mjq,
         )
 
     def allocate(
