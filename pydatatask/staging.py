@@ -614,7 +614,7 @@ class PipelineStaging:
                 all_tasks.append(task_constructor(task_name, dict_spec))
 
         root_hosts = {name: host_constructor(nameit(asdict(val), name)) for name, val in self.spec.hosts.items()}
-        mjq = quota_constructor(self.spec.max_job_quota)
+        mjq = None if self.spec.max_job_quota is None else quota_constructor(self.spec.max_job_quota)
         assert isinstance(mjq, Quota)
         return Pipeline(
             all_tasks,
