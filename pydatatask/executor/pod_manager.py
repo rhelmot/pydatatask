@@ -187,9 +187,11 @@ class PodManager(Executor):
         return self.connection.v1_ws
 
     def _id_to_name(self, task: str, job: str, replica: int) -> str:
+        task = task.replace("_", "-")
         return f"{self.app}-{task}-{job}-{replica}"
 
     def _name_to_id(self, name: str, task: str) -> Tuple[str, int]:
+        task = task.replace("_", "-")
         prefix = f"{self.app}-{task}-"
         if name.startswith(prefix):
             job, replica = name[len(prefix) :].split("-")
@@ -200,7 +202,6 @@ class PodManager(Executor):
         """Create a pod with the given manifest, named and labeled for this podman's app and the given job and
         task."""
         assert manifest["kind"] == "Pod"
-        task = task.replace("_", "-")
 
         manifest["metadata"] = manifest.get("metadata", {})
         manifest["metadata"].update(
