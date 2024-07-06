@@ -616,7 +616,7 @@ class Pipeline:
                 attrs["follow_footprint"] = follow_footprint
                 attrs["rfollow_footprint"] = rfollow_footprint
                 attrs["multi"] = multi
-                attrs["content_keyed"] = link.content_keyed_sha256
+                attrs["content_keyed"] = link.content_keyed_md5
                 repo = attrs.pop("repo")
                 edges = []
                 if attrs["is_input"] or attrs["required_for_start"] or attrs["inhibits_start"]:

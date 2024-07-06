@@ -193,7 +193,7 @@ class Link:
     required_for_success: bool
     force_path: Optional[str]
     DANGEROUS_filename_is_key: bool
-    content_keyed_sha256: bool
+    content_keyed_md5: bool
 
 
 class Task(ABC):
@@ -362,13 +362,13 @@ class Task(ABC):
         )
         headers = {"Cookie": "secret=" + self.agent_secret}
 
-        content_keyed_sha256 = self.links[link_name].content_keyed_sha256
+        content_keyed_md5 = self.links[link_name].content_keyed_md5
         DANGEROUS_filename_is_key = self.links[link_name].DANGEROUS_filename_is_key
         assert not (
-            content_keyed_sha256 and DANGEROUS_filename_is_key
-        ), "content_keyed_sha256 and DANGEROUS_filename_is_key are mutually exclusive"
-        if self.links[link_name].content_keyed_sha256:
-            result = f"UPLOAD_JOB=$(sha256sum {filename} | cut -d' ' -f1)\n"
+            content_keyed_md5 and DANGEROUS_filename_is_key
+        ), "content_keyed_md5 and DANGEROUS_filename_is_key are mutually exclusive"
+        if self.links[link_name].content_keyed_md5:
+            result = f"UPLOAD_JOB=$(md5sum {filename} | cut -d' ' -f1)\n"
         elif self.links[link_name].DANGEROUS_filename_is_key and not bypass_dangerous:
             result = f"UPLOAD_JOB=$(basename {filename})\n"
         else:
@@ -468,7 +468,7 @@ class Task(ABC):
         force_upload_dir: Optional[str] = None,
         mkdir: bool = True,
         DANGEROUS_filename_is_key: bool = False,
-        content_keyed_sha256: bool = False,
+        content_keyed_md5: bool = False,
     ) -> Tuple[Any, Any, Dict[str, str]]:
         """Misery and woe.
 
@@ -511,8 +511,8 @@ class Task(ABC):
         }
         """
         assert not (
-            DANGEROUS_filename_is_key and content_keyed_sha256
-        ), "DANGEROUS_filename_is_key and content_keyed_sha256 are mutually exclusive"
+            DANGEROUS_filename_is_key and content_keyed_md5
+        ), "DANGEROUS_filename_is_key and content_keyed_md5 are mutually exclusive"
         if DANGEROUS_filename_is_key:
             idgen_function = """
             idgen() {
@@ -520,11 +520,11 @@ class Task(ABC):
                 echo $(basename "$f")
             }
             """
-        elif content_keyed_sha256:
+        elif content_keyed_md5:
             idgen_function = """
             idgen() {
                 f="$1"
-                echo $(sha256sum "$f" | cut -d' ' -f1)
+                echo $(md5sum "$f" | cut -d' ' -f1)
             }
             """
 
@@ -678,7 +678,7 @@ class Task(ABC):
         required_for_success: Optional[bool] = None,
         force_path: Optional[str] = None,
         DANGEROUS_filename_is_key: bool = False,
-        content_keyed_sha256: bool = False,
+        content_keyed_md5: bool = False,
     ):
         """Create a link between this task and a repository.
 
@@ -740,7 +740,7 @@ class Task(ABC):
             required_for_success=required_for_success,
             force_path=force_path,
             DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
-            content_keyed_sha256=content_keyed_sha256,
+            content_keyed_md5=content_keyed_md5,
         )
 
     def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":

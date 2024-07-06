@@ -45,7 +45,7 @@
     "DANGEROUS_filename_is_key": {
       "type": "boolean"
     },
-    "content_keyed_sha256": {
+    "content_keyed_md5": {
       "type": "boolean"
     },
   },

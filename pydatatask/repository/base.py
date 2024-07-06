@@ -160,8 +160,8 @@ class Repository(ABC):
         """
 
         force_path = task.links[link_name].force_path
-        content_keyed_sha256 = task.links[link_name].content_keyed_sha256
-        assert not content_keyed_sha256 or isinstance(self, (repomodule.BlobRepository, repomodule.MetadataRepository))
+        content_keyed_md5 = task.links[link_name].content_keyed_md5
+        assert not content_keyed_md5 or isinstance(self, (repomodule.BlobRepository, repomodule.MetadataRepository))
 
         if kind in (taskmodule.LinkKind.InputId, taskmodule.LinkKind.OutputId):
             return taskmodule.TemplateInfo(job)
@@ -185,7 +185,7 @@ class Repository(ABC):
             )
             put = task.mk_repo_put(filepath, link_name, job)
 
-            if content_keyed_sha256:
+            if content_keyed_md5:
                 cokey_dirs = {}
                 for k in task.links[link_name].cokeyed:
                     cofilepath = task.mktemp(f"output-{link_name}-{k}-{job}")
@@ -212,7 +212,7 @@ class Repository(ABC):
                 hostjob,
                 mkdir=force_path is None,
                 DANGEROUS_filename_is_key=task.links[link_name].DANGEROUS_filename_is_key,
-                content_keyed_sha256=task.links[link_name].content_keyed_sha256,
+                content_keyed_md5=task.links[link_name].content_keyed_md5,
             )
             return taskmodule.TemplateInfo(StrDict(filepath, extra_dirs), preamble=preamble, epilogue=epilogue)
         if kind == taskmodule.LinkKind.StreamingInputFilepath:
