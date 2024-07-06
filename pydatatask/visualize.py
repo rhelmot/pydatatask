@@ -323,7 +323,6 @@ class TaskVisualizer:
             fig = go.Figure()
             annotations = []
             self.populate_all_node_info(list(pos.keys()))
-            print(self.nodes)
 
             for node, (x, y) in pos.items():
                 results = self.nodes[node.name]
