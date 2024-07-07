@@ -586,7 +586,7 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
 
         if nil_ephemeral is not None:
             self._local_kube: Optional[KubeContainerManager] = KubeContainerManager(
-                quota=quota,
+                quota=kube_quota or quota,
                 cluster=PodManager(
                     kube_quota or quota,
                     kube_host,
