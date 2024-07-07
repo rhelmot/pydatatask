@@ -498,8 +498,8 @@ class Task(ABC):
             else:
                 return f"ln -s {cokeydir}/$f {upload}"
 
-        idgen_function = """
-        idgen() {
+        idgen_function = f"""
+        idgen_{nonce}() {{
           echo $(($(shuf -i0-255 -n1) +
                   $(shuf -i0-255 -n1)*0x100 +
                   $(shuf -i0-255 -n1)*0x10000 +
@@ -508,24 +508,24 @@ class Task(ABC):
                   $(shuf -i0-255 -n1)*0x10000000000 +
                   $(shuf -i0-255 -n1)*0x1000000000000 +
                   $(shuf -i0-127 -n1)*0x100000000000000))
-        }
+        }}
         """
         assert not (
             DANGEROUS_filename_is_key and content_keyed_md5
         ), "DANGEROUS_filename_is_key and content_keyed_md5 are mutually exclusive"
         if DANGEROUS_filename_is_key:
-            idgen_function = """
-            idgen() {
+            idgen_function = f"""
+            idgen_{nonce}() {{
                 f="$1"
                 echo $(basename "$f")
-            }
+            }}
             """
         elif content_keyed_md5:
-            idgen_function = """
-            idgen() {
+            idgen_function = f"""
+            idgen_{nonce}() {{
                 f="$1"
                 echo $(md5sum "$f" | cut -d' ' -f1)
-            }
+            }}
             """
 
         templated_preamble = f"""
@@ -534,7 +534,7 @@ class Task(ABC):
         {self.host.mk_mkdir(lock)}
         {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
         {idgen_function}
-        watcher() {{
+        watcher_{nonce}() {{
           WATCHER_LAST=
           while ! [ -d {filepath} ]; do
             sleep 1
@@ -547,7 +547,7 @@ class Task(ABC):
             fi
             for f in *; do
               if [ -e "$f" ] && ! [ -e "{scratch}/$f" ] && ! [ -e "{lock}/$f" ] && [ "$(($(date +%s) - $(stat -c %Y "$f")))" -ge 5 ]; then
-                ID=$(idgen "$f")
+                ID=$(idgen_{nonce} "$f")
                 ln -sf "$PWD/$f" {upload}
                 {self.mk_repo_put(upload, link_name, "$ID", hostjob, bypass_dangerous=True)}
                 rm {upload}
@@ -562,7 +562,7 @@ class Task(ABC):
             done
           done
         }}
-        watcher &
+        watcher_{nonce} &
         WATCHER_PID_{nonce}=$!
         """
 
