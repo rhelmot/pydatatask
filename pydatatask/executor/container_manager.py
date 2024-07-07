@@ -331,6 +331,57 @@ class KubeContainerManager(AbstractContainerManager):
         super().cache_flush()
         self.cluster.cache_flush()
 
+    def build_pod_spec(
+        self,
+        image: str,
+        entrypoint: List[str],
+        cmd: str,
+        environ: Dict[str, str],
+        quota: Quota,
+        mounts: Dict[str, str],
+        privileged: bool,
+    ):
+        mount_info = {
+            provided_name: (
+                str(Path(provided_name)).replace("/", "-").replace("_", "-").strip("-"),
+                self._volume_lookup(str(Path(provided_name))),
+            )
+            for provided_name in mounts.values()
+        }
+        return {
+            "restartPolicy": "Never",
+            "containers": [
+                {
+                    "name": "main",
+                    "image": self._image_prefix + image,
+                    "imagePullPolicy": "Always",
+                    "command": entrypoint,
+                    "args": [cmd],
+                    "env": [{"name": name, "value": value} for name, value in environ.items()]
+                    + [{"name": "NODE_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}],
+                    "resources": {
+                        "requests": {
+                            "cpu": str(quota.cpu),
+                            "memory": str(quota.mem),
+                        },
+                        "limits": {
+                            "cpu": str(quota.cpu),
+                            "memory": str(quota.mem),
+                        },
+                    },
+                    "securityContext": {
+                        "privileged": privileged,
+                    },
+                    "volumeMounts": [
+                        {"mountPath": mountpoint, "name": mount_info[name][0]}
+                        for mountpoint, name in mounts.items()
+                        if not mount_info[name][1].null
+                    ],
+                }
+            ],
+            "volumes": [info.to_kube(name) for (name, info) in mount_info.values() if not info.null],
+        }
+
     async def launch(
         self,
         task: str,
@@ -347,13 +398,7 @@ class KubeContainerManager(AbstractContainerManager):
     ):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
-        mount_info = {
-            provided_name: (
-                str(Path(provided_name)).replace("/", "-").replace("_", "-").strip("-"),
-                self._volume_lookup(str(Path(provided_name))),
-            )
-            for provided_name in mounts.values()
-        }
+        podspec = self.build_pod_spec(image, entrypoint, cmd, environ, quota, mounts, privileged)
         await self.cluster.launch(
             task,
             job,
@@ -361,39 +406,7 @@ class KubeContainerManager(AbstractContainerManager):
             {
                 "apiVersion": "v1",
                 "kind": "Pod",
-                "spec": {
-                    "restartPolicy": "Never",
-                    "containers": [
-                        {
-                            "name": "main",
-                            "image": self._image_prefix + image,
-                            "imagePullPolicy": "Always",
-                            "command": entrypoint,
-                            "args": [cmd],
-                            "env": [{"name": name, "value": value} for name, value in environ.items()]
-                            + [{"name": "NODE_IP", "valueFrom": {"fieldRef": {"fieldPath": "status.hostIP"}}}],
-                            "resources": {
-                                "requests": {
-                                    "cpu": str(quota.cpu),
-                                    "memory": str(quota.mem),
-                                },
-                                "limits": {
-                                    "cpu": str(quota.cpu),
-                                    "memory": str(quota.mem),
-                                },
-                            },
-                            "securityContext": {
-                                "privileged": privileged,
-                            },
-                            "volumeMounts": [
-                                {"mountPath": mountpoint, "name": mount_info[name][0]}
-                                for mountpoint, name in mounts.items()
-                                if not mount_info[name][1].null
-                            ],
-                        }
-                    ],
-                    "volumes": [info.to_kube(name) for (name, info) in mount_info.values() if not info.null],
-                },
+                "spec": podspec,
             },
         )
 

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
 
-from kubernetes_asyncio.client import ApiClient, ApiException, CoreV1Api
+from kubernetes_asyncio.client import ApiClient, ApiException, AppsV1Api, CoreV1Api
 from kubernetes_asyncio.config import (
     ConfigException,
     load_incluster_config,
@@ -53,6 +53,7 @@ class KubeConnection:
         self.api_ws: WsApiClient = WsApiClient(config)
         self.v1 = CoreV1Api(self.api)
         self.v1_ws = CoreV1Api(self.api_ws)
+        self.v1apps = AppsV1Api(self.api)
         self.incluster = incluster
 
     async def close(self):

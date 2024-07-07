@@ -15,7 +15,7 @@ from pydatatask.quota import Quota
 
 if TYPE_CHECKING:
     from ..pipeline import Pipeline
-    from . import container_manager, pod_manager, proc_manager
+    from . import container_manager, container_set_manager, pod_manager, proc_manager
 
 
 class Executor:
@@ -47,6 +47,9 @@ class Executor:
         This is allowed to fail with TypeError if this is not possible.
         """
         raise TypeError(f"{type(self)} cannot host a linux container")
+
+    def to_container_set_manager(self) -> "container_set_manager.AbstractContainerSetManager":
+        raise TypeError(f"{type(self)} cannot host a linux container set")
 
     @property
     def host(self) -> Host:

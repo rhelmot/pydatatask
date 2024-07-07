@@ -15,6 +15,9 @@ __all__ = (
     "docker_connect",
     "SSHLinuxManager",
     "InProcessLocalLinuxManager",
+    "AbstractContainerSetManager",
+    "DockerContainerSetManager",
+    "KubeContainerSetManager",
 )
 
 from .base import Executor
@@ -31,4 +34,9 @@ from .container_manager import (
     DockerContainerManager,
     KubeContainerManager,
     docker_connect,
+)
+from .container_set_manager import (
+    AbstractContainerSetManager,
+    DockerContainerSetManager,
+    KubeContainerSetManager,
 )

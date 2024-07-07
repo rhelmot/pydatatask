@@ -51,7 +51,14 @@ from pydatatask.repository import (
 from pydatatask.repository.base import CompressedBlobRepository
 from pydatatask.repository.filesystem import TarfileFilesystemRepository
 from pydatatask.session import Ephemeral
-from pydatatask.task import ContainerTask, KubeTask, LinkKind, ProcessTask, Task
+from pydatatask.task import (
+    ContainerSetTask,
+    ContainerTask,
+    KubeTask,
+    LinkKind,
+    ProcessTask,
+    Task,
+)
 import pydatatask
 
 _T = TypeVar("_T")
@@ -728,7 +735,6 @@ def build_task_picker(
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
                 "queries": queries_constructor,
-                "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
@@ -758,7 +764,6 @@ def build_task_picker(
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
                 "queries": queries_constructor,
-                "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
@@ -785,7 +790,6 @@ def build_task_picker(
                 "ready": make_picker("Repository", repos),
                 "links": links_constructor,
                 "queries": queries_constructor,
-                "window": timedelta_constructor,
                 "timeout": timedelta_constructor,
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
@@ -804,6 +808,36 @@ def build_task_picker(
                     # fmt: on
                 },
             )
+        ),
+        "ContainerSet": make_annotated_constructor(
+            "ContainerSetTask",
+            ContainerSetTask,
+            {
+                # fmt: off
+                # Common to all tasks
+                "name": str,
+                "executor": make_picker("Executor", executors),
+                "done": make_picker("Repository", repos),
+                "ready": make_picker("Repository", repos),
+                "links": links_constructor,
+                "queries": queries_constructor,
+                "timeout": timedelta_constructor,
+                "long_running": parse_bool,
+                "failure_ok": parse_bool,
+                "replicable": parse_bool,
+
+                # Containerset-specific
+                "template": str,
+                "image": str,
+                "environ": make_dict_parser("environ", str, str),
+                "entrypoint": make_list_parser("entrypoint", str),
+                "single_instance_quota": lambda thing: None if thing is None else quota_constructor(thing),
+                "logs": make_picker("Repository", repos),
+                "privileged": parse_bool,
+                "tty": parse_bool,
+                "mounts": make_dict_parser("mounts", str, str),
+                # fmt: on
+            },
         ),
     }
     for ep in entry_points(group="pydatatask.task_constructors"):

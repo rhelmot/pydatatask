@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING, Any, List
 from .base import Repository
 
 if TYPE_CHECKING:
-    from kubernetes_asyncio.client.models.v1_pod import V1Pod
-
-    from ..task import ContainerTask, KubeTask, ProcessTask
+    from ..task import ContainerSetTask, ContainerTask, KubeTask, ProcessTask
 
 
 class LiveKubeRepository(Repository):
@@ -132,5 +130,37 @@ class LiveProcessRepository(Repository):
 
     async def delete(self, job, /):
         """Deleting a job from this repository will delete the processes for that job."""
+        for jjob, replica in await self.task.manager.live(self.task.name, job):
+            await self.task.manager.kill(self.task.name, jjob, replica)
+
+
+class LiveContainerSetRepository(Repository):
+    _EXCLUDE_BACKUP = True
+
+    def __init__(self, task: "ContainerSetTask"):
+        super().__init__()
+        self.task = task
+
+    def footprint(self):
+        return []
+
+    def __getstate__(self):
+        return (self.task.name,)
+
+    async def unfiltered_iter(self):
+        seen = set()
+        for name, _ in await self.task.manager.live(self.task.name):
+            if name in seen:
+                continue
+            seen.add(name)
+            yield name
+
+    async def contains(self, item, /):
+        return any(item == job for job, _ in await self.task.manager.live(self.task.name))
+
+    def __repr__(self):
+        return f"<LiveContainerSetRepository task={self.task.name}>"
+
+    async def delete(self, job, /):
         for jjob, replica in await self.task.manager.live(self.task.name, job):
             await self.task.manager.kill(self.task.name, jjob, replica)

@@ -131,7 +131,6 @@ class TaskSpec:
     ready: Optional[str] = None
     links: Dict[str, LinkSpec] = field(default_factory=dict)
     queries: Dict[str, QuerySpec] = field(default_factory=dict)
-    window: Dict[str, str] = field(default_factory=dict)
     timeout: Dict[str, str] = field(default_factory=dict)
     long_running: bool = False
     job_quota: Optional[Quota] = None
