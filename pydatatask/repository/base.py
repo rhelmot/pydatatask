@@ -1153,8 +1153,8 @@ class CacheInProcessMetadataRepository(MetadataRepository):
 
     def cache_flush(self):
         self.base.cache_flush()
-        self._cache.clear()
-        self._negative_cache.clear()
+        self._cache = {}
+        self._negative_cache = set()
         self._complete_keys = False
         self._complete_values = False
 
@@ -1191,7 +1191,9 @@ class CacheInProcessMetadataRepository(MetadataRepository):
 
     async def unfiltered_iter(self):
         if self._complete_keys:
-            for k in self._cache:
+            # do not yield in the middle of iterating a mutable dict
+            keys = list(self._cache)
+            for k in keys:
                 yield k
         else:
             # optimization for any()
