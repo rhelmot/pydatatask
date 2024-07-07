@@ -220,7 +220,10 @@ class PodManager(Executor):
 
     async def kill(self, task: str, job: str, replica: int):
         """Killllllllllllll."""
-        await self.v1.delete_namespaced_pod(self._id_to_name(task, job, replica), self.namespace)
+        try:
+            await self.v1.delete_namespaced_pod(self._id_to_name(task, job, replica), self.namespace)
+        except ApiException:
+            pass
 
     async def update(
         self, task: str, timeout: Optional[timedelta] = None
@@ -294,7 +297,10 @@ class PodManager(Executor):
 
     async def delete(self, pod: Any):
         """Destroy the given pod."""
-        await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
+        try:
+            await self.v1.delete_namespaced_pod(pod.metadata.name, self.namespace)
+        except ApiException:
+            pass
 
     async def logs(self, pod: Any, timeout=10) -> bytes:
         """Retrieve the logs for the given pod."""
