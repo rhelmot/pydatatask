@@ -831,7 +831,7 @@ def build_task_picker(
                 "image": str,
                 "environ": make_dict_parser("environ", str, str),
                 "entrypoint": make_list_parser("entrypoint", str),
-                "single_instance_quota": lambda thing: None if thing is None else quota_constructor(thing),
+                "job_quota": lambda thing: None if thing is None else quota_constructor(thing),
                 "logs": make_picker("Repository", repos),
                 "privileged": parse_bool,
                 "tty": parse_bool,
