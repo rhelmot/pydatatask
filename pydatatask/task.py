@@ -1146,6 +1146,7 @@ class TemplateShellTask(Task):
         set +e
         (
         set -e
+        set -u
         {main}
         )
         RETCODE=$?
