@@ -2237,7 +2237,7 @@ class ContainerSetTask(TemplateShellTask):
         done: "repomodule.MetadataRepository",
         executor: execmodule.Executor,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
-        single_instance_quota: Union[Quota, _MaxQuotaType, None] = None,
+        job_quota: Union[Quota, _MaxQuotaType, None] = None,
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
         mounts: Optional[Dict[str, str]] = None,
@@ -2268,7 +2268,7 @@ class ContainerSetTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._single_instance_quota = single_instance_quota or Quota.parse(1, "256Mi")
+        self._single_instance_quota = job_quota or Quota.parse(1, "256Mi")
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerSetManager] = None
         self.warned = False
