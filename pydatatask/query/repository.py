@@ -123,6 +123,10 @@ class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
         async for a, b, c, d in (await self._resolve()).walk(job):
             yield a, b, c, d
 
+    async def iterdir(self, job, path):
+        async for a in (await self._resolve()).iterdir(job, path):
+            yield a
+
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         return await (await self._resolve()).dump_tarball(job, stream)
 
