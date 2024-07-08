@@ -2268,7 +2268,7 @@ class ContainerSetTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._single_instance_quota = job_quota or Quota.parse(1, "256Mi")
+        self._job_quota = job_quota or Quota.parse(1, "256Mi")
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerSetManager] = None
         self.warned = False
