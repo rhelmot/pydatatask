@@ -46,7 +46,10 @@ from pydatatask.executor.container_manager import (
     KubeContainerManager,
     docker_connect,
 )
-from pydatatask.executor.container_set_manager import KubeContainerSetManager
+from pydatatask.executor.container_set_manager import (
+    DockerContainerSetManager,
+    KubeContainerSetManager,
+)
 from pydatatask.executor.pod_manager import PodManager, VolumeSpec, kube_connect
 from pydatatask.host import LOCAL_HOST, Host, HostOS
 from pydatatask.quota import LOCALHOST_QUOTA, Quota
@@ -390,8 +393,12 @@ class LocalLinuxManager(AbstractProcessManager):
         if self._local_docker is not None:
             dir(self._local_docker.docker)
             return self._local_docker
-        if self._local_docker is not None:
-            return self._local_docker
+        raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
+
+    def to_container_set_manager(self):
+        if self._local_docker_set is not None:
+            dir(self._local_docker_set._docker_manager.docker)
+            return self._local_docker_set
         raise TypeError("Not configured to connect to docker (pass nil_ephemeral, lol)")
 
     def cache_flush(self):
@@ -421,8 +428,16 @@ class LocalLinuxManager(AbstractProcessManager):
                 image_prefix=image_prefix,
                 host_path_overrides=host_path_overrides,
             )
+            self._local_docker_set: Optional[DockerContainerSetManager] = DockerContainerSetManager(
+                quota=quota,
+                app=app,
+                docker=nil_ephemeral._session.ephemeral(docker_connect(), optional=True, name=f"{app}_local_docker"),
+                image_prefix=image_prefix,
+                host_path_overrides=host_path_overrides,
+            )
         else:
             self._local_docker = None
+            self._local_docker_set = None
 
     @property
     def host(self) -> Host:
