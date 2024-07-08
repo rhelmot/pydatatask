@@ -107,6 +107,9 @@ class DockerContainerSetManager(AbstractContainerSetManager):
             host_path_overrides=host_path_overrides,
         )
 
+    async def size(self):
+        return 1
+
     @property
     def host(self):
         return self._docker_manager.host
