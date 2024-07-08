@@ -107,6 +107,10 @@ class DockerContainerSetManager(AbstractContainerSetManager):
             host_path_overrides=host_path_overrides,
         )
 
+    @property
+    def host(self):
+        return self._docker_manager.host
+
     def cache_flush(self):
         self._docker_manager.cache_flush()
 
@@ -335,3 +339,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
         dss = await self.query(task, job)
         return {self._ds_to_id(ds): ds.metadata.creation_timestamp for ds in dss}
+
+    @property
+    def host(self):
+        return self.inner.host
