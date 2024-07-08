@@ -325,6 +325,10 @@ class PipelineSpec:
                 reponame = f"autologs_{taskname}"
                 self.repo_classes[reponame] = RepoClassSpec(cls="BlobRepository", required=False)
                 task.executable.args["logs"] = reponame
+            if task.executable.cls == "ContainerSet" and "logs" not in task.executable.args:
+                reponame = f"autologs_{taskname}"
+                self.repo_classes[reponame] = RepoClassSpec(cls="BlobRepository", required=False)
+                task.executable.args["logs"] = reponame
             if task.executable.cls == "Process" and "stdout" not in task.executable.args:
                 reponame = f"autostdout_{taskname}"
                 self.repo_classes[reponame] = RepoClassSpec(cls="BlobRepository", required=False)
