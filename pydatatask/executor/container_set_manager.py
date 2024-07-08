@@ -248,6 +248,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
         if tty:
             raise ValueError("Cannot do tty from a container on a kube cluster")
         pod_spec = self.inner.build_pod_spec(image, entrypoint, cmd, environ, quota, mounts, privileged)
+        pod_spec["restartPolicy"] = "Always"
         nonce = "".join(random.choice(string.ascii_lowercase) for _ in range(8))
         pod_template = {
             "metadata": {
