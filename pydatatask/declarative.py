@@ -809,11 +809,12 @@ def build_task_picker(
                 },
             )
         ),
-        "ContainerSet": make_annotated_constructor(
-            "ContainerSetTask",
-            ContainerSetTask,
-            {
-                # fmt: off
+        "ContainerSet": mk_container_wrapper(
+            make_annotated_constructor(
+                "ContainerSetTask",
+                ContainerSetTask,
+                {
+                    # fmt: off
                 # Common to all tasks
                 "name": str,
                 "executor": make_picker("Executor", executors),
@@ -836,8 +837,9 @@ def build_task_picker(
                 "privileged": parse_bool,
                 "tty": parse_bool,
                 "mounts": make_dict_parser("mounts", str, str),
-                # fmt: on
-            },
+                    # fmt: on
+                },
+            )
         ),
     }
     for ep in entry_points(group="pydatatask.task_constructors"):
