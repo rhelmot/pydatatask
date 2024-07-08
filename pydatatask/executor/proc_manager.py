@@ -405,6 +405,8 @@ class LocalLinuxManager(AbstractProcessManager):
         super().cache_flush()
         if self._local_docker is not None:
             self._local_docker.cache_flush()
+        if self._local_docker_set is not None:
+            self._local_docker_set.cache_flush()
 
     def __init__(
         self,
@@ -615,8 +617,10 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
                 ),
                 image_prefix=image_prefix,
             )
+            self._local_kube_set = KubeContainerSetManager(self._local_kube)
         else:
             self._local_kube = None
+            self._local_kube_set = None
 
     def cache_flush(self):
         super().cache_flush()
@@ -652,7 +656,7 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
             except SessionOpenFailedError as e:
                 e1 = e
             else:
-                return KubeContainerSetManager(self._local_kube)
+                return self._local_kube_set
         try:
             return super().to_container_set_manager()
         except SessionOpenFailedError as e2:
