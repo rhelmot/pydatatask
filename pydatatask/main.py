@@ -292,11 +292,10 @@ def main(
     parser_viz.add_argument("--host", help="The host to bind on", default="0.0.0.0")
     parser_viz.set_defaults(func=run_viz)
 
-    if fuse is not None:
-        parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
-        parser_fuse.set_defaults(func=fuse.main)
-        parser_fuse.add_argument("path", help="The mountpoint")
-        parser_fuse.add_argument("--verbose", "-v", dest="debug", action="store_true", help="Show FUSE debug logging")
+    parser_fuse = subparsers.add_parser("fuse", help="Mount a fuse filesystem to explore the pipeline's repos")
+    parser_fuse.set_defaults(func=fuse.main if fuse is not None else fuse_stub)
+    parser_fuse.add_argument("path", help="The mountpoint")
+    parser_fuse.add_argument("--verbose", "-v", dest="debug", action="store_true", help="Show FUSE debug logging")
 
     if instrument is not None:
         instrument(subparsers)
@@ -816,3 +815,9 @@ async def _repo_copy_fs(repo_src: repomodule.FilesystemRepository, repo_dst: rep
         queue = AsyncQueueStream()
 
         await asyncio.gather(repo_dst.dump_tarball(ident, queue), make_writer(repo_src, ident, queue)())
+
+
+def fuse_stub(*args, **kwargs):
+    print("Please pip install pydatafs in order to use pd fuse")
+    print("Note that this requires operating system dependencies, probably libfuse3-dev and fuse3")
+    return 1

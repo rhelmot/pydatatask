@@ -96,6 +96,10 @@ class FilesystemRepository(Repository, abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
+    def iterdir(self, job: str, path: str) -> AsyncIterator[str]:
+        raise NotImplementedError
+
+    @abc.abstractmethod
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         """Given a path, get the type of the file at that path."""
         raise NotImplementedError
@@ -338,6 +342,11 @@ class DirectoryRepository(FilesystemRepository, FileRepositoryBase):
             regs, links = partition(mk_islink(top), nondirs)
             yield str(rtop), dirs, list(regs), list(links)
 
+    async def iterdir(self, job, path):
+        root = self.fullpath(job)
+        for entry in (Path(root) / path).iterdir():
+            yield entry.name
+
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         r = os.stat(os.path.join(self.fullpath(job), path))
         if r.st_mode & stat.S_IFLNK:
@@ -464,6 +473,18 @@ class ContentAddressedBlobRepository(FilesystemRepository):
 
             for name in dir_names:
                 queue.append((dir_mapping[name], name))
+
+    async def iterdir(self, job, path):
+        info = await self.meta.info(job)
+        split = self._splitpath(path)
+        try:
+            child_info = self._follow_path(info, split)
+        except (ValueError, KeyError) as e:
+            raise ValueError(f"Not a directory: {job}:{path}") from e
+        if child_info["type"] != "DIRECTORY":
+            raise ValueError(f"Not a directory: {job}:{path}")
+        for child in child_info["children"]:
+            yield child["name"]
 
     def _follow_path(self, meta: List[Dict[str, Any]], path: List[str], insert: bool = False) -> Dict[str, Any]:
         for i, key in enumerate(path[:-1]):
@@ -618,6 +639,18 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         return child["size"], child["content"]
 
 
+def norm(pth):
+    pth = pth.strip("/")
+    while True:
+        if pth.startswith("./"):
+            pth = pth[2:]
+        elif pth.startswith("../"):
+            pth = pth[3:]
+        else:
+            break
+    return pth
+
+
 class TarfileFilesystemRepository(FilesystemRepository):
     """A filesystem repository which stores its data at-rest as a tarball.
 
@@ -656,10 +689,11 @@ class TarfileFilesystemRepository(FilesystemRepository):
                 else:
                     continue
 
-                name = entry.name().decode()
-                dirname, basename = name.rsplit("/", 1)
-                while not basename:
-                    dirname, basename = dirname.rsplit("/", 1)
+                name = norm(entry.name().decode())
+                if "/" in name:
+                    dirname, _ = name.rsplit("/", 1)
+                else:
+                    dirname = name
 
                 if dirname not in members:
                     members[dirname] = ([], [], [])
@@ -668,10 +702,22 @@ class TarfileFilesystemRepository(FilesystemRepository):
         for name, (d, r, s) in members.items():
             yield name, d, r, s
 
+    async def iterdir(self, job, path):
+        async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
+            async for entry in tar:
+                name = norm(entry.name().decode())
+                if "/" in name:
+                    dirname, basename = name.rsplit("/", 1)
+                else:
+                    dirname, basename = ".", name
+
+                if Path(dirname) == Path(path):
+                    yield basename
+
     async def get_type(self, job: str, path: str) -> Optional[FilesystemType]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                if entry.name().decode().strip("/") == path.strip("/"):
+                if norm(entry.name().decode()) == norm(path):
                     ty = entry.entry_type()
                     if ty == aiotarfile.TarfileEntryType.Directory:
                         return FilesystemType.DIRECTORY
@@ -686,21 +732,21 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def get_mode(self, job: str, path: str) -> Optional[int]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                if entry.name().decode().strip("/") == path.strip("/"):
+                if norm(entry.name().decode()) == norm(path):
                     return entry.mode()
         return None
 
     async def readlink(self, job: str, path: str) -> str:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                if entry.name().decode().strip("/") == path.strip("/"):
+                if norm(entry.name().decode()) == norm(path):
                     return entry.link_target().decode()
         raise ValueError("Member %s not found" % path)
 
     async def get_regular_meta(self, job: str, path: str) -> Tuple[int, Optional[str]]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                if entry.name().decode().strip("/") == path.strip("/"):
+                if norm(entry.name().decode()) == norm(path):
                     return (entry.size(), None)
         raise ValueError("Member %s not found" % path)
 
@@ -711,7 +757,7 @@ class TarfileFilesystemRepository(FilesystemRepository):
     async def open(self, job: str, path: Union[str, Path]) -> AsyncIterator[AReadStreamBase]:
         async with await self.inner.open(job, "rb") as fp, await aiotarfile.open_rd(fp) as tar:
             async for entry in tar:
-                if entry.name().decode().strip("/") == str(path).strip("/"):
+                if norm(entry.name().decode()) == norm(str(path)):
                     yield entry
         raise ValueError("Member %s not found" % path)
 
@@ -768,6 +814,10 @@ class FilterFilesystemRepository(FilterRepository, FilesystemRepository):
     async def walk(self, job: str) -> AsyncIterator[Tuple[str, List[str], List[str], List[str]]]:
         async for a, b, c, d in self.base.walk(job):
             yield a, b, c, d
+
+    async def iterdir(self, job, path):
+        async for child in self.base.iterdir(job, path):
+            yield child
 
     async def dump(self, job: str):
         thing = self.base.dump(job)

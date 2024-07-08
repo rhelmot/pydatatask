@@ -2,7 +2,7 @@
 # pylint: disable=import-error
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 import os
 
 from pydatafs.errors import FSInvalidError
@@ -79,6 +79,8 @@ class RepoDir(Directory):
             self.job_builder = self.symlink_builder
         elif isinstance(repo, repomodule.BlobRepository):
             self.job_builder = self.blob_builder
+        elif isinstance(repo, repomodule.FilesystemRepository):
+            self.job_builder = self.fs_builder
         else:
             self.job_builder = self.empty_builder
 
@@ -142,6 +144,9 @@ class RepoDir(Directory):
             writeback=writeback,
         )
 
+    def fs_builder(self, job: str):
+        return FsRepoDir(cast(repomodule.FilesystemRepository, self.repo), job)
+
     def empty_builder(self, job: str):
         return RWBufferedFile(identity=(self.repo, job), content=b"This repository is not readable\n")
 
@@ -170,6 +175,83 @@ class LinkDir(RepoDir):
     def __init__(self, link: taskmodule.Link):
         self.link = link
         super().__init__(link.repo)
+
+
+class FsRepoDir(Directory):
+    def __init__(self, repo: repomodule.FilesystemRepository, job: str, path: str = "."):
+        self.repo = repo
+        self.job = job
+        self.path = path
+        super().__init__(mode=0o555)
+
+    async def get_children(self):
+        async for member in self.repo.iterdir(self.job, self.path):
+            stuff = await self.get_child(member)
+            if stuff is not None:
+                yield member, stuff
+
+    async def get_child(self, name: str):
+        fullpath = f"{self.path}/{name}"
+        ty = await self.repo.get_type(self.job, fullpath)
+        if ty is None:
+            return None
+        if ty == repomodule.FilesystemType.FILE:
+            return FsRepoFile(self.repo, self.job, fullpath)
+        elif ty == repomodule.FilesystemType.DIRECTORY:
+            return FsRepoDir(self.repo, self.job, fullpath)
+        elif ty == repomodule.FilesystemType.SYMLINK:
+            return Symlink((self.repo, self.job, fullpath), await self.repo.readlink(self.job, fullpath))
+        else:
+            raise TypeError()
+
+    def __hash__(self):
+        return hash((self.repo, self.job, self.path))
+
+    def __eq__(self, other):
+        return type(self) is type(other) and (self.repo, self.job, self.path) == (other.repo, other.job, other.path)
+
+
+class FsRepoFile(File):
+    def __init__(self, repo: repomodule.FilesystemRepository, job: str, path: str):
+        self.repo = repo
+        self.job = job
+        self.path = path
+        self._fp = None
+        self._fp_mgr = None
+        self._off = None
+        super().__init__(mode=0o444)
+
+    def __hash__(self):
+        return hash((self.repo, self.job, self.path))
+
+    def __eq__(self, other):
+        return type(self) is type(other) and (self.repo, self.job, self.path) == (other.repo, other.job, other.path)
+
+    async def read(self, off, size):
+        if self._fp is None or self._off is None or off < self._off:
+            self._fp_mgr = await self.repo.open(self.job, self.path)
+            self._fp = await self._fp_mgr.__aenter__()
+            self._off = 0
+
+        while self._off > off:
+            data = await self._fp.read(self._off - off)
+            self._off += len(data)
+
+        if self._off != off:
+            raise Exception("Underlying file object is misbehaving")
+
+        data = bytearray()
+        while len(data) < size:
+            datum = await self._fp.read(size - len(data))
+            self._off += len(datum)
+            if not datum:
+                break
+            data.extend(datum)
+
+        if len(data) > size:
+            raise Exception("Underlying file object is misbehaving")
+
+        return bytes(data)
 
 
 async def main(pipeline: Pipeline, path: str, debug: bool):
