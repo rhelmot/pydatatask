@@ -46,6 +46,7 @@ from pydatatask.executor.container_manager import (
     KubeContainerManager,
     docker_connect,
 )
+from pydatatask.executor.container_set_manager import KubeContainerSetManager
 from pydatatask.executor.pod_manager import PodManager, VolumeSpec, kube_connect
 from pydatatask.host import LOCAL_HOST, Host, HostOS
 from pydatatask.quota import LOCALHOST_QUOTA, Quota
@@ -623,6 +624,22 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
                 return self._local_kube
         try:
             return super().to_container_manager()
+        except SessionOpenFailedError as e2:
+            if e1 is not None:
+                raise e1 from e2
+            raise
+
+    def to_container_set_manager(self):
+        e1 = None
+        if self._local_kube is not None:
+            try:
+                dir(self._local_kube.cluster.connection)
+            except SessionOpenFailedError as e:
+                e1 = e
+            else:
+                return KubeContainerSetManager(self._local_kube)
+        try:
+            return super().to_container_set_manager()
         except SessionOpenFailedError as e2:
             if e1 is not None:
                 raise e1 from e2
