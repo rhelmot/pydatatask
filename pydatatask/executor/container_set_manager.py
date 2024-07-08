@@ -98,6 +98,7 @@ class DockerContainerSetManager(AbstractContainerSetManager):
         image_prefix: str = "",
         host_path_overrides: Optional[Dict[str, str]] = None,
     ):
+        super().__init__(quota)
         self._docker_manager = DockerContainerManager(
             quota,
             app=app + "-set",
@@ -149,11 +150,15 @@ class DockerContainerSetManager(AbstractContainerSetManager):
 
 class KubeContainerSetManager(AbstractContainerSetManager):
     def __init__(self, inner: KubeContainerManager):
+        super().__init__(inner.quota)
         self.inner = inner
         self._connection = inner.cluster._connection
         self._cached_ds = None
         self.namespace = inner.cluster.namespace
         self.app = inner.cluster.app + "-set"
+
+    async def size(self):
+        return len(await self.v1.list_node().items)
 
     @property
     def connection(self) -> pod_manager.KubeConnection:
