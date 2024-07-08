@@ -231,7 +231,7 @@ class Task(ABC):
         self.done = done
         self.failure_ok = failure_ok
         self.replicable = replicable
-        self.success = pydatatask.query.repository.QueryRepository(
+        self.success = pydatatask.query.repository.QueryMetadataRepository(
             "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
         self._max_quota: Optional[Quota] = None
