@@ -158,7 +158,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
         self.app = inner.cluster.app + "-set"
 
     async def size(self):
-        return len(await self.v1.list_node().items)
+        return len((await self.v1.list_node()).items)
 
     @property
     def connection(self) -> pod_manager.KubeConnection:
