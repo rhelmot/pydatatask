@@ -236,7 +236,7 @@ class PodManager(Executor):
         live = set(podmap) - dead
         now = datetime.now(tz=timezone.utc)
         timed = {
-            name for name in live if timeout is not None and podmap[name].metadata.creation_timesamp + timeout > now
+            name for name in live if timeout is not None and podmap[name].metadata.creation_timestamp + timeout > now
         }
         live -= timed
         dead |= timed
