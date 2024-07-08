@@ -346,7 +346,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
             pass
 
     async def live(self, task: str, job: Optional[str] = None) -> Dict[Tuple[str, int], datetime]:
-        dss = await self.query(task, job)
+        dss = await self.query(task=task, job=job)
         return {self._ds_to_id(ds): ds.metadata.creation_timestamp for ds in dss}
 
     @property
