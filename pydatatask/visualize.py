@@ -273,7 +273,7 @@ class TaskVisualizer:
             # Read the file contents
             try:
                 if isinstance(repo, BlobRepository):
-                    contents = self.do_async(repo.blobinfo(job))
+                    contents = self.do_async(repo.blobinfo(job)).decode("utf-8", errors="replace")
                 elif isinstance(repo, MetadataRepository):
                     contents = yaml.safe_dump(self.do_async(repo.info(job)))
                 else:
