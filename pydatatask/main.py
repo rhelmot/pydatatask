@@ -652,7 +652,7 @@ async def inject_data(pipeline: Pipeline, data: str, job: str):
         return 1
 
     try:
-        await inject_data_inner(item, job, aiofiles.stdin_bytes)
+        await inject_data_inner(item, job, aiofiles.stdin_bytes, False)
     except TypeError:
         if FAIL_FAST:
             raise

@@ -107,7 +107,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         except KeyError as e:
             raise web.HTTPNotFound() from e
         content = await task.instrument_dump(request.content, link_str, None, job, hostjob)
-        await inject_data(repo, job, content)
+        await inject_data(repo, job, content, True)
         return web.Response(text=job)
 
     async def stream(request: web.Request) -> web.StreamResponse:
@@ -153,7 +153,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
         except KeyError as e:
             raise web.HTTPNotFound() from e
         content = await task.instrument_dump(request.content, link_str, cokey_str, job, hostjob)
-        await inject_data(repo, job, content)
+        await inject_data(repo, job, content, True)
         return web.Response(text=job)
 
     async def errors(request: web.Request) -> web.StreamResponse:
@@ -217,9 +217,9 @@ async def cat_fs_entry(item: repomodule.FilesystemRepository, job: str, stream: 
         await async_copyfile(fp, stream)
 
 
-async def inject_data(item: repomodule.Repository, job: str, stream: AReadStreamBase):
+async def inject_data(item: repomodule.Repository, job: str, stream: AReadStreamBase, agent_warn: bool):
     """Ingest one job of a repository from a stream."""
-    if await item.contains(job):
+    if agent_warn and await item.contains(job):
         l.warning(f"{item} already contains {job}")
         return
 
