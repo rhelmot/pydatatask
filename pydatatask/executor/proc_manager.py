@@ -626,6 +626,8 @@ class LocalLinuxOrKubeManager(LocalLinuxManager):
         super().cache_flush()
         if self._local_kube is not None:
             self._local_kube.cache_flush()
+        if self._local_kube_set is not None:
+            self._local_kube_set.cache_flush()
 
     def to_pod_manager(self):
         if self._local_kube is not None:
