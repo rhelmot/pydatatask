@@ -11,12 +11,19 @@ import time
 
 from dash import dcc, html
 from dash.dependencies import Input, Output
+from janus import Queue
 import dash
 import networkx as nx
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
+import yaml
 
-from .repository import FileRepositoryBase, FilesystemRepository
+from .repository import (
+    BlobRepository,
+    DirectoryRepository,
+    FileRepositoryBase,
+    MetadataRepository,
+)
 
 _default_index = """<!DOCTYPE html>
 <html>
@@ -86,22 +93,30 @@ class TaskVisualizer:
         self.register_callbacks()
 
         self.request = None
-        self.response = None
         self.thread = threading.Thread(target=self._thread, daemon=True)
         self.thread.start()
+
+    def do_async(self, coro):
+        response = []
+        while self.request is None:
+            time.sleep(0.05)
+        self.request.sync_q.put((coro, response))
+        while not response:
+            time.sleep(0.05)
+        return response[0].sync_q.get()
 
     def _thread(self):
         asyncio.run(self._async_thread())
 
     async def _async_thread(self):
+        self.request = Queue()
         async with self.pipeline:
             while True:
-                while self.request is None:
-                    await asyncio.sleep(0.1)
-                request = self.request
-                self.request = None
+                thing, response = await self.request.async_q.get()
+                response.append(Queue())
+                result = await thing
+                await response[0].async_q.put(result)
                 self.pipeline.cache_flush()
-                self.response = await self.get_task_info(request)
 
     def left_to_right_layout(self, G):
         """This doesn't really need docs, does it?"""
@@ -199,43 +214,36 @@ class TaskVisualizer:
 
         This is PROBABLY done to avoid blocking the main thread? Only @Clasm knows for sure why this was necessary.
         """
-        self.request = nodes
-        while self.response is None:
-            time.sleep(0.1)
-        self.nodes = self.response
-        self.response = None
+        self.nodes = self.do_async(self.get_task_info(nodes))
 
     @staticmethod
-    def generate_file_tree_html(path):
+    def generate_file_tree_html(taskname, linkname, jobs, ty):
         """Generates a collapsible file tree for the given path.
 
         This is used to display the contents of a repository.
         """
         items = []
-        for root, dirs, files in os.walk(path):
-            short_root = os.path.basename(root)
+        for job in jobs:
+            identity = {"type": ty, "index": f"{taskname}.{linkname}.{job}"}
             items.append(
                 html.Details(
                     [
-                        html.Summary(short_root, style={"cursor": "pointer"}),
                         html.Div(
                             [
                                 html.P(
-                                    file,
-                                    id={"type": "file", "index": os.path.join(root, file)},
+                                    job,
+                                    id=identity,
                                     style={"padding-left": "20px", "cursor": "pointer"},
                                     className="file",
                                 )
-                                for file in files
-                            ]
-                            + [TaskVisualizer.generate_file_tree_html(os.path.join(root, d)) for d in dirs],
+                            ],
                             style={"padding-left": "20px"},
                         ),
                     ],
                     open=False,
                 )
             )
-            break  # Only include the top level to avoid recursion in this example
+
         return html.Div(items)
 
     def register_callbacks(self):
@@ -258,12 +266,18 @@ class TaskVisualizer:
             button_id = ctx.triggered[0]["prop_id"].replace(".n_clicks", "")
             # Safely parse the JSON string without using eval()
             button_id_dict = json.loads(button_id.replace("'", '"'))
-            file_path = button_id_dict["index"]
+            taskname, linkname, job = button_id_dict["index"].split(".")
+            repo = self.pipeline.tasks[taskname].links[linkname].repo
+            file_path = f"{taskname}.{linkname} {job}"
 
             # Read the file contents
             try:
-                with open(file_path, "r", encoding="utf-8") as file:
-                    contents = file.read()
+                if isinstance(repo, BlobRepository):
+                    contents = self.do_async(repo.blobinfo(job))
+                elif isinstance(repo, MetadataRepository):
+                    contents = yaml.safe_dump(self.do_async(repo.info(job)))
+                else:
+                    contents = "<unreadable repo type>"
                 return html.Div(
                     [
                         html.H1(file_path),
@@ -305,10 +319,20 @@ class TaskVisualizer:
                 html.H1(node.name),
             ]
             for link in node.links:
-                if not isinstance(node.links[link].repo, (FileRepositoryBase, FilesystemRepository)):
-                    continue
                 children.append(html.P(f"{link}<{node.links[link].repo.__class__.__name__}>:"))
-                children.append(self.generate_file_tree_html(node.links[link].repo.basedir))
+                keys = self.do_async(node.links[link].repo.keys())
+                children.append(
+                    self.generate_file_tree_html(
+                        node.name,
+                        link,
+                        keys,
+                        (
+                            "file"
+                            if isinstance(node.links[link].repo, (BlobRepository, MetadataRepository))
+                            else "unknown"
+                        ),
+                    )
+                )
 
             output = html.Div(children)
 
