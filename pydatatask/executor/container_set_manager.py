@@ -217,7 +217,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
 
     async def logs(self, ds: Any, timeout=10) -> bytes:
         """Retrieve the logs for the given ds."""
-        nonce = ds.spec.selector.matchLabels["daemonset"]
+        nonce = ds.spec.selector.match_labels["daemonset"]
         pods = await self.v1.list_namespaced_pod(self.namespace, label_selector=f"daemonset={nonce}")
         all_logs = await asyncio.gather(
             *(

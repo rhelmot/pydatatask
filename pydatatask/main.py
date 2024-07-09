@@ -783,7 +783,7 @@ async def action_restore(pipeline: Pipeline, backup_dir: str, repos: List[str], 
             await new_repo_fs.validate()
             jobs.append(_repo_copy_fs(new_repo_fs, repo))
         else:
-            print("Warning: cannot backup", repo_path, "because it is of unknown type", repo)
+            print("Warning: cannot restore", repo_path, "because it is of unknown type", repo)
 
     await asyncio.gather(*jobs)
 
