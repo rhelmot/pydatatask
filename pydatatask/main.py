@@ -672,12 +672,9 @@ async def launch(
     sync: bool,
     meta: bool,
     force: bool,
-    fail_fast: bool,
-    debug_trace: bool,
-    require_success: bool,
 ):
     task = pipeline.tasks[task_name]
-    pipeline.settings(sync, meta, fail_fast, debug_trace=debug_trace, require_success=require_success)
+    pipeline.settings(sync, meta)
 
     if force or await task.ready.contains(job):
         await task.launch(job, 0)
