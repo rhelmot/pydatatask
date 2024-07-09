@@ -225,7 +225,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
                 for pod in pods.items
             )
         )
-        return "\n".join(f"==> {pod.status.hostIP} <==\n" + log for pod, log in zip(pods.items, all_logs)).encode()
+        return "\n".join(f"==> {pod.status.host_ip} <==\n" + log for pod, log in zip(pods.items, all_logs)).encode()
 
     def cache_flush(self):
         self.inner.cache_flush()
