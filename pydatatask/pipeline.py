@@ -644,7 +644,7 @@ class Pipeline:
                             edges.append((footprint, task))
                     if attrs["is_output"] or attrs["is_status"]:
                         edges.append((task, repo))
-                else:
+                elif attrs["is_output"] or attrs["is_status"]:
                     edges.append((task, repo))
 
                 for a, b in edges:

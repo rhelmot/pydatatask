@@ -765,7 +765,7 @@ class Task(ABC):
         if linkname in seen:
             raise ValueError("Infinite recursion in repository related key lookup")
         link = self.links[linkname]
-        if link.key is None:
+        if link.key is None or link.kind == LinkKind.StreamingInputFilepath:
             return link.repo
 
         if link.key == "ALLOC":
@@ -822,7 +822,7 @@ class Task(ABC):
             )
 
         splitkey = link.key.split(".")
-        related = self._repo_related(splitkey[0])
+        related = self.links[splitkey[0]].repo
         if not isinstance(related, repomodule.MetadataRepository):
             raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
 
@@ -845,11 +845,15 @@ class Task(ABC):
             mapped2 = None
 
         async def filterer(subjob: str) -> bool:
-            if mapped2 is None:
-                mapped2_info = job
-            else:
-                mapped2_info = await mapped2.info(job)
-            return await mapped.info(subjob) == mapped2_info
+            try:
+                if mapped2 is None:
+                    mapped2_info = job
+                else:
+                    mapped2_info = await mapped2.info(job)
+                mapped1_info = await mapped.info(subjob)
+            except KeyError:
+                return False
+            return mapped1_info == mapped2_info
 
         if isinstance(link.repo, repomodule.MetadataRepository):
             return repomodule.FilterMetadataRepository(link.repo, filterer)
