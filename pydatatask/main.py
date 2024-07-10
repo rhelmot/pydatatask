@@ -105,9 +105,11 @@ def main(
     parser.add_argument(
         "--fail-fast", action="store_true", help="Do not catch exceptions thrown during routine operations"
     )
-    parser.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
     parser.add_argument(
-        "--not-task", "-T", dest="not_tasks", action="append", default=[], help="Do not manage these tasks"
+        "--task", "-t", dest="tasks_allowlist", action="append", default=[], help="Only manage these tasks"
+    )
+    parser.add_argument(
+        "--not-task", "-T", dest="tasks_denylist", action="append", default=[], help="Do not manage these tasks"
     )
     parser.add_argument(
         "--debug-trace",
@@ -164,6 +166,7 @@ def main(
         type=Path,
         help="Output path for JSON",
     )
+    parser_status.add_argument("tasks", nargs="*", help="Only look at these tasks")
     parser_status.set_defaults(func=print_status)
 
     parser_trace = subparsers.add_parser("trace", help="Track a job's progress through the pipeline")
@@ -252,6 +255,12 @@ def main(
     parser_shell = subparsers.add_parser("shell", help="Launch an interactive shell to interrogate the pipeline")
     parser_shell.set_defaults(func=shell)
 
+    parser_why = subparsers.add_parser(
+        "why-ready", help="Show the underpinnings of why a given task could be ready or not ready to schedule"
+    )
+    parser_why.add_argument("task", help="Task to analyze")
+    parser_why.set_defaults(func=why_ready)
+
     if has_local_fs:
         parser_graph = subparsers.add_parser("graph", help="Generate a the pipeline graph visualizations")
         parser_graph.add_argument(
@@ -308,8 +317,8 @@ def main(
     func = ns.pop("func")
     pipeline.settings(
         fail_fast=ns.pop("fail_fast"),
-        task_allowlist=ns.pop("tasks") or None,
-        task_denylist=ns.pop("not_tasks") or None,
+        task_allowlist=ns.pop("tasks_allowlist") or None,
+        task_denylist=ns.pop("tasks_denylist") or None,
         debug_trace=ns.pop("debug_trace"),
         require_success=ns.pop("require_success"),
     )
@@ -463,9 +472,11 @@ async def run(
             raise TimeoutError("Pipeline run timeout")
 
 
-def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
+def get_links(pipeline: Pipeline, all_repos: bool, tasks: Optional[List[str]]) -> Iterable[taskmodule.Link]:
     seen = set()
     for task in pipeline.tasks.values():
+        if tasks is not None and task.name not in tasks:
+            continue
         for link in task.links.values():
             if not all_repos and not link.is_status and not link.is_input and not link.is_output:
                 continue
@@ -475,40 +486,48 @@ def get_links(pipeline: Pipeline, all_repos: bool) -> Iterable[taskmodule.Link]:
             yield link
 
 
-async def print_status(pipeline: Pipeline, all_repos: bool, as_json: bool = False, output: Optional[Path] = None):
-    async def inner(repo: repomodule.Repository) -> int:
-        the_sum = 0
-        async for _ in repo:
-            the_sum += 1
-        return the_sum
-
-    link_list = list(get_links(pipeline, all_repos))
+async def print_status(
+    pipeline: Pipeline,
+    all_repos: bool,
+    as_json: bool = False,
+    output: Optional[Path] = None,
+    tasks: Optional[List[str]] = None,
+):
+    tasks = tasks or None
+    link_list = list(get_links(pipeline, all_repos, tasks))
     repo_set = {link.repo for link in link_list}
     repo_set |= {cokeyed for link in link_list for cokeyed in link.cokeyed.values()}
     repo_list = list(repo_set)
-    repo_sizes: Dict[repomodule.Repository, int] = dict(
-        zip(repo_list, await asyncio.gather(*(inner(repo) for repo in repo_list)))
+    repo_members: Dict[repomodule.Repository, List[str]] = dict(
+        zip(repo_list, await asyncio.gather(*(repo.keys() for repo in repo_list)))
     )
 
-    result: DefaultDict[str, Dict[str, Tuple[int, Dict[str, int]]]] = defaultdict(dict)
+    result: DefaultDict[str, Dict[str, Tuple[List[str], Dict[str, List[str]]]]] = defaultdict(dict)
     for task in pipeline.tasks.values():
         for link_name, link in sorted(
             task.links.items(),
             key=lambda x: 0 if x[1].is_input else 1 if x[1].is_status else 2,
         ):
             if link in link_list:
-                result[task.name][link_name] = repo_sizes[link.repo], {
-                    cokey: repo_sizes[cokeyed] for cokey, cokeyed in link.cokeyed.items()
+                result[task.name][link_name] = repo_members[link.repo], {
+                    cokey: repo_members[cokeyed] for cokey, cokeyed in link.cokeyed.items()
                 }
+
+    def fmt_jobs(jobs: List[str]) -> str:
+        if not jobs:
+            return ""
+        if len(jobs) <= 3:
+            return f' ({", ".join(jobs)})'
+        return f' ({", ".join(jobs[:3])}, ...)'
 
     msg = ""
     if not as_json:
         for task_name, links in result.items():
             msg += f"{task_name}\n"
-            for link_name, (sizes, cokeys) in links.items():
-                msg += f"  {task_name}.{link_name} {sizes}\n"
-                for cokey_name, cokey_size in cokeys.items():
-                    msg += f"  {task_name}.{link_name}.{cokey_name} {cokey_size}\n"
+            for link_name, (jobs, cokeys) in links.items():
+                msg += f"  {task_name}.{link_name} {len(jobs)}{fmt_jobs(jobs)}\n"
+                for cokey_name, cokey_jobs in cokeys.items():
+                    msg += f"  {task_name}.{link_name}.{cokey_name}{fmt_jobs(cokey_jobs)}\n"
             msg += "\n"
     else:
         msg = json.dumps(result, indent=2)
@@ -822,3 +841,22 @@ def fuse_stub(*args, **kwargs):
     print("Please pip install pydatafs in order to use pd fuse")
     print("Note that this requires operating system dependencies, probably libfuse3-dev and fuse3")
     return 1
+
+
+async def why_ready(pipeline: Pipeline, task: str):
+    ready = pipeline.tasks[task].ready
+    assert isinstance(ready, repomodule.BlockingRepository)
+    source = ready.source
+    assert isinstance(source, repomodule.AggregateAndRepository)
+    unless = ready.unless
+    assert isinstance(unless, repomodule.AggregateOrRepository)
+
+    print("ready", " ".join(await ready.keys()))
+    print("")
+    print("### SOURCE")
+    for name, repo in source.children.items():
+        print(name, " ".join(await repo.keys()))
+    print("")
+    print("### UNLESS")
+    for name, repo in unless.children.items():
+        print(name, " ".join(await repo.keys()))
