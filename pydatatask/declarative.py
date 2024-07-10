@@ -32,6 +32,7 @@ from pydatatask.host import Host, HostOS
 from pydatatask.query.parser import QueryValueType, tyexpr_basic_to_type
 from pydatatask.query.query import Query
 from pydatatask.query.repository import (
+    QueryBlobRepository,
     QueryFilesystemRepository,
     QueryMetadataRepository,
     QueryRepository,
@@ -464,6 +465,15 @@ def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Call
             "QueryMetadata": make_annotated_constructor(
                 "QueryMetadataRepository",
                 QueryMetadataRepository,
+                {
+                    "query": str,
+                    "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),
+                    "jq": make_dict_parser("jq", str, str),
+                },
+            ),
+            "QueryBlob": make_annotated_constructor(
+                "QueryBlobRepository",
+                QueryBlobRepository,
                 {
                     "query": str,
                     "getters": make_dict_parser("getters", str, tyexpr_basic_to_type),

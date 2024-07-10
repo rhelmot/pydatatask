@@ -348,6 +348,8 @@ class PipelineSpec:
                     query_cls = "QueryMetadata"
                 elif "Filesystem" in source_defn:
                     query_cls = "QueryFilesystem"
+                elif "Blob" in source_defn:
+                    query_cls = "QueryBlob"
                 else:
                     query_cls = "QueryRepository"
                 self.repos[reponame] = Dispatcher(

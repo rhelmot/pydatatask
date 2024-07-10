@@ -6,15 +6,29 @@ from typing import (
     AsyncIterator,
     Dict,
     List,
+    Literal,
     Optional,
     Tuple,
     Union,
 )
 from pathlib import Path
+import re
 
-from pydatatask.repository import FilesystemRepository, MetadataRepository, Repository
+from pydatatask.repository import (
+    BlobRepository,
+    FilesystemRepository,
+    MetadataRepository,
+    Repository,
+)
 from pydatatask.repository.filesystem import FilesystemType
-from pydatatask.utils import AReadStreamBase, AWriteStreamBase
+from pydatatask.utils import (
+    AReadStreamBase,
+    AReadStreamManager,
+    AReadTextProto,
+    AWriteStreamBase,
+    AWriteStreamManager,
+    AWriteTextProto,
+)
 
 from .parser import QueryValueType
 from .query import Query
@@ -37,7 +51,7 @@ class QueryRepository(Repository):
     def footprint(self):
         # HACK LMAO
         for reponame, repo in self.query.repos.items():
-            if reponame in self.query.query:
+            if re.search("\\b" + reponame + "\\b", self.query.query):
                 yield from repo.footprint()
 
     def cache_flush(self):
@@ -85,6 +99,31 @@ class QueryMetadataRepository(QueryRepository, MetadataRepository):
 
     async def dump(self, key: str, data: Any, /):
         return await (await self._resolve()).dump(key, data)
+
+
+class QueryBlobRepository(QueryRepository, BlobRepository):
+    """A QueryBlobRepository is just a QueryRepository but additionally a BlobRepository."""
+
+    async def _resolve(self) -> BlobRepository:
+        result = await super()._resolve()
+        assert isinstance(result, BlobRepository)
+        return result
+
+    async def open(self, job: str, mode: Literal["r"]) -> AsyncContextManager[AReadTextProto]:
+        return await (await self._resolve()).open(job, mode)
+
+    async def open(self, job: str, mode: Literal["w"]) -> AsyncContextManager[AWriteTextProto]:
+        return await (await self._resolve()).open(job, mode)
+
+    async def open(self, job: str, mode: Literal["rb"]) -> AReadStreamManager:
+        return await (await self._resolve()).open(job, mode)
+
+    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStreamManager:
+        return await (await self._resolve()).open(job, mode)
+
+    async def open(self, job, mode="r"):
+        """Open the given job's value as a stream for reading or writing, in text or binary mode."""
+        return await (await self._resolve()).open(job, mode)
 
 
 class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
