@@ -717,7 +717,9 @@ def build_task_picker(
     def mk_container_wrapper(initial):
         def container_wrapper(thing):
             if "host_mounts" in thing:
-                thing["mounts"] = thing.pop("host_mounts")
+                mounts = thing.pop("mounts", {})
+                mounts.update(thing.pop("host_mounts", {}))
+                thing["mounts"] = mounts
             return initial(thing)
 
         return container_wrapper
