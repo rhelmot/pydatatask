@@ -24,6 +24,7 @@ from pathlib import Path
 import asyncio
 import heapq
 import logging
+import random
 
 from typing_extensions import Self
 import networkx.algorithms.traversal.depth_first_search
@@ -169,6 +170,7 @@ class Pipeline:
         self.global_template_env = global_template_env or {}
         self.global_script_env = global_script_env or {}
         self.max_job_quota = max_job_quota
+        self.backoff: Dict[Tuple[str, str], datetime] = {}
 
         for task in tasks:
             if task is not self.tasks[task.name]:
@@ -310,9 +312,9 @@ class Pipeline:
 
         info = await self._update_only_update()
         result2 = (await self._update_only_launch(info)) if launch else False
-        return any(any(live) or any(reaped) for live, reaped in info.values()) or result2
+        return any(any(live) or any(reaped) for live, reaped, _ in info.values()) or result2
 
-    async def _update_only_update(self) -> Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str]]]:
+    async def _update_only_update(self) -> Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]]:
         """Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this
         function to run.
 
@@ -326,7 +328,9 @@ class Pipeline:
         self.cache_flush()
         return gathered
 
-    async def _update_only_launch(self, info: Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str]]]) -> bool:
+    async def _update_only_launch(
+        self, info: Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]]
+    ) -> bool:
         """Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this
         function to run.
 
@@ -334,6 +338,15 @@ class Pipeline:
         """
         if not self._opened:
             raise Exception("Pipeline must be opened")
+
+        now = datetime.now(tz=timezone.utc)
+        self.backoff.update(
+            {
+                (task, job): now + timedelta(seconds=random.randrange(30, 90))
+                for task, (_, _, jobs) in info.items()
+                for job in jobs
+            }
+        )
 
         task_list = list(self.tasks.values())
         # l.debug("Collecting launchable jobs")
@@ -343,6 +356,8 @@ class Pipeline:
         by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
         for job_list, task in zip(to_gather, task_list):
             for job in job_list:
+                if (task.name, job) in self.backoff and now < self.backoff[(task.name, job)]:
+                    continue
                 prio = _JobPrioritizer(self.priority, task, job)
                 sched = by_manager[task.resource_limit]
                 sched.initial_jobs.append((prio.peek(), task.name, job))
@@ -378,23 +393,23 @@ class Pipeline:
             used = sum(
                 (
                     self.tasks[task].job_quota
-                    for task, (live, _) in info.items()
+                    for task, (live, _, _) in info.items()
                     for (_, replica) in live
                     if replica == 0
                 ),
                 Quota.parse(0, 0),
             )
-            live_jobs = {taskname: {job for job, _ in live} for taskname, (live, _) in info.items()}
+            live_jobs = {taskname: {job for job, _ in live} for taskname, (live, _, _) in info.items()}
             now = datetime.now(tz=timezone.utc)
             last_period = {
                 taskname: sum(1 for _, time in live.items() if time + self.tasks[taskname].max_spawn_jobs_period > now)
-                for taskname, (live, _) in info.items()
+                for taskname, (live, _, _) in info.items()
             }
             base_already = {
-                (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica == 0
+                (task, job, replica) for task, (live, _, _) in info.items() for (job, replica) in live if replica == 0
             }
             to_kill = {
-                (task, job, replica) for task, (live, _) in info.items() for (job, replica) in live if replica != 0
+                (task, job, replica) for task, (live, _, _) in info.items() for (job, replica) in live if replica != 0
             }
 
             sched.initial_jobs.sort(reverse=True)

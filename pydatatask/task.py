@@ -901,7 +901,7 @@ class Task(ABC):
         """
 
     @abstractmethod
-    async def update(self) -> Tuple[Dict[Tuple[str, int], datetime], Set[str]]:
+    async def update(self) -> Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]:
         """Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set
         of live tasks. Typically, this entails reaping finished processes.
 
@@ -1354,6 +1354,7 @@ class KubeTask(TemplateShellTask):
 
     async def update(self):
         live, reaped = await self.podman.update(self.name, timeout=self.timeout)
+        backoff = set()
         for job, replicas in reaped.items():
             success = True
             logs = {}
@@ -1378,6 +1379,7 @@ class KubeTask(TemplateShellTask):
                     self.name,
                     job,
                 )
+                backoff.add(job)
                 continue
 
             if len(dones) == 1:
@@ -1396,7 +1398,7 @@ class KubeTask(TemplateShellTask):
                 assert self.fail_fast
                 raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        return live, set(reaped)
+        return live, set(reaped), backoff
 
 
 class ProcessTask(TemplateShellTask):
@@ -1533,6 +1535,7 @@ class ProcessTask(TemplateShellTask):
 
     async def update(self):
         live, reaped = await self.manager.update(self.name, self.timeout)
+        backoff = set()
         for job, replicas in reaped.items():
             success = True
             stdouts: Dict[int, bytes] = {}
@@ -1567,6 +1570,7 @@ class ProcessTask(TemplateShellTask):
                     self.name,
                     job,
                 )
+                backoff.add(job)
                 continue
 
             if len(dones) == 1:
@@ -1585,7 +1589,7 @@ class ProcessTask(TemplateShellTask):
                 assert self.fail_fast
                 raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        return live, set(reaped)
+        return live, set(reaped), backoff
 
     async def launch(self, job: str, replica: int):
         template_env, preamble, epilogue = await self.build_template_env(job, replica)
@@ -1690,7 +1694,7 @@ class InProcessSyncTask(Task):
         #        raise NameError("%s takes parameter %s but no such argument is available" % (self.func, name))
 
     async def update(self):
-        return {}, set()
+        return {}, set(), set()
 
     async def launch(self, job: str, replica: int):
         assert replica == 0
@@ -1832,7 +1836,7 @@ class ExecutorTask(Task):
             dead.add(job)
         await asyncio.gather(*coros)
         live -= dead
-        return {(job, cast(int, 0)): self.jobs[self.rev_jobs[job]][1] for job in live}, dead
+        return {(job, cast(int, 0)): self.jobs[self.rev_jobs[job]][1] for job in live}, dead, set()
 
     async def _cleanup(self, job_future, job, start_time):
         e = job_future.exception()
@@ -2166,6 +2170,7 @@ class ContainerTask(TemplateShellTask):
 
     async def update(self):
         live, reaped = await self.manager.update(self.name, timeout=self.timeout)
+        backoff = set()
         for job, replicas in reaped.items():
             success = True
             logs = {}
@@ -2190,6 +2195,7 @@ class ContainerTask(TemplateShellTask):
                     self.name,
                     job,
                 )
+                backoff.add(job)
                 continue
 
             if len(dones) == 1:
@@ -2208,7 +2214,7 @@ class ContainerTask(TemplateShellTask):
                 assert self.fail_fast
                 raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        return live, set(reaped)
+        return live, set(reaped), backoff
 
     async def launch(self, job: str, replica: int):
         template_env, preamble, epilogue = await self.build_template_env(job, replica)
@@ -2356,6 +2362,7 @@ class ContainerSetTask(TemplateShellTask):
 
     async def update(self):
         live, reaped = await self.manager.update(self.name, timeout=self.timeout)
+        backoff = set()
         for job, replicas in reaped.items():
             success = True
             logs = {}
@@ -2380,6 +2387,7 @@ class ContainerSetTask(TemplateShellTask):
                     self.name,
                     job,
                 )
+                backoff.add(job)
                 continue
 
             if len(dones) == 1:
@@ -2398,7 +2406,7 @@ class ContainerSetTask(TemplateShellTask):
                 assert self.fail_fast
                 raise Exception(f"require_success is set but {self.name}:{job} failed. fail_fast is set so aborting.")
 
-        return live, set(reaped)
+        return live, set(reaped), backoff
 
     async def launch(self, job: str, replica: int):
         template_env, preamble, epilogue = await self.build_template_env(job, replica)
