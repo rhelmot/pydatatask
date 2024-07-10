@@ -210,6 +210,7 @@ class Task(ABC):
         timeout: Optional[timedelta] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         replicable: bool = False,
+        cache_dir: Optional[str] = None,
     ):
         self.name = name
         self._ready = ready
@@ -238,6 +239,7 @@ class Task(ABC):
         self.max_concurrent_jobs: Optional[int] = None
         self.max_spawn_jobs = 100
         self.max_spawn_jobs_period = timedelta(minutes=1)
+        self.cache_dir = cache_dir
 
         self.link(
             "done",
@@ -305,12 +307,17 @@ class Task(ABC):
         _, path = domainpath.split("/", 1)
         return self.host.mk_http_get("/dev/stderr", f"{self.agent_url}/errors/{path}", headers)
 
-    def mk_http_get(self, filename: str, url: str, headers: Dict[str, str], handle_err: str = "") -> Any:
+    def mk_http_get(
+        self, filename: str, url: str, headers: Dict[str, str], handle_err: str = "", cache_key: Optional[str] = None
+    ) -> Any:
         """Generate logic to perform an http download for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
         """
-        return self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace, handle_err=handle_err)
+        get = self.host.mk_http_get(filename, url, headers, verbose=self.debug_trace, handle_err=handle_err)
+        if self.cache_dir is not None and cache_key is not None:
+            return self.host.mk_cache_get_static(filename, cache_key, get, self.cache_dir)
+        return get
 
     def mk_http_post(
         self,
@@ -344,6 +351,9 @@ class Task(ABC):
             verbose=self.debug_trace,
             handle_err=self.mk_error_handler(url, headers),
         )
+        if self.cache_dir is not None and repomodule.Repository.is_valid_job_id(job):
+            cache_key = f"linkjob-{self.name}-{link_name}-{job}"
+            result = self.host.mk_cache_get_static(payload_filename, cache_key, result, self.cache_dir)
         if is_filesystem:
             result += self.host.mk_unzip(filename, payload_filename)
         return result
@@ -1213,6 +1223,7 @@ class KubeTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        cache_dir: Optional[str] = None,
     ):
         """
         :param name: The name of the task.
@@ -1238,6 +1249,7 @@ class KubeTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            cache_dir=cache_dir,
         )
 
         self.template = _read_template(template)
@@ -1411,6 +1423,7 @@ class ProcessTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        cache_dir: Optional[str] = None,
     ):
         """
         :param name: The name of this task.
@@ -1446,6 +1459,7 @@ class ProcessTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            cache_dir=cache_dir,
         )
 
         self.template = template
@@ -2057,6 +2071,7 @@ class ContainerTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        cache_dir: Optional[str] = None,
     ):
         """
         :param name: The name of this task.
@@ -2084,6 +2099,7 @@ class ContainerTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            cache_dir=cache_dir,
         )
 
         self.template = template
@@ -2250,6 +2266,7 @@ class ContainerSetTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        cache_dir: Optional[str] = None,
     ):
         super().__init__(
             name,
@@ -2260,6 +2277,7 @@ class ContainerSetTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            cache_dir=cache_dir,
         )
 
         if not long_running:

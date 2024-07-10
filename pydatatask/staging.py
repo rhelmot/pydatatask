@@ -143,6 +143,7 @@ class TaskSpec:
     max_concurrent_jobs: Optional[int] = None
     max_spawn_jobs: int = 100
     max_spawn_jobs_period: Dict[str, Union[str, int]] = field(default_factory=lambda: {"minutes": 1})
+    cache_dir: Optional[str] = None
 
 
 @_dataclass_serial

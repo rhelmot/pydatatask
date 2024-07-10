@@ -9,6 +9,7 @@ from typing import Dict, Optional
 from dataclasses import dataclass
 from enum import Enum, auto
 import getpass
+import hashlib
 import os
 import random
 import string
@@ -137,6 +138,26 @@ class Host:
         """Generate a shell script to make a directory for the host system."""
         if self.os == HostOS.Linux:
             return f"mkdir -p {filepath}"
+        else:
+            raise TypeError(self.os)
+
+    def mk_cache_get_static(self, dest_filepath: str, cache_key: str, miss, cache_dir) -> str:
+        if self.os == HostOS.Linux:
+            cache_key_hash = hashlib.md5(cache_key.encode()).hexdigest()
+            tick = "'"
+            backslash = "\\"
+            cache_key_sane = f'{cache_key.replace("/", "-").replace(" ", "-").replace(backslash, "-").replace(tick, "-")[:55]}-{cache_key_hash[:8]}'
+            cache_key_dirname = f"{cache_dir}/{cache_key_hash[:2]}"
+            cache_key_path = f"{cache_key_dirname}/{cache_key_sane}"
+            return f"""
+            if [ -f "{cache_key_path}" ]; then
+              cp "{cache_key_path}" "{dest_filepath}"
+            else
+              mkdir -p "{cache_key_dirname}"
+              {miss}
+              cp "{dest_filepath}" "{cache_key_path}"
+            fi
+            """
         else:
             raise TypeError(self.os)
 
