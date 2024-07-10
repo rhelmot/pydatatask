@@ -305,6 +305,7 @@ class PodManager(Executor):
 
     async def logs(self, pod: Any, timeout=10) -> bytes:
         """Retrieve the logs for the given pod."""
-        return (
-            await self.v1.read_namespaced_pod_log(pod.metadata.name, self.namespace, _request_timeout=timeout)
-        ).encode()
+        response = await self.v1.read_namespaced_pod_log(
+            pod.metadata.name, self.namespace, _request_timeout=timeout, _preload_content=False
+        )
+        return await response.read()
