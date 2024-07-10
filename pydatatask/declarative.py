@@ -4,6 +4,7 @@ other kinds of pydatatask classes."""
 from typing import Any, Callable, Dict, List, Mapping, Optional, Type, TypeVar, Union
 from datetime import timedelta
 from enum import Enum
+from pathlib import Path
 import base64
 import gc
 import json
@@ -720,6 +721,7 @@ def build_task_picker(
             if "host_mounts" in thing:
                 mounts = thing.pop("mounts", {})
                 mounts.update(thing.pop("host_mounts", {}))
+                mounts = {str(Path(k)): v for k, v in mounts.items()}
                 thing["mounts"] = mounts
             return initial(thing)
 
