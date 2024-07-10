@@ -848,7 +848,7 @@ class Task(ABC):
             if mapped2 is None:
                 mapped2_info = job
             else:
-                mapped2_info = await mapped2.info(subjob)
+                mapped2_info = await mapped2.info(job)
             return await mapped.info(subjob) == mapped2_info
 
         if isinstance(link.repo, repomodule.MetadataRepository):

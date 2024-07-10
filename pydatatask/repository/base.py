@@ -949,8 +949,11 @@ class YamlMetadataRepository(MetadataRepository, ABC):
 
     @job_getter
     async def info(self, job, /):
-        async with await self.blob.open(job, "rb") as fp:
-            s = await fp.read()
+        try:
+            async with await self.blob.open(job, "rb") as fp:
+                s = await fp.read()
+        except (LookupError, FileNotFoundError):
+            return {}
         return safe_load(s)
 
     @job_getter
