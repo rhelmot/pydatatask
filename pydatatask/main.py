@@ -107,6 +107,9 @@ def main(
     )
     parser.add_argument("--task", "-t", dest="tasks", action="append", default=[], help="Only manage these tasks")
     parser.add_argument(
+        "--not-task", "-T", dest="not_tasks", action="append", default=[], help="Do not manage these tasks"
+    )
+    parser.add_argument(
         "--debug-trace",
         action="store_true",
         help="Make every worker script print out its execution trace for debugging",
@@ -306,6 +309,7 @@ def main(
     pipeline.settings(
         fail_fast=ns.pop("fail_fast"),
         task_allowlist=ns.pop("tasks") or None,
+        task_denylist=ns.pop("not_tasks") or None,
         debug_trace=ns.pop("debug_trace"),
         require_success=ns.pop("require_success"),
     )

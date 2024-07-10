@@ -187,6 +187,7 @@ class Pipeline:
         debug_trace: Optional[bool] = None,
         require_success: Optional[bool] = None,
         task_allowlist: Optional[List[str]] = None,
+        task_denylist: Optional[List[str]] = None,
     ):
         """This method can be called to set properties of the current run. Only settings set to non-none will be
         updated.
@@ -217,6 +218,8 @@ class Pipeline:
                 task.require_success = require_success
             if task_allowlist is not None:
                 task.disabled = task.name not in task_allowlist
+            if task_denylist is not None:
+                task.disabled = task.name in task_denylist
 
     async def _validate(self):
         seen_repos = set()
