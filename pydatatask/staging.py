@@ -111,6 +111,7 @@ class LinkSpec:
     force_path: Optional[str] = None
     DANGEROUS_filename_is_key: Optional[bool] = None
     content_keyed_md5: Optional[bool] = None
+    equals: Optional[str] = None
 
 
 @_dataclass_serial

@@ -194,6 +194,7 @@ class Link:
     force_path: Optional[str]
     DANGEROUS_filename_is_key: bool
     content_keyed_md5: bool
+    equals: Optional[str] = None
 
 
 class Task(ABC):
@@ -689,6 +690,7 @@ class Task(ABC):
         force_path: Optional[str] = None,
         DANGEROUS_filename_is_key: bool = False,
         content_keyed_md5: bool = False,
+        equals: Optional[str] = None,
     ):
         """Create a link between this task and a repository.
 
@@ -751,6 +753,7 @@ class Task(ABC):
             force_path=force_path,
             DANGEROUS_filename_is_key=DANGEROUS_filename_is_key,
             content_keyed_md5=content_keyed_md5,
+            equals=equals,
         )
 
     def _repo_related(self, linkname: str, seen: Optional[Set[str]] = None) -> "repomodule.Repository":
@@ -828,8 +831,25 @@ class Task(ABC):
 
         mapped = related.map(mapper, [])
 
+        if link.equals is not None:
+            splitkey2 = link.equals.split(".")
+            related2 = self._repo_related(splitkey2[0])
+            if not isinstance(related2, repomodule.MetadataRepository):
+                raise TypeError("Cannot do key lookup on repository which is not MetadataRepository")
+
+            async def mapper2(_job, info):
+                return str(supergetattr_path(info, splitkey2[1:]))
+
+            mapped2 = related2.map(mapper2, [])
+        else:
+            mapped2 = None
+
         async def filterer(subjob: str) -> bool:
-            return await mapped.info(subjob) == job
+            if mapped2 is None:
+                mapped2_info = job
+            else:
+                mapped2_info = await mapped2.info(subjob)
+            return await mapped.info(subjob) == mapped2_info
 
         if isinstance(link.repo, repomodule.MetadataRepository):
             return repomodule.FilterMetadataRepository(link.repo, filterer)

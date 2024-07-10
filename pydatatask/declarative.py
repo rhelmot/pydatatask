@@ -688,6 +688,7 @@ def build_task_picker(
             "force_path": lambda thing: str(thing) if thing is not None else None,
             "DANGEROUS_filename_is_key": parse_optional_bool,
             "content_keyed_md5": parse_optional_bool,
+            "equals": lambda thing: None if thing is None else str(thing),
         },
     )
     links_constructor = make_dict_parser("links", str, link_constructor)
