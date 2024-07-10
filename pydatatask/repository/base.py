@@ -362,16 +362,6 @@ class MapRepository(MetadataRepository):
             if self.filter is None or await self.filter(item):
                 yield item
 
-    async def template(
-        self,
-        job: str,
-        task: taskmodule.Task,
-        kind: taskmodule.LinkKind,
-        link_name: str,
-        hostjob: Optional[str] = None,
-    ) -> taskmodule.TemplateInfo:
-        raise TypeError("Not supported yet")
-
     async def info(self, job, /):
         return await self.func(job, await self.base.info(job))
 
@@ -439,16 +429,6 @@ class FilterRepository(Repository):
             if self.filter is None or await self.filter(item):
                 yield item
 
-    async def template(
-        self,
-        job: str,
-        task: taskmodule.Task,
-        kind: taskmodule.LinkKind,
-        link_name: str,
-        hostjob: Optional[str] = None,
-    ) -> taskmodule.TemplateInfo:
-        raise TypeError("Not supported yet")
-
 
 class FilterMetadataRepository(FilterRepository, MetadataRepository):
     """A filter repository that is also a metadata repository."""
@@ -495,7 +475,7 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
         return result
 
     async def dump(self, job: str, data: Any, /):
-        raise TypeError("Do not try to dump into a filter repository lol")
+        await self.base.dump(job, data)
 
 
 class BlobRepository(Repository, ABC):
