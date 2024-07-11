@@ -67,13 +67,19 @@ class Query:
                 obj[i] = cls._scorch(v)
         elif isinstance(obj, dict):
             oldkeys = []
+            newkeys = []
             for k, v in enumerate(obj):
                 k2 = cls._scorch(k)
+                v = cls._scorch(v)
                 if k2 is not k:
                     oldkeys.append(k)
-                obj[k2] = cls._scorch(v)
+                    newkeys.append((k, v))
+                else:
+                    obj[k2] = v
             for k in oldkeys:
                 obj.pop(k)
+            for k2, v in newkeys:
+                obj[k2] = v
         return obj
 
     def _make_scope(self, parameters: Dict[str, Any]) -> Scope:
