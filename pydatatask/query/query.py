@@ -66,11 +66,14 @@ class Query:
             for i, v in enumerate(obj):
                 obj[i] = cls._scorch(v)
         elif isinstance(obj, dict):
+            oldkeys = []
             for k, v in enumerate(obj):
                 k2 = cls._scorch(k)
                 if k2 is not k:
-                    obj.pop(k)
+                    oldkeys.append(k)
                 obj[k2] = cls._scorch(v)
+            for k in oldkeys:
+                obj.pop(k)
         return obj
 
     def _make_scope(self, parameters: Dict[str, Any]) -> Scope:
