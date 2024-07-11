@@ -337,6 +337,8 @@ class PipelineSpec:
                 task.executable.args["stdout"] = reponame
                 if "stderr" not in task.executable.args:
                     task.executable.args["stderr"] = "STDOUT"
+            if task.job_quota is None and task.priority == 0.0:
+                task.priority = 999999999
 
         for reponame, repo in self.repos.items():
             if repo.cls == "CokeyedJqFilterRepository":

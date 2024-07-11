@@ -352,12 +352,17 @@ class Pipeline:
         # l.debug("Collecting launchable jobs")
         to_gather = await asyncio.gather(*(self._gather_ready_jobs(task) for task in self.tasks.values()))
         entries = {}
+        quota_overrides = {}
 
         by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
         for job_list, task in zip(to_gather, task_list):
             for job in job_list:
-                if (task.name, job) in self.backoff and now < self.backoff[(task.name, job)]:
-                    continue
+                if (task.name, job) in self.backoff:
+                    if now < self.backoff[(task.name, job)]:
+                        continue
+                    fq = task.fallback_quota
+                    if fq is not None:
+                        quota_overrides[(task.name, job)] = fq
                 prio = _JobPrioritizer(self.priority, task, job)
                 sched = by_manager[task.resource_limit]
                 sched.initial_jobs.append((prio.peek(), task.name, job))
@@ -422,7 +427,7 @@ class Pipeline:
                     if mcj is not None and len(live_jobs[task]) >= mcj:
                         l.debug("Too many concurrent jobs (%d) to launch %s:%s ", mcj, task, job)
                         continue
-                alloc = self.tasks[task].job_quota
+                alloc = quota_overrides.get((task, job), None) or self.tasks[task].job_quota
                 excess = (used + alloc).excess(quota)
                 if excess is not None:
                     l.debug(
@@ -452,7 +457,10 @@ class Pipeline:
                 # schedule replicas
                 while sched.replica_heap:
                     next_guy = sched.replica_heap[0]
-                    alloc = self.tasks[next_guy.task.name].job_quota
+                    alloc = (
+                        quota_overrides.get((next_guy.task.name, next_guy.job), None)
+                        or self.tasks[next_guy.task.name].job_quota
+                    )
                     excess = (used + alloc).excess(quota)
                     mcj = self.tasks[next_guy.task.name].max_concurrent_jobs
                     if (

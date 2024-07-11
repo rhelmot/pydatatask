@@ -277,6 +277,10 @@ class Task(ABC):
         raise NotImplementedError
 
     @property
+    def fallback_quota(self) -> Optional[Quota]:
+        return None
+
+    @property
     @abstractmethod
     def resource_limit(self) -> Quota:
         """The total resources available for allocation to this job.
@@ -2090,6 +2094,7 @@ class ContainerTask(TemplateShellTask):
         executor: execmodule.Executor,
         entrypoint: Iterable[str] = ("/bin/sh", "-c"),
         job_quota: Union[Quota, _MaxQuotaType, None] = None,
+        fallback_quota: Union[Quota, _MaxQuotaType, None] = None,
         timeout: Optional[timedelta] = None,
         environ: Optional[Dict[str, str]] = None,
         mounts: Optional[Dict[str, str]] = None,
@@ -2138,6 +2143,7 @@ class ContainerTask(TemplateShellTask):
         self.environ = environ or {}
         self.logs = logs
         self._job_quota = job_quota or Quota.parse(1, "256Mi")
+        self._fallback_quota = fallback_quota
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerManager] = None
         self.warned = False
@@ -2178,6 +2184,24 @@ class ContainerTask(TemplateShellTask):
                 r,
             )
             self._job_quota = r
+        return r
+
+    @property
+    def fallback_quota(self):
+        if self._fallback_quota is None:
+            return None
+        if isinstance(self._fallback_quota, _MaxQuotaType):
+            r = (self._max_quota or self.resource_limit) * self._fallback_quota
+        else:
+            r = copy.copy(self._fallback_quota)
+        if r.excess(self.resource_limit):
+            r = self.resource_limit * 0.9
+            l.warning(
+                "%s can never fit within the resource limits. Automatically adjusting its quota to %s",
+                self.name,
+                r,
+            )
+            self._fallback_quota = r
         return r
 
     @property
