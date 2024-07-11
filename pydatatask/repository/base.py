@@ -393,6 +393,7 @@ class FilterRepository(Repository):
         base: Repository,
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         allow_deletes=False,
+        extra_footprint: Optional[List[Repository]] = None,
     ):
         """
         :param func: The function to use to translate the base repository's info results into the mapped info
@@ -405,15 +406,20 @@ class FilterRepository(Repository):
         self.base = base
         self.filter = filt
         self.allow_deletes = allow_deletes
+        self.extra_footprint = extra_footprint or []
 
     def __getstate__(self):
         return (self.base, self.filter, self.allow_deletes)
 
     def footprint(self):
         yield from self.base.footprint()
+        for repo in self.extra_footprint:
+            yield from repo.footprint()
 
     def cache_flush(self):
         self.base.cache_flush()
+        for repo in self.extra_footprint:
+            repo.cache_flush()
 
     async def contains(self, item, /):
         if self.filter is None or await self.filter(item):
@@ -439,6 +445,7 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
         filt: Optional[Callable[[str], Awaitable[bool]]] = None,
         filter_all: Optional[Callable[[Dict[str, Any]], AsyncIterator[str]]] = None,
         allow_deletes=False,
+        extra_footprint: Optional[List[Repository]] = None,
     ):
         if filt is None:
             assert filter_all is not None
@@ -451,9 +458,9 @@ class FilterMetadataRepository(FilterRepository, MetadataRepository):
                 else:
                     return True
 
-            super().__init__(base, f, allow_deletes=allow_deletes)
+            super().__init__(base, f, allow_deletes=allow_deletes, extra_footprint=extra_footprint)
         else:
-            super().__init__(base, filt, allow_deletes=allow_deletes)
+            super().__init__(base, filt, allow_deletes=allow_deletes, extra_footprint=extra_footprint)
         self.filter_all = filter_all
 
     base: MetadataRepository
@@ -1273,3 +1280,32 @@ class CompressedBlobRepository(BlobRepository):
 
     def unfiltered_iter(self):
         return self.inner.unfiltered_iter()
+
+
+class FilterBlobRepository(FilterRepository, BlobRepository):
+    def __init__(
+        self,
+        base: BlobRepository,
+        filt: Optional[Callable[[str], Awaitable[bool]]] = None,
+        allow_deletes=False,
+        extra_footprint: Optional[List[Repository]] = None,
+    ):
+        super().__init__(base, filt, allow_deletes, extra_footprint)
+
+    @overload
+    async def open(self, job: str, mode: Literal["r"]) -> AsyncContextManager[AReadTextProto]: ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["w"]) -> AsyncContextManager[AWriteTextProto]: ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["rb"]) -> AReadStreamManager: ...
+
+    @overload
+    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStreamManager: ...
+
+    base: BlobRepository
+
+    async def open(self, job, mode: Union[Literal["r"], Literal["w"], Literal["rb"], Literal["wb"]] = "r"):
+        """Open the given job's value as a stream for reading or writing, in text or binary mode."""
+        return await self.base.open(job, mode)

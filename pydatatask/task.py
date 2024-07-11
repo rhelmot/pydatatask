@@ -859,6 +859,8 @@ class Task(ABC):
             return repomodule.FilterMetadataRepository(link.repo, filterer)
         elif isinstance(link.repo, repomodule.FilesystemRepository):
             return repomodule.FilterFilesystemRepository(link.repo, filterer)
+        elif isinstance(link.repo, repomodule.BlobRepository):
+            return repomodule.FilterBlobRepository(link.repo, filterer)
         else:
             return repomodule.FilterRepository(link.repo, filterer)
 

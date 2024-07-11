@@ -10,6 +10,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    overload,
 )
 from pathlib import Path
 import re
@@ -58,7 +59,7 @@ class QueryRepository(Repository):
         self._cached = None
         # HACK LMAO
         for reponame, repo in self.query.repos.items():
-            if reponame in self.query.query:
+            if re.search("\\b" + reponame + "\\b", self.query.query):
                 repo.cache_flush()
 
     async def _resolve(self) -> Repository:
@@ -109,21 +110,22 @@ class QueryBlobRepository(QueryRepository, BlobRepository):
         assert isinstance(result, BlobRepository)
         return result
 
-    async def open(self, job: str, mode: Literal["r"]) -> AsyncContextManager[AReadTextProto]:
-        return await (await self._resolve()).open(job, mode)
+    @overload
+    async def open(self, job: str, mode: Literal["r"]) -> AsyncContextManager[AReadTextProto]: ...
 
-    async def open(self, job: str, mode: Literal["w"]) -> AsyncContextManager[AWriteTextProto]:
-        return await (await self._resolve()).open(job, mode)
+    @overload
+    async def open(self, job: str, mode: Literal["w"]) -> AsyncContextManager[AWriteTextProto]: ...
 
-    async def open(self, job: str, mode: Literal["rb"]) -> AReadStreamManager:
-        return await (await self._resolve()).open(job, mode)
+    @overload
+    async def open(self, job: str, mode: Literal["rb"]) -> AReadStreamManager: ...
 
-    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStreamManager:
-        return await (await self._resolve()).open(job, mode)
+    @overload
+    async def open(self, job: str, mode: Literal["wb"]) -> AWriteStreamManager: ...
 
-    async def open(self, job, mode="r"):
+    async def open(self, job, mode: Union[Literal["r"], Literal["w"], Literal["rb"], Literal["wb"]] = "r"):
         """Open the given job's value as a stream for reading or writing, in text or binary mode."""
-        return await (await self._resolve()).open(job, mode)
+        guy = await self._resolve()
+        return await guy.open(job, mode)
 
 
 class QueryFilesystemRepository(QueryRepository, FilesystemRepository):
