@@ -52,11 +52,26 @@ class Query:
             gotten = scope.lookup_value("arg").unwrap()
             if not isinstance(gotten, (dict, list, str, int, float, bool)):
                 raise TypeError(f"Can only run {name} on json types, got {gotten}")
-            return QueryValue.wrap(query.input_value(gotten).first())
+            return QueryValue.wrap(query.input_value(self._scorch(gotten)).first())
 
         return FunctionDefinition(
             [], ["arg"], FunctionType((), (QueryValueType.RepositoryData,), QueryValueType.RepositoryData), inner
         )
+
+    @classmethod
+    def _scorch(cls, obj):
+        if isinstance(obj, bytes):
+            return obj.decode("latin-1")
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                obj[i] = cls._scorch(v)
+        elif isinstance(obj, dict):
+            for k, v in enumerate(obj):
+                k2 = cls._scorch(k)
+                if k2 is not k:
+                    obj.pop(k)
+                obj[k2] = cls._scorch(v)
+        return obj
 
     def _make_scope(self, parameters: Dict[str, Any]) -> Scope:
         values = {}
