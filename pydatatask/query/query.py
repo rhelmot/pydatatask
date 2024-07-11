@@ -68,7 +68,7 @@ class Query:
         elif isinstance(obj, dict):
             oldkeys = []
             newkeys = []
-            for k, v in enumerate(obj):
+            for k, v in obj.items():
                 k2 = cls._scorch(k)
                 v = cls._scorch(v)
                 if k2 is not k:
