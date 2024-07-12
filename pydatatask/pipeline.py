@@ -353,12 +353,14 @@ class Pipeline:
         to_gather = await asyncio.gather(*(self._gather_ready_jobs(task) for task in self.tasks.values()))
         entries = {}
         quota_overrides = {}
+        delayed = False
 
         by_manager: DefaultDict[Quota, _SchedState] = defaultdict(_SchedState)
         for job_list, task in zip(to_gather, task_list):
             for job in job_list:
                 if (task.name, job) in self.backoff:
                     if now < self.backoff[(task.name, job)]:
+                        delayed = True
                         continue
                     fq = task.fallback_quota
                     if fq is not None:
@@ -388,7 +390,7 @@ class Pipeline:
 
         if all(not sched.initial_jobs for sched in by_manager.values()):
             self.cache_flush()
-            return False
+            return delayed
 
         queue: asyncio.Queue[Optional[Tuple[str, str, int, bool]]] = asyncio.Queue()
         N_WORKERS = 15
