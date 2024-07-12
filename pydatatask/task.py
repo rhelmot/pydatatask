@@ -224,6 +224,7 @@ class Task(ABC):
         self.agent_url = ""
         self.agent_secret = ""
         self._related_cache: Dict[str, Any] = {}
+        self._filtered_cache: Dict[Tuple[str, str], Any] = {}
         self.long_running = long_running
         self.global_template_env: Dict[str, Any] = {}
         self.annotations: Dict[str, str] = {}
@@ -265,6 +266,7 @@ class Task(ABC):
     def cache_flush(self):
         """Flush any in-memory caches."""
         self._related_cache.clear()
+        self._filtered_cache.clear()
         for link in self.links.values():
             link.repo.cache_flush()
         if self._ready is not None:
@@ -770,7 +772,14 @@ class Task(ABC):
             raise ValueError("Infinite recursion in repository related key lookup")
         link = self.links[linkname]
         if link.key is None or link.kind == LinkKind.StreamingInputFilepath:
-            return link.repo
+
+            async def filterer(job: str) -> bool:
+                stream = self._repo_filtered(job, linkname)
+                async for _ in stream:
+                    return True
+                return False
+
+            return repomodule.FilterRepository(link.repo, filterer)
 
         if link.key == "ALLOC":
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
@@ -815,6 +824,9 @@ class Task(ABC):
         return result
 
     def _repo_filtered(self, job: str, linkname: str) -> "repomodule.Repository":
+        if (job, linkname) in self._filtered_cache:
+            return self._filtered_cache[(job, linkname)]
+
         link = self.links[linkname]
         if link.kind != LinkKind.StreamingInputFilepath:
             raise TypeError("Cannot automatically produce a filtered repo unless it's StreamingInput")
@@ -860,13 +872,15 @@ class Task(ABC):
             return mapped1_info == mapped2_info
 
         if isinstance(link.repo, repomodule.MetadataRepository):
-            return repomodule.FilterMetadataRepository(link.repo, filterer)
+            r = repomodule.FilterMetadataRepository(link.repo, filterer)
         elif isinstance(link.repo, repomodule.FilesystemRepository):
-            return repomodule.FilterFilesystemRepository(link.repo, filterer)
+            r = repomodule.FilterFilesystemRepository(link.repo, filterer)
         elif isinstance(link.repo, repomodule.BlobRepository):
-            return repomodule.FilterBlobRepository(link.repo, filterer)
+            r = repomodule.FilterBlobRepository(link.repo, filterer)
         else:
-            return repomodule.FilterRepository(link.repo, filterer)
+            r = repomodule.FilterRepository(link.repo, filterer)
+        self._filtered_cache[(job, linkname)] = r
+        return r
 
     @property
     def ready(self):
