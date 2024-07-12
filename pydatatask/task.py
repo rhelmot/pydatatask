@@ -771,7 +771,9 @@ class Task(ABC):
         if linkname in seen:
             raise ValueError("Infinite recursion in repository related key lookup")
         link = self.links[linkname]
-        if link.key is None or link.kind == LinkKind.StreamingInputFilepath:
+        if link.key is None:
+            return link.repo
+        if link.kind == LinkKind.StreamingInputFilepath:
 
             async def filterer(job: str) -> bool:
                 stream = self._repo_filtered(job, linkname)
