@@ -776,8 +776,6 @@ class Task(ABC):
         if linkname in seen:
             raise ValueError("Infinite recursion in repository related key lookup")
         link = self.links[linkname]
-        if link.key is None:
-            return link.repo
         if link.kind == LinkKind.StreamingInputFilepath:
 
             async def filterer(job: str) -> bool:
@@ -787,6 +785,8 @@ class Task(ABC):
                 return False
 
             return repomodule.FilterRepository(link.repo, filterer)
+        if link.key is None:
+            return link.repo
 
         if link.key == "ALLOC":
             mapped: repomodule.MetadataRepository = repomodule.FunctionCallMetadataRepository(
