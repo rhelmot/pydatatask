@@ -57,11 +57,8 @@ class S3BucketReader:
         self.body.close()
 
     async def read(self, n=None):  # pylint: disable=unused-argument :(
-        """Read the entire body of the blob.
-
-        Due to API limitations, we can't read less than that at once...
-        """
-        return await self.body.read()
+        """Read the body of :he blob."""
+        return await self.body.read(n)
 
     async def __aenter__(self):
         await self.body.__aenter__()
