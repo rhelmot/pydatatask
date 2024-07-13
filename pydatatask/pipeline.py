@@ -270,7 +270,7 @@ class Pipeline:
                 link_attrs = {}
                 if link.inhibits_output:
                     link_attrs["inhibits_start"] = True
-                elif link.required_for_success:
+                elif link.required_for_success and link.kind != taskmodule.LinkKind.StreamingInputFilepath:
                     link_attrs["required_for_start"] = attrs["vlink"]
                 if link_attrs:
                     v.link(
