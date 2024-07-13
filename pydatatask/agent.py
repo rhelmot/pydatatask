@@ -5,12 +5,15 @@ This is the only hammer you will ever need, if you are okay with that hammer kin
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+from asyncio import Task, create_task, sleep
+from datetime import timedelta
 import logging
 import time
 import traceback
 
 from aiohttp import web
+from aiojobs.aiohttp import setup, spawn
 import yaml
 
 from pydatatask.utils import (
@@ -48,7 +51,9 @@ class _DeferredResponse:
         await self.response.write_eof()
 
 
-def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Application:
+def build_agent_app(
+    pipeline: Pipeline, owns_pipeline: bool = False, flush_period: Optional[timedelta] = None
+) -> web.Application:
     """Given a pipeline, generate an aiohttp web app to serve its repositories."""
 
     error_log: Dict[str, Tuple[float, str]] = {}
@@ -68,6 +73,7 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
             raise
 
     app = web.Application(middlewares=[authorize_middleware, error_handling_middleware])
+    setup(app)
 
     def parse(f):
         async def inner(request: web.Request) -> web.StreamResponse:
@@ -179,6 +185,18 @@ def build_agent_app(pipeline: Pipeline, owns_pipeline: bool = False) -> web.Appl
     if owns_pipeline:
         app.on_startup.append(on_startup)
         app.on_shutdown.append(on_shutdown)
+    if flush_period is not None:
+        cache_flush = web.AppKey("cache_flush", Task[None])
+
+        async def background_flush():
+            while True:
+                pipeline.cache_flush()
+                await sleep(flush_period.total_seconds())
+
+        async def on_startup_flush(app):
+            app[cache_flush] = create_task(background_flush())
+
+        app.on_startup.append(on_startup_flush)
     return app
 
 

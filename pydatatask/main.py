@@ -38,6 +38,7 @@ from typing import (
     Union,
 )
 from collections import defaultdict
+from datetime import timedelta
 from pathlib import Path
 import argparse
 import asyncio
@@ -291,6 +292,7 @@ def main(
     parser_http_agent.set_defaults(func=http_agent)
     parser_http_agent.add_argument("--host", help="The host to listen on", default="0.0.0.0")
     parser_http_agent.add_argument("--override-port", help="The port to listen on", type=int)
+    parser_http_agent.add_argument("--flush-seconds", type=int, help="How often to flush the query cache")
 
     parser_http_multi = subparsers.add_parser(
         "agent-http-multi", help="Launch multiple http agents balanced behind nginx"
@@ -376,9 +378,11 @@ async def graph(pipeline: Pipeline, out_dir: Optional[Path]):
         write_dot(pipeline.graph, f)
 
 
-def http_agent(pipeline: Pipeline, host: str, override_port: Optional[int] = None) -> None:
+def http_agent(
+    pipeline: Pipeline, host: str, override_port: Optional[int] = None, flush_seconds: Optional[float] = None
+) -> None:
     logging.getLogger("aiohttp.access").setLevel("DEBUG")
-    app = build_agent_app(pipeline, True)
+    app = build_agent_app(pipeline, True, None if flush_seconds is None else timedelta(seconds=flush_seconds))
     web.run_app(app, host=host, port=override_port or pipeline.agent_port)
 
 

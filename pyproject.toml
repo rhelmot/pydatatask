@@ -45,6 +45,7 @@ dependencies = [
     "jsonschema",
     "jq",
     "janus",
+    "aiojobs",
 ]
 
 [project.scripts]
