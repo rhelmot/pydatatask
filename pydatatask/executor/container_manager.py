@@ -452,7 +452,14 @@ class KubeContainerManager(AbstractContainerManager):
                 final[job][replica] = result
             elif result[0] is not None:
                 directory = f"/tmp/pydatatask-emergency/{task}-{job}"
-                l.error("Unexpected replica death %s:%s#%s - writing logs to %s", task, job, replica, directory)
+                l.error(
+                    "Unexpected replica death %s:%s#%s (%s) - writing logs to %s",
+                    task,
+                    job,
+                    replica,
+                    pod.metadata.name,
+                    directory,
+                )
                 os.makedirs(directory, exist_ok=True)
                 with open(f"{directory}/{replica}", "wb") as fp:
                     fp.write(result[0])
