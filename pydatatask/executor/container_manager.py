@@ -21,6 +21,7 @@ import logging
 import os
 
 from aiodocker import DockerError
+from kubernetes_asyncio.client import ApiException
 import aiodocker.containers
 import aiofiles.ospath
 import dateutil.parser
@@ -450,7 +451,10 @@ class KubeContainerManager(AbstractContainerManager):
         return live_replicas, dict(final)
 
     async def _cleanup(self, pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
-        log = await self.cluster.logs(pod)
+        try:
+            log = await self.cluster.logs(pod)
+        except (TimeoutError, ApiException):
+            log = b"<Timeout or other error retrieving logs>"
         await self.cluster.delete(pod)
         return (
             log,
