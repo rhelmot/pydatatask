@@ -935,7 +935,11 @@ class Task(ABC):
     def required_for_start_basic(self):
         """A mapping from link name to repository for all links which must be populated in order to start the
         task."""
-        return {name: self._repo_related(name) for name, link in self.links.items() if link.required_for_start is True}
+        return {
+            name: self._repo_related(name)
+            for name, link in self.links.items()
+            if link.required_for_start is True and link.kind != LinkKind.StreamingInputFilepath
+        }
 
     @property
     def inhibits_output(self):
