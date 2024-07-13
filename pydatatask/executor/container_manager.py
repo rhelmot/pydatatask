@@ -446,8 +446,16 @@ class KubeContainerManager(AbstractContainerManager):
         )
         final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
         for pod, result in zip(pods, results):
-            if pod.metadata.labels["job"] not in live_jobs:
-                final[pod.metadata.labels["job"]][int(pod.metadata.labels["replica"])] = result
+            job = pod.metadata.labels["job"]
+            replica = int(pod.metadata.labels["replica"])
+            if job not in live_jobs:
+                final[job][replica] = result
+            elif result[0] is not None:
+                directory = f"/tmp/pydatatask-emergency/{task}-{job}"
+                l.error("Unexpected replica death %s:%s#%s - writing logs to %s", task, job, replica, directory)
+                os.makedirs(directory, exist_ok=True)
+                with open(f"{directory}/{replica}", "wb") as fp:
+                    fp.write(result[0])
         return live_replicas, dict(final)
 
     async def _cleanup(self, pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
