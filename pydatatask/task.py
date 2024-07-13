@@ -211,6 +211,7 @@ class Task(ABC):
         timeout: Optional[timedelta] = None,
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         replicable: bool = False,
+        max_replicas: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
         self.name = name
@@ -234,6 +235,7 @@ class Task(ABC):
         self.done = done
         self.failure_ok = failure_ok
         self.replicable = replicable
+        self.max_replicas = max_replicas
         self.success = pydatatask.query.repository.QueryMetadataRepository(
             "done.filter[.getsuccess]()", {"success": pydatatask.query.parser.QueryValueType.Bool}, {"done": done}
         )
@@ -1272,6 +1274,7 @@ class KubeTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        max_replicas: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
         """
@@ -1298,6 +1301,7 @@ class KubeTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            max_replicas=max_replicas,
             cache_dir=cache_dir,
         )
 
@@ -1474,6 +1478,7 @@ class ProcessTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        max_replicas: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
         """
@@ -1510,6 +1515,7 @@ class ProcessTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            max_replicas=max_replicas,
             cache_dir=cache_dir,
         )
 
@@ -2125,6 +2131,7 @@ class ContainerTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        max_replicas: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
         """
@@ -2153,6 +2160,7 @@ class ContainerTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            max_replicas=max_replicas,
             cache_dir=cache_dir,
         )
 
@@ -2341,6 +2349,7 @@ class ContainerSetTask(TemplateShellTask):
         queries: Optional[Dict[str, pydatatask.query.query.Query]] = None,
         failure_ok: bool = False,
         replicable: bool = False,
+        max_replicas: Optional[int] = None,
         cache_dir: Optional[str] = None,
     ):
         super().__init__(
@@ -2352,6 +2361,7 @@ class ContainerSetTask(TemplateShellTask):
             queries=queries,
             failure_ok=failure_ok,
             replicable=replicable,
+            max_replicas=max_replicas,
             cache_dir=cache_dir,
         )
 

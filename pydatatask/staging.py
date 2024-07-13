@@ -137,6 +137,7 @@ class TaskSpec:
     job_quota: Optional[Quota] = None
     failure_ok: bool = False
     replicable: bool = False
+    max_replicas: Optional[int] = None
     require_success: bool = False
     priority_factor: Optional[float] = None
     priority_addend: Optional[int] = None

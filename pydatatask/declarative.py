@@ -754,6 +754,7 @@ def build_task_picker(
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
                 "replicable": parse_bool,
+                "max_replicas": lambda thing: None if thing is None else int(thing),
                 "cache_dir": lambda thing: thing,
 
                 # Process-specific
@@ -784,6 +785,7 @@ def build_task_picker(
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
                 "replicable": parse_bool,
+                "max_replicas": lambda thing: None if thing is None else int(thing),
                 "cache_dir": lambda thing: thing,
 
                 # Kube-specific
@@ -811,6 +813,7 @@ def build_task_picker(
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
                 "replicable": parse_bool,
+                "max_replicas": lambda thing: None if thing is None else int(thing),
                 "cache_dir": lambda thing: thing,
 
                 # Container-specific
@@ -845,6 +848,7 @@ def build_task_picker(
                 "long_running": parse_bool,
                 "failure_ok": parse_bool,
                 "replicable": parse_bool,
+                "max_replicas": lambda thing: None if thing is None else int(thing),
                 "cache_dir": lambda thing: thing,
 
                 # Containerset-specific

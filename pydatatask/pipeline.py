@@ -459,6 +459,9 @@ class Pipeline:
                 # schedule replicas
                 while sched.replica_heap:
                     next_guy = sched.replica_heap[0]
+                    if next_guy.task.max_replicas is not None and next_guy.replica >= next_guy.task.max_replicas:
+                        heapq.heappop(sched.replica_heap)
+                        continue
                     alloc = (
                         quota_overrides.get((next_guy.task.name, next_guy.job), None)
                         or self.tasks[next_guy.task.name].job_quota
