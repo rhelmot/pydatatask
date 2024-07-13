@@ -150,6 +150,7 @@ class PodManager(Executor):
         self._connection = connection
         self.volumes = volumes or {}
         self._cached_pods: Optional[List[Any]] = None
+        self._lock = asyncio.Lock()
 
     def cache_flush(self):
         super().cache_flush()
@@ -282,10 +283,11 @@ class PodManager(Executor):
 
     async def query(self, job=None, task=None, replica=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
-        if self._cached_pods is None:
-            self._cached_pods = (
-                await self.v1.list_namespaced_pod(self.namespace, label_selector=f"app={self.app}")
-            ).items
+        async with self._lock:
+            if self._cached_pods is None:
+                self._cached_pods = (
+                    await self.v1.list_namespaced_pod(self.namespace, label_selector=f"app={self.app}")
+                ).items
 
         assert self._cached_pods is not None
         return [

@@ -156,6 +156,7 @@ class KubeContainerSetManager(AbstractContainerSetManager):
         self._cached_ds = None
         self.namespace = inner.cluster.namespace
         self.app = inner.cluster.app + "-set"
+        self._lock = asyncio.Lock()
 
     async def size(self):
         return len((await self.v1.list_node()).items)
@@ -194,10 +195,11 @@ class KubeContainerSetManager(AbstractContainerSetManager):
         return self.connection.v1apps
 
     async def query(self, job=None, task=None, replica=None) -> List[Any]:
-        if self._cached_ds is None:
-            self._cached_ds = (
-                await self.v1apps.list_namespaced_daemon_set(self.namespace, label_selector=f"app={self.app}")
-            ).items
+        async with self._lock:
+            if self._cached_ds is None:
+                self._cached_ds = (
+                    await self.v1apps.list_namespaced_daemon_set(self.namespace, label_selector=f"app={self.app}")
+                ).items
 
         assert self._cached_ds is not None
         return [
