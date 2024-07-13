@@ -1515,7 +1515,7 @@ class ProcessTask(TemplateShellTask):
         self.stdin = stdin
         self.stdout = stdout
         self._stderr = stderr
-        self._job_quota = job_quota or Quota.parse(1, "256Mi")
+        self._job_quota = job_quota or Quota.parse(1, "1Gi")
         self._executor = executor or execmodule.localhost_manager
         self._manager: Optional[execmodule.AbstractProcessManager] = None
         self.warned = False
@@ -1985,7 +1985,7 @@ class KubeFunctionTask(KubeTask):
                       resources:
                         requests:
                           cpu: 100m
-                          memory: 256Mi
+                          memory: 1Gi
             ''',
             repo_done,
             repo_func_done,
@@ -2158,7 +2158,7 @@ class ContainerTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._job_quota = job_quota or Quota.parse(1, "256Mi")
+        self._job_quota = job_quota or Quota.parse(1, "1Gi")
         self._fallback_quota = fallback_quota
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerManager] = None
@@ -2359,7 +2359,7 @@ class ContainerSetTask(TemplateShellTask):
         self.image = image
         self.environ = environ or {}
         self.logs = logs
-        self._job_quota = job_quota or Quota.parse(1, "256Mi")
+        self._job_quota = job_quota or Quota.parse(1, "1Gi")
         self._executor = executor
         self._manager: Optional[execmodule.AbstractContainerSetManager] = None
         self.warned = False
