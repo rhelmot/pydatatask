@@ -784,7 +784,10 @@ class Task(ABC):
                     return True
                 return False
 
-            return repomodule.FilterRepository(link.repo, filterer)
+            return repomodule.FilterRepository(
+                repomodule.AggregateAndRepository(**self.required_for_start_basic),
+                filterer,
+            )
         if link.key is None:
             return link.repo
 
