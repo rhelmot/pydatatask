@@ -59,8 +59,8 @@ def build_agent_app(
     error_log: Dict[str, Tuple[float, str]] = {}
 
     @web.middleware
-    async def authorize_middleware(request, handler):
-        if request.cookies.get("secret", None) != pipeline.agent_secret:
+    async def authorize_middleware(request: web.Request, handler):
+        if request.path != "/health" and request.cookies.get("secret", None) != pipeline.agent_secret:
             raise web.HTTPForbidden()
         return await handler(request)
 
@@ -170,11 +170,15 @@ def build_agent_app(
             ts, err = error_log[path]
             return web.Response(text=f"Error from {time.time() - ts} seconds ago:\n{err}")
 
+    async def health(request: web.Request) -> web.StreamResponse:
+        return web.Response(text="OK")
+
     app.add_routes([web.get("/data/{task}/{link}/{job}", get), web.post("/data/{task}/{link}/{job}", post)])
     app.add_routes([web.get("/stream/{task}/{link}/{job}", stream)])
     app.add_routes([web.post("/query/{task}/{query}", query)])
     app.add_routes([web.post("/cokeydata/{task}/{link}/{cokey}/{job}", cokey_post)])
     app.add_routes([web.get("/errors/{path:.*}", errors)])
+    app.add_routes([web.get("/health", health)])
 
     async def on_startup(_app: web.Application):
         await pipeline.open()
