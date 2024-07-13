@@ -552,6 +552,7 @@ class Task(ABC):
         {'; '.join(self.host.mk_mkdir(cokey_dir) for cokey_dir in cokeyed.values())}
         {idgen_function}
         watcher_{nonce}() {{
+          set +x
           WATCHER_LAST=
           while ! [ -d {filepath} ]; do
             sleep 1
@@ -604,12 +605,14 @@ class Task(ABC):
         lock = self.host.mktemp("lock")
         stream_url = f"{self.agent_url}/stream/{self.name}/{link_name}/{job}"
         stream_headers = {"Cookie": f"secret={self.agent_secret}"}
+        nonce = "".join(random.choice(string.ascii_lowercase) for _ in range(10))
 
         templated_preamble = f"""
         {self.host.mk_mkdir(filepath)}
         {self.host.mk_mkdir(scratch)}
         {self.host.mk_mkdir(lock)}
-        watcher() {{
+        watcher_{nonce}() {{
+            set +x
             cd {filepath}
             while true; do
                 sleep 5
@@ -625,7 +628,7 @@ class Task(ABC):
                 done
             done
         }}
-        watcher &
+        watcher_{nonce} &
         """
 
         return templated_preamble, {
