@@ -219,7 +219,6 @@ class PodManager(Executor):
         )
         if replica != 0:
             manifest["metadata"]["labels"]["preemptable"] = "true"
-        manifest["spec"]["priority"] = -1 if replica != 0 else 0
 
         await self.v1.create_namespaced_pod(self.namespace, manifest)
 
