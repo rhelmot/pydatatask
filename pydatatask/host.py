@@ -49,11 +49,19 @@ class Host:
             FILENAME="$(mktemp)"
             ERR_FILENAME=$(mktemp)
             if [ -d "$FILENAME" ]; then echo "mk_http_get target $FILENAME is a directory" && false; fi
-            wget {'-v' if verbose else '-q'} -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
-                curl -f {'-v' if verbose else ''} $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
-                (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME
-                {handle_err}
-                false)
+
+            for i in $(seq 1 3); do
+                wget {'-v' if verbose else '-q'} -O- $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
+                    curl -f {'-v' if verbose else ''} $URL {headers_str} >>$FILENAME 2>>$ERR_FILENAME || \\
+                    (echo "download of $URL failed:" && cat $ERR_FILENAME $FILENAME
+                    {handle_err}
+                    false)
+                CUR_DOWNLOAD_FAILED=$?
+                if [ $CUR_DOWNLOAD_FAILED -eq 0 ]; then break; fi
+                RETRY_DELAY=$((i * 10))
+                echo "download failed, retrying in $RETRY_DELAY seconds"
+                sleep $RETRY_DELAY
+            done
             rm $ERR_FILENAME
             cat $FILENAME >"{filename}"
             rm $FILENAME
