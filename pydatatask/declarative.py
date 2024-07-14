@@ -14,6 +14,7 @@ import sys
 import traceback
 
 from importlib_metadata import entry_points
+import aiobotocore.config
 import aiobotocore.session
 import asyncssh
 import docker_registry_client_async

@@ -96,6 +96,13 @@ class TestMinio(unittest.IsolatedAsyncioTestCase):
         assert await repo.contains("foo")
         assert not await repo.contains("bar")
 
+        async with await repo.open("empty", "w") as fp:
+            await fp.write("")
+        assert await repo.contains("empty")
+        async with await repo.open("empty", "rb") as fp:
+            assert await fp.read() == b""
+        await repo.delete("empty")
+
         assert repo.get_endpoint(LOCAL_HOST) == "http://" + self.minio_endpoint
 
         await repo.delete("foo")

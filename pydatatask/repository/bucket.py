@@ -1,10 +1,11 @@
 """This module contains repositories and other classes for interacting with S3-compatible bucket stores."""
 
 from typing import Any, Dict, Literal, Optional, overload
-import io
 
 from types_aiobotocore_s3.client import S3Client
+from types_aiobotocore_s3.type_defs import CreateMultipartUploadOutputTypeDef
 import botocore.exceptions
+import botocore.utils
 
 from pydatatask.host import LOCAL_HOST, Host
 from pydatatask.session import Ephemeral
@@ -14,13 +15,12 @@ from .base import BlobRepository, Repository, YamlMetadataRepository, job_getter
 
 
 class S3BucketBinaryWriter:
-    """A class for streaming (or buffering) byte data to be written to an `S3BucketRepository`."""
+    """A class for streaming byte data to be written to an `S3BucketRepository`."""
 
-    def __init__(self, repo: "S3BucketRepository", job: str):
-        self.repo = repo
-        self.job = job
-        self.buffer = io.BytesIO()
-        super().__init__()
+    def __init__(self, mpu: CreateMultipartUploadOutputTypeDef, client: S3Client):
+        self.mpu = mpu
+        self.client = client
+        self.etags = []
 
     async def __aenter__(self):
         return self
@@ -30,20 +30,25 @@ class S3BucketBinaryWriter:
 
     async def close(self):
         """Close and flush the data to the bucket."""
-        self.buffer.seek(0, io.SEEK_END)
-        size = self.buffer.tell()
-        self.buffer.seek(0, io.SEEK_SET)
-        await self.repo.client.put_object(
-            Bucket=self.repo.bucket,
-            Key=self.repo.object_name(self.job),
-            Body=self.buffer,
-            ContentLength=size,
-            ContentType=self.repo.mimetype,
+        parts = [{"ETag": etag, "PartNumber": i + 1} for i, etag in enumerate(self.etags)]
+        await self.client.complete_multipart_upload(
+            Bucket=self.mpu["Bucket"],
+            Key=self.mpu["Key"],
+            UploadId=self.mpu["UploadId"],
+            MultipartUpload={"Parts": parts},
         )
 
-    async def write(self, data: bytes) -> int:
+    async def write(self, data: bytes, /) -> int:
         """Write some data to the stream."""
-        return self.buffer.write(data)
+        part = await self.client.upload_part(
+            Bucket=self.mpu["Bucket"],
+            Key=self.mpu["Key"],
+            UploadId=self.mpu["UploadId"],
+            PartNumber=len(self.etags) + 1,
+            Body=data,
+        )
+        self.etags.append(part["ETag"])
+        return len(data)
 
 
 class S3BucketReader:
@@ -56,7 +61,7 @@ class S3BucketReader:
         """Close and release the stream."""
         self.body.close()
 
-    async def read(self, n=None):  # pylint: disable=unused-argument :(
+    async def read(self, n=None):
         """Read the body of :he blob."""
         return await self.body.read(n)
 
@@ -189,9 +194,15 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         if not self.is_valid_job_id(job):
             raise KeyError(job)
         if mode == "wb":
-            return S3BucketBinaryWriter(self, job)
+            mpu = await self.client.create_multipart_upload(
+                Bucket=self.bucket, Key=self.object_name(job), ContentType=self.mimetype
+            )
+            return S3BucketBinaryWriter(mpu, self.client)
         elif mode == "w":
-            return AWriteText(S3BucketBinaryWriter(self, job))
+            mpu = await self.client.create_multipart_upload(
+                Bucket=self.bucket, Key=self.object_name(job), ContentType=self.mimetype
+            )
+            return AWriteText(S3BucketBinaryWriter(mpu, self.client))
         elif mode == "rb":
             return S3BucketReader((await self.client.get_object(Bucket=self.bucket, Key=self.object_name(job)))["Body"])
         elif mode == "r":

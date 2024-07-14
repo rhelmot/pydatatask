@@ -268,6 +268,9 @@ class AWriteText:
         await self.base.close()
 
     async def __aenter__(self):
+        aenter = getattr(self.base, "__aenter__", None)
+        if aenter is not None:
+            await aenter()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
