@@ -63,8 +63,7 @@ class Host:
                 sleep $RETRY_DELAY
             done
             rm $ERR_FILENAME
-            cat $FILENAME >"{filename}"
-            rm $FILENAME
+            mv $FILENAME "{filename}" || cat $FILENAME >"{filename}" && rm -f $FILENAME
             """
         else:
             raise TypeError(self.os)
@@ -114,7 +113,7 @@ class Host:
                 {'ANY_UPLOADS_FAILED=1' if required_for_success else ''}
             fi
             rm $ERR_FILENAME
-            {f'cat $OUTPUT_FILENAME >"{output_filename}"; rm $OUTPUT_FILENAME' if output_filename else ''}
+            {f'mv $OUTPUT_FILENAME "{output_filename}" || cat $OUTPUT_FILENAME >"{output_filename}" && rm -f $OUTPUT_FILENAME' if output_filename else ''}
             """
         else:
             raise TypeError(self.os)
