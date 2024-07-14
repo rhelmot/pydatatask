@@ -42,6 +42,7 @@ from pydatatask.quota import MAX_QUOTA, Quota, _MaxQuotaType
 from pydatatask.repository import (
     DirectoryRepository,
     DockerRepository,
+    FallbackMetadataRepository,
     FileRepository,
     InProcessBlobRepository,
     InProcessMetadataRepository,
@@ -452,6 +453,14 @@ def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Call
                 {
                     "database": make_picker("MongoDatabase", ephemerals),
                     "collection": str,
+                },
+            ),
+            "FallbackMetadata": make_annotated_constructor(
+                "FallbackMetadata",
+                FallbackMetadataRepository,
+                {
+                    "database": make_dispatcher("Repository", kinds),
+                    "fallback": make_dispatcher("Repository", kinds),
                 },
             ),
             "Query": make_annotated_constructor(

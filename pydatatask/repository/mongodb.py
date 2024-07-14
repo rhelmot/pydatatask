@@ -91,3 +91,55 @@ class MongoMetadataRepository(MetadataRepository):
             await self.collection.replace_one({"_id": job}, data, upsert=True)
         except (TypeError, errors.BSONError) as e:
             raise Exception(f"Failed to dump a document to mongodb. The document is:\n{data}") from e
+
+
+class FallbackMetadataRepository(MetadataRepository):
+    def __init__(
+        self,
+        base: MetadataRepository,
+        fallback: MetadataRepository,
+    ):
+        self.base = base
+        self.fallback = fallback
+
+    async def _unfiltered_iter(self):
+        async for x in self.base:
+            yield x
+        async for x in self.fallback:
+            yield x
+
+    async def contains(self, job):
+        return (await self.base.contains(job)) or (await self.fallback.contains(job))
+
+    async def info(self, job):
+        if await self.base.contains(job):
+            return await self.base.info(job)
+        return await self.fallback.info(job)
+
+    async def info_all(self):
+        result = await self.base.info_all()
+        result.update(await self.fallback.info_all())
+        return result
+
+    async def dump(self, job, data):
+        try:
+            await self.base.dump(job, data)
+        except Exception:
+            await self.fallback.dump(job, data)
+            await self.base.delete(job)
+        else:
+            await self.fallback.delete(job)
+
+    async def delete(self, job):
+        await self.base.delete(job)
+        await self.fallback.delete(job)
+
+    def cache_flush(self):
+        self.base.cache_flush()
+        self.fallback.cache_flush()
+
+    def footprint(self):
+        yield self  # me when I lie
+
+    def __getstate__(self):
+        return (self.base, self.fallback)

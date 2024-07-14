@@ -172,6 +172,28 @@ class MongoMetaAllocator(Allocator):
         )
 
 
+class S3FallbackMongoMetaAllocator(Allocator):
+    def __init__(self, url: str):
+        mongo_url, s3_url = url.split(":::::", 1)
+        self.s3_alloc = S3BlobAllocator(s3_url)
+        self.mongo_alloc = MongoMetaAllocator(mongo_url)
+
+    def allocate(self, spec: RepoClassSpec) -> Optional[Dispatcher]:
+        if spec.cls != "MetadataRepository":
+            return None
+        s3_name = None if spec.name is None else spec.name + "___s3"
+        s3 = self.s3_alloc.allocate(RepoClassSpec("BlobRepository", name=s3_name))
+        assert s3 is not None
+        s3.cls = "YamlMetadataS3Bucket"
+        return Dispatcher(
+            "FallbackMetadata",
+            {
+                "base": self.mongo_alloc.allocate(spec),
+                "fallback": s3,
+            },
+        )
+
+
 def _subargparse(url: str):
     result: Dict[str, Union[bool, str]] = {}
     for arg in url.split(","):
@@ -369,7 +391,14 @@ def main():
         action="append",
         dest="repo_allocator",
         type=MongoMetaAllocator,
-        help="Allocate metadata repositories as a tarball in a mongodb collection. Expects url in format MONGO_URL:::database",
+        help="Allocate metadata repositories as an entry in a mongodb collection. Expects url in format MONGO_URL:::database",
+    )
+    parser.add_argument(
+        "--repo-meta-mongo-s3-fallback",
+        action="append",
+        dest="repo_allocator",
+        type=S3FallbackMongoMetaAllocator,
+        help="Allocate metadata repositories as an entry in a mongodb collection, or as a yaml-encoded blob in a s3 bucket if it cannot be stored for any reason. Expects url in format a:::::b, where a is the argument to --repo-meta-mongo and b is the argument to --repo-blob-s3",
     )
     parser.add_argument(
         "--repo-temp",
