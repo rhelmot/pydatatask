@@ -1026,7 +1026,8 @@ class InProcessMetadataRepository(MetadataRepository):
         return item in self.data
 
     async def delete(self, job, /):
-        del self.data[job]
+        if job in self.data:
+            del self.data[job]
 
     async def unfiltered_iter(self):
         for job in self.data:

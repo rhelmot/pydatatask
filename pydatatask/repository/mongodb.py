@@ -62,7 +62,7 @@ class MongoMetadataRepository(MetadataRepository):
         # WHY does mypy think this doesn't work
         result: Optional[Any] = await self.collection.find_one({"_id": job})  # type: ignore[func-returns-value]
         if result is None:
-            result = {}
+            return {}
         return self._fix_bson(result, root=True)
 
     async def info_all(self) -> Dict[str, Any]:
@@ -102,7 +102,7 @@ class FallbackMetadataRepository(MetadataRepository):
         self.base = base
         self.fallback = fallback
 
-    async def _unfiltered_iter(self):
+    async def unfiltered_iter(self):
         async for x in self.base:
             yield x
         async for x in self.fallback:

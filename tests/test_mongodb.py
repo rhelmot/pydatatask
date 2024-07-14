@@ -90,6 +90,31 @@ class TestMongoDB(unittest.IsolatedAsyncioTestCase):
         assert await repo.info("foo") == {}
         assert len([x async for x in repo]) == 0
 
+    async def test_fallback(self):
+        assert self.client is not None
+        client = self.client
+        repo = pydatatask.MongoMetadataRepository(lambda: client.get_database(self.database), "test2")
+        try:
+            await repo.dump("1", 1)
+        except:
+            pass
+        else:
+            assert False, "Shouldn't be able to store a raw int"
+
+        fallback = pydatatask.InProcessMetadataRepository()
+        repo2 = pydatatask.FallbackMetadataRepository(repo, fallback)
+
+        await repo2.dump("1", 1)
+        assert (await repo2.info("1")) == 1
+
+        await repo2.dump("2", {"asdf": "qwer"})
+        assert await repo2.contains("2")
+        assert not await fallback.contains("2")
+
+        await repo2.dump("3", {"asdf": "A" * (17 * 1024 * 1024)})
+        assert await repo2.contains("3")
+        assert not await repo.contains("3")
+
     async def asyncTearDown(self):
         if self.client is not None:
             await self.client.drop_database(self.database)
