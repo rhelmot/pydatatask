@@ -42,6 +42,9 @@ class DockerRepository(Repository):
     def __getstate__(self):
         return (self.domain, self.repository)
 
+    async def cache_key(self, job: str):
+        return None
+
     @property
     def registry(self) -> docker_registry_client_async.dockerregistryclientasync.DockerRegistryClientAsync:
         """The ``docker_registry_client_async`` client object.

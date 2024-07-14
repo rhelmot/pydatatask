@@ -444,6 +444,9 @@ class ContentAddressedBlobRepository(FilesystemRepository):
         self.blobs.cache_flush()
         self.meta.cache_flush()
 
+    async def cache_key(self, job):
+        return await self.meta.cache_key(job)
+
     def __getstate__(self):
         return (self.blobs, self.meta, self.pathsep)
 
@@ -660,6 +663,9 @@ class TarfileFilesystemRepository(FilesystemRepository):
     def __init__(self, inner: BlobRepository):
         super().__init__()
         self.inner = inner
+
+    async def cache_key(self, job):
+        return await self.inner.cache_key(job)
 
     def footprint(self):
         # This COULD be split out into a more base level footprint. however this produces a more legible backup result

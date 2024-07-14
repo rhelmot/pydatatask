@@ -172,7 +172,8 @@ class Repository(ABC):
                 filepath = task.mktemp(f"input-{link_name}-{job}")
             else:
                 filepath = force_path.format(link_name=link_name, job=job)
-            return taskmodule.TemplateInfo(filepath, preamble=task.mk_repo_get(filepath, link_name, job))
+            cache_key = await task._repo_related(link_name).cache_key(job)
+            return taskmodule.TemplateInfo(filepath, preamble=task.mk_repo_get(filepath, link_name, job, cache_key))
         if kind == taskmodule.LinkKind.OutputFilepath:
             if force_path is None:
                 filepath = task.mktemp(f"output-{link_name}-{job}")
@@ -240,6 +241,10 @@ class Repository(ABC):
 
         This will be automatically called by the pipeline on opening.
         """
+
+    @abstractmethod
+    def cache_key(self, job: str) -> Awaitable[Optional[str]]:
+        raise NotImplementedError
 
 
 class MetadataRepository(Repository, ABC):
@@ -383,6 +388,9 @@ class MapRepository(MetadataRepository):
     async def dump(self, job: str, data: Any, /):
         raise TypeError("Do not try to dump into a map repository lol")
 
+    async def cache_key(self, job: str):
+        return None
+
 
 class FilterRepository(Repository):
     """A FilterRepository is a repository which uses arbitrary functions to filter results from a base
@@ -434,6 +442,9 @@ class FilterRepository(Repository):
         async for item in self.base.unfiltered_iter():
             if self.filter is None or await self.filter(item):
                 yield item
+
+    async def cache_key(self, job):
+        return await self.base.cache_key(job)
 
 
 class FilterMetadataRepository(FilterRepository, MetadataRepository):
@@ -578,6 +589,9 @@ class FileRepositoryBase(Repository, ABC):
         """Construct the full local path of the file corresponding to ``job``."""
         return self.basedir / (job + self.extension)
 
+    async def cache_key(self, job):
+        return f"file:{self.basedir}/{job}"
+
 
 class FileRepository(FileRepositoryBase, BlobRepository):  # BlobFileRepository?
     """A file repository whose members are files, treated as streamable blobs."""
@@ -616,6 +630,9 @@ class FunctionCallMetadataRepository(MetadataRepository):
         self._domain.cache_flush()
         for child in self._extra_footprint:
             child.cache_flush()
+
+    async def cache_key(self, job):
+        return None
 
     def __getstate__(self):
         return (self._info, self._domain)
@@ -696,6 +713,12 @@ class RelatedItemRepository(Repository):
         if basename is None:
             return False
         return await self.base_repository.contains(basename)
+
+    async def cache_key(self, job):
+        basename = await self._lookup(job)
+        if basename is None:
+            return None
+        return await self.base_repository.cache_key(basename)
 
     async def delete(self, job, /):
         if not self.allow_deletes:
@@ -800,6 +823,9 @@ class AggregateAndRepository(Repository):
         for child in self.children.values():
             child.cache_flush()
 
+    async def cache_key(self, job):
+        return None
+
     def __getstate__(self):
         return (self.children,)
 
@@ -837,6 +863,9 @@ class AggregateOrRepository(Repository):
     def cache_flush(self):
         for child in self.children.values():
             child.cache_flush()
+
+    async def cache_key(self, job):
+        return None
 
     def __getstate__(self):
         return (self.children,)
@@ -878,6 +907,9 @@ class BlockingRepository(Repository):
     def cache_flush(self):
         self.source.cache_flush()
         self.unless.cache_flush()
+
+    async def cache_key(self, job):
+        return await self.source.cache_key(job)
 
     def __getstate__(self):
         return (self.source, self.unless, self.enumerate_unless)
@@ -952,6 +984,9 @@ class YamlMetadataRepository(MetadataRepository, ABC):
         async with await self.blob.open(job, "w") as fp:
             await fp.write(s)
 
+    async def cache_key(self, job):
+        return await self.blob.cache_key(job)
+
 
 class YamlMetadataFileRepository(YamlMetadataRepository):
     """A metadata repository based on a file blob repository."""
@@ -986,6 +1021,9 @@ class ExecutorLiveRepo(Repository):
         for job in self.task.rev_jobs:
             yield job
 
+    async def cache_key(self, job):
+        return None
+
     async def contains(self, item, /):
         return item in self.task.rev_jobs
 
@@ -1001,6 +1039,9 @@ class InProcessMetadataRepository(MetadataRepository):
     def __init__(self, data: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.data: Dict[str, Any] = data if data is not None else {}
+
+    async def cache_key(self, job):
+        return None
 
     def footprint(self):
         yield self
@@ -1082,6 +1123,9 @@ class InProcessBlobRepository(BlobRepository):
     def __getstate__(self):
         return id(self)
 
+    async def cache_key(self, job):
+        return None
+
     def __repr__(self):
         return f"<{type(self).__name__}>"
 
@@ -1148,6 +1192,9 @@ class CacheInProcessMetadataRepository(MetadataRepository):
         self._negative_cache = set()
         self._complete_keys = False
         self._complete_values = False
+
+    async def cache_key(self, job):
+        return await self.base.cache_key(job)
 
     async def info(self, job: str, /):
         # EXPERIMENT
@@ -1271,6 +1318,9 @@ class CompressedBlobRepository(BlobRepository):
 
     def cache_flush(self):
         self.inner.cache_flush()
+
+    async def cache_key(self, job):
+        return await self.inner.cache_key(job)
 
     async def validate(self):
         await self.inner.validate()

@@ -37,6 +37,9 @@ class LiveKubeRepository(Repository):
             seen.add(job)
             yield job
 
+    async def cache_key(self, job):
+        return None
+
     async def contains(self, item, /):
         return bool(await self.task.podman.query(task=self.task.name, job=item))
 
@@ -93,6 +96,9 @@ class LiveContainerRepository(Repository):
         for jjob, replica in await self.task.manager.live(self.task.name, job):
             await self.task.manager.kill(self.task.name, jjob, replica)
 
+    async def cache_key(self, job):
+        return None
+
 
 class LiveProcessRepository(Repository):
     """A repository where keys translate to containers running in process task.
@@ -124,6 +130,9 @@ class LiveProcessRepository(Repository):
     async def contains(self, item, /):
         bluh = await self.task.manager.live(self.task.name)
         return any(item == job for job, _ in bluh)
+
+    async def cache_key(self, job):
+        return None
 
     def __repr__(self):
         return f"<LiveProcessRepository task={self.task.name}>"
@@ -157,6 +166,9 @@ class LiveContainerSetRepository(Repository):
 
     async def contains(self, item, /):
         return any(item == job for job, _ in await self.task.manager.live(self.task.name))
+
+    async def cache_key(self, job):
+        return None
 
     def __repr__(self):
         return f"<LiveContainerSetRepository task={self.task.name}>"

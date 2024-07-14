@@ -344,7 +344,7 @@ class Task(ABC):
             filename, url, headers, output_filename, verbose=self.debug_trace, required_for_success=required_for_success
         )
 
-    def mk_repo_get(self, filename: str, link_name: str, job: str) -> Any:
+    def mk_repo_get(self, filename: str, link_name: str, job: str, cache_key: Optional[str] = None) -> Any:
         """Generate logic to perform an repository download for the task host system.
 
         For shell script-based tasks, this will be a shell script, but for other tasks it may be other objects.
@@ -360,8 +360,7 @@ class Task(ABC):
             verbose=self.debug_trace,
             handle_err=self.mk_error_handler(url, headers),
         )
-        if self.cache_dir is not None and repomodule.Repository.is_valid_job_id(job):
-            cache_key = f"linkjob-{self.name}-{link_name}-{job}"
+        if self.cache_dir is not None and cache_key is not None:
             result = self.host.mk_cache_get_static(payload_filename, cache_key, result, self.cache_dir)
         if is_filesystem:
             result += self.host.mk_unzip(filename, payload_filename)

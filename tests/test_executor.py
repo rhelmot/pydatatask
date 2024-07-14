@@ -46,9 +46,6 @@ class TestExecutor(unittest.IsolatedAsyncioTestCase):
                 sync=True,
                 meta=True,
                 force=True,
-                fail_fast=True,
-                debug_trace=False,
-                require_success=True,
             )
 
         assert repo2.data["foo"] == "weh!?"

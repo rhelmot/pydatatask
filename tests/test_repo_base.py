@@ -23,6 +23,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
             async def info(self, job):
                 return None
 
+            async def cache_key(self, job):
+                return None
+
         repo = DerivedRepository()
 
         with self.assertLogs("pydatatask.repository") as cl:
@@ -53,6 +56,9 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
             async def dump(self, job, data):
                 raise NotImplementedError
 
+            async def cache_key(self, job):
+                return None
+
         repo = DerivedRepository()
 
         async def mapper(job, info):
@@ -61,7 +67,7 @@ class TestRepoBase(unittest.IsolatedAsyncioTestCase):
         async def filter(job):
             return job == "foo"
 
-        mapped = repo.map(mapper, filter, allow_deletes=True)
+        mapped = repo.map(mapper, [], filt=filter, allow_deletes=True)
 
         assert [x async for x in mapped] == ["foo"]
         assert await mapped.contains("foo")

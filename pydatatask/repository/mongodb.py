@@ -55,6 +55,9 @@ class MongoMetadataRepository(MetadataRepository):
         async for x in self.collection.find({}, projection=["_id"]):
             yield x["_id"]
 
+    async def cache_key(self, job):
+        return f"mongo:{self._collection}/{job}"
+
     @job_getter
     async def info(self, job, /):
         """The info of a mongo metadata repository is the literal value stored in the repository with identifier
@@ -102,6 +105,9 @@ class FallbackMetadataRepository(MetadataRepository):
         self.base = base
         self.fallback = fallback
         super().__init__()
+
+    async def cache_key(self, job):
+        return await self.base.cache_key(job)
 
     async def unfiltered_iter(self):
         async for x in self.base:

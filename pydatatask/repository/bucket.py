@@ -90,6 +90,9 @@ class S3BucketRepositoryBase(Repository):
     def footprint(self):
         yield self
 
+    async def cache_key(self, job):
+        return f"bucket:{self.bucket}/{job}"
+
     def __getstate__(self) -> Any:
         return (self.endpoints, self.bucket)
 

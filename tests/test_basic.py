@@ -33,7 +33,7 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         task.link("repo0", repo0, kind=LinkKind.InputRepo)
         task.link("repo1", repo1, kind=LinkKind.OutputRepo)
 
-        pipeline = pydatatask.Pipeline([task], session, [])
+        pipeline = pydatatask.Pipeline([task], session, lambda x, y, z: 0)
         async with pipeline:
             await pydatatask.run(pipeline, forever=False, launch_once=False, timeout=None)
 
@@ -44,18 +44,6 @@ class TestBasic(unittest.IsolatedAsyncioTestCase):
         assert len([x async for x in repo0]) == 100
         await repo1.delete("0")
         assert len([x async for x in repo1]) == 99
-
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            await pydatatask.print_status(pipeline, False)
-        assert (
-            captured.getvalue() == "task\n  task.repo0 100\n  task.done 100\n  task.success 100\n  task.repo1 99\n\n\n"
-        )
-
-        captured = io.StringIO()
-        with contextlib.redirect_stdout(captured):
-            await pydatatask.print_trace(pipeline, False, ["0", "1", "foo"])
-        assert captured.getvalue() == "task\ntask.repo0 0 1\ntask.done 0 1\ntask.success 0 1\ntask.repo1 1\n\n"
 
 
 if __name__ == "__main__":

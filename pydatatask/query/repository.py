@@ -83,6 +83,9 @@ class QueryRepository(Repository):
     def __getstate__(self):
         return (self.query,)
 
+    async def cache_key(self, job):
+        return await (await self._resolve()).cache_key(job)
+
 
 class QueryMetadataRepository(QueryRepository, MetadataRepository):
     """A QueryMetadataRepository is just a QueryRepository but additionally a MetadataRepository."""

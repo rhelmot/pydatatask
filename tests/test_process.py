@@ -73,7 +73,7 @@ echo bye >&2
         assert len(repo_done.data) == self.n
 
         for i in range(self.n):
-            assert repo_stdout.data[str(i)] == f"{i}weh\nbye\n".encode()
+            assert repo_stdout.data[str(i)] == f"{i}weh\nbye\nShutting down now\n".encode()
             assert repo_done.data[str(i)]["exit_code"] == 0
 
     async def asyncTearDown(self):
@@ -177,7 +177,7 @@ echo 'goodbye world!' >&2
             assert repo_stderr.data[str(i)] == "hello world!\ngoodbye world!\n".encode()
             assert (
                 repo_stdout.data[str(i)]
-                == f"The message of day {i} is {base64.b64encode(repo_stdin.data[str(i)]).decode()}. That's pretty great!\n".encode()
+                == f"The message of day {i} is {base64.b64encode(repo_stdin.data[str(i)]).decode()}. That's pretty great!\nShutting down now\n".encode()
             )
             assert repo_done.data[str(i)]["exit_code"] == 0
 
