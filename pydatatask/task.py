@@ -1422,7 +1422,7 @@ class KubeTask(TemplateShellTask):
             for replica, (log, done) in replicas.items():
                 success &= done["success"] | (done["timeout"] and self.long_running)
                 logs[replica] = log
-                dones[replica] = done
+                dones[str(replica)] = done
 
             if self.logs is not None:
                 async with await self.logs.open(job, "wb") as fp:

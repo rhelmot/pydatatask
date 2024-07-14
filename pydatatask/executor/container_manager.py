@@ -468,7 +468,7 @@ class KubeContainerManager(AbstractContainerManager):
     async def _cleanup(self, pod, timeout: bool = False) -> Tuple[bytes, Dict[str, Any]]:
         try:
             log = await self.cluster.logs(pod)
-        except (TimeoutError, ApiException):
+        except (TimeoutError, ApiException, asyncio.exceptions.TimeoutError):
             log = b"<Timeout or other error retrieving logs>"
         await self.cluster.delete(pod)
         return (
