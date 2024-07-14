@@ -445,7 +445,7 @@ class KubeContainerManager(AbstractContainerManager):
             *chain((self._cleanup(pod) for pod in finished_pods), (self._cleanup(pod, True) for pod in timeout_pods))
         )
         final: DefaultDict[str, Dict[int, Tuple[Optional[bytes], Dict[str, Any]]]] = defaultdict(dict)
-        for pod, result in zip(pods, results):
+        for pod, result in zip(chain(finished_pods, timeout_pods), results):
             job = pod.metadata.labels["job"]
             replica = int(pod.metadata.labels["replica"])
             if job not in live_jobs:
