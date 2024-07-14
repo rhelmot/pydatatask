@@ -101,6 +101,7 @@ class FallbackMetadataRepository(MetadataRepository):
     ):
         self.base = base
         self.fallback = fallback
+        super().__init__()
 
     async def unfiltered_iter(self):
         async for x in self.base:
