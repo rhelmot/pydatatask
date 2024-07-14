@@ -1,12 +1,15 @@
 """This module contains repositories for interacting with MongoDB as a data store."""
 
 from typing import Any, Callable, Dict, Optional, Union
+import logging
 
-from bson import Int64
+from bson import Int64, errors
 import motor.core
 import motor.motor_asyncio
 
 from .base import MetadataRepository, job_getter
+
+l = logging.getLogger(__name__)
 
 
 class MongoMetadataRepository(MetadataRepository):
@@ -84,4 +87,7 @@ class MongoMetadataRepository(MetadataRepository):
         self.schema_validate(data)
         if not self.is_valid_job_id(job):
             raise KeyError(job)
-        await self.collection.replace_one({"_id": job}, data, upsert=True)
+        try:
+            await self.collection.replace_one({"_id": job}, data, upsert=True)
+        except (TypeError, errors.BSONError) as e:
+            raise Exception(f"Failed to dump a document to mongodb. The document is:\n{data}") from e
