@@ -13,6 +13,8 @@ from pydatatask.utils import AReadText, AWriteText
 
 from .base import BlobRepository, Repository, YamlMetadataRepository, job_getter
 
+BUFFER_THRESHOLD = 1024 * 1024 * 5
+
 
 class S3BucketBinaryWriter:
     """A class for streaming byte data to be written to an `S3BucketRepository`."""
@@ -21,6 +23,7 @@ class S3BucketBinaryWriter:
         self.mpu = mpu
         self.client = client
         self.etags = []
+        self.buffer = bytearray()
 
     async def __aenter__(self):
         return self
@@ -30,6 +33,17 @@ class S3BucketBinaryWriter:
 
     async def close(self):
         """Close and flush the data to the bucket."""
+        if self.buffer:
+            part = await self.client.upload_part(
+                Bucket=self.mpu["Bucket"],
+                Key=self.mpu["Key"],
+                UploadId=self.mpu["UploadId"],
+                PartNumber=len(self.etags) + 1,
+                Body=self.buffer,
+            )
+            self.etags.append(part["ETag"])
+            self.buffer.clear()
+
         parts = [{"ETag": etag, "PartNumber": i + 1} for i, etag in enumerate(self.etags)]
         await self.client.complete_multipart_upload(
             Bucket=self.mpu["Bucket"],
@@ -39,17 +53,20 @@ class S3BucketBinaryWriter:
         )
 
     async def write(self, data: bytes, /) -> int:
-        """Write some data to the stream."""
         if not data:
             return 0
-        part = await self.client.upload_part(
-            Bucket=self.mpu["Bucket"],
-            Key=self.mpu["Key"],
-            UploadId=self.mpu["UploadId"],
-            PartNumber=len(self.etags) + 1,
-            Body=data,
-        )
-        self.etags.append(part["ETag"])
+        self.buffer.extend(data)
+        if len(self.buffer) >= BUFFER_THRESHOLD:
+            """Write some data to the stream."""
+            part = await self.client.upload_part(
+                Bucket=self.mpu["Bucket"],
+                Key=self.mpu["Key"],
+                UploadId=self.mpu["UploadId"],
+                PartNumber=len(self.etags) + 1,
+                Body=self.buffer,
+            )
+            self.etags.append(part["ETag"])
+            self.buffer.clear()
         return len(data)
 
 
