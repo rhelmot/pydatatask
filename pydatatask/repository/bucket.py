@@ -109,9 +109,6 @@ class S3BucketRepositoryBase(Repository):
     def footprint(self):
         yield self
 
-    async def cache_key(self, job):
-        return f"bucket:{self.bucket}/{job}"
-
     def __getstate__(self) -> Any:
         return (self.endpoints, self.bucket)
 
@@ -166,6 +163,9 @@ class S3BucketRepository(S3BucketRepositoryBase, BlobRepository):
         self.prefix = prefix
         self.suffix = suffix
         self.mimetype = mimetype
+
+    async def cache_key(self, job):
+        return f"bucket:{self.bucket}/{self.prefix}{job}{self.suffix}"
 
     def __getstate__(self):
         return (super().__getstate__(), self.prefix, self.suffix, self.mimetype)

@@ -377,7 +377,7 @@ async def map_values(a: repomodule.Repository, b: Callable[[object], Awaitable[o
     async def inner(_key, obj):
         return await b(obj)
 
-    return a.map(inner)
+    return a.map(inner, [])
 
 
 @_builtin("map")
@@ -398,7 +398,7 @@ async def map_key_values(
     async def inner(key, obj):
         return await b(Key(key), obj)
 
-    return a.map(inner)
+    return a.map(inner, [])
 
 
 @_builtin("rekey")
@@ -407,9 +407,9 @@ async def rekey(a: repomodule.Repository, b: Callable[[Key], Awaitable[Key]]) ->
         return str(await b(Key(k)))
 
     if isinstance(a, repomodule.MetadataRepository):
-        return repomodule.RelatedItemMetadataRepository(a, repomodule.FunctionCallMetadataRepository(inner, a))
+        return repomodule.RelatedItemMetadataRepository(a, repomodule.FunctionCallMetadataRepository(inner, a, []))
     else:
-        return repomodule.RelatedItemRepository(a, repomodule.FunctionCallMetadataRepository(inner, a))
+        return repomodule.RelatedItemRepository(a, repomodule.FunctionCallMetadataRepository(inner, a, []))
 
 
 @_builtin("filter")
