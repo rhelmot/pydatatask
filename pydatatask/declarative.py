@@ -459,7 +459,7 @@ def build_repository_picker(ephemerals: Mapping[str, Callable[[], Any]]) -> Call
                 "FallbackMetadata",
                 FallbackMetadataRepository,
                 {
-                    "database": make_dispatcher("Repository", kinds),
+                    "base": make_dispatcher("Repository", kinds),
                     "fallback": make_dispatcher("Repository", kinds),
                 },
             ),
