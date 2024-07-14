@@ -40,6 +40,8 @@ class S3BucketBinaryWriter:
 
     async def write(self, data: bytes, /) -> int:
         """Write some data to the stream."""
+        if not data:
+            return 0
         part = await self.client.upload_part(
             Bucket=self.mpu["Bucket"],
             Key=self.mpu["Key"],
