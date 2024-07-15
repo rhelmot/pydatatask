@@ -4,10 +4,13 @@ Its whole purpose is to parse pipeline.yaml files and then feed the result into 
 """
 
 from typing import Optional
+import logging
 import sys
 
 from pydatatask.main import main as real_main
 from pydatatask.staging import get_current_directory_pipeline
+
+logging.basicConfig(format="%(asctime)s: %(name)s:%(levelname)s - %(message)s")
 
 
 def _main() -> Optional[int]:
