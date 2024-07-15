@@ -341,6 +341,7 @@ class KubeContainerManager(AbstractContainerManager):
         quota: Quota,
         mounts: Dict[str, str],
         privileged: bool,
+        tty: bool,
     ):
         mount_info = {
             provided_name: (
@@ -378,6 +379,8 @@ class KubeContainerManager(AbstractContainerManager):
                         for mountpoint, name in mounts.items()
                         if not mount_info[name][1].null
                     ],
+                    "tty": tty,
+                    "stdin": tty,
                 }
             ],
             "volumes": [info.to_kube(name) for (name, info) in mount_info.values() if not info.null],
@@ -397,9 +400,7 @@ class KubeContainerManager(AbstractContainerManager):
         privileged: bool,
         tty: bool,
     ):
-        if tty:
-            raise ValueError("Cannot do tty from a container on a kube cluster")
-        podspec = self.build_pod_spec(image, entrypoint, cmd, environ, quota, mounts, privileged)
+        podspec = self.build_pod_spec(image, entrypoint, cmd, environ, quota, mounts, privileged, tty)
         await self.cluster.launch(
             task,
             job,
