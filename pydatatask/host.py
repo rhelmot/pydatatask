@@ -150,6 +150,7 @@ class Host:
 
     def mk_cache_get_static(self, dest_filepath: str, cache_key: str, miss, cache_dir) -> str:
         if self.os == HostOS.Linux:
+            cp = "cp"
             cache_key_hash = hashlib.md5(cache_key.encode()).hexdigest()
             tick = "'"
             backslash = "\\"
@@ -157,13 +158,28 @@ class Host:
             cache_key_dirname = f"{cache_dir}/{cache_key_hash[:2]}"
             cache_key_path = f"{cache_key_dirname}/{cache_key_sane}"
             return f"""
-            if [ -f "{cache_key_path}" ]; then
-              cp "{cache_key_path}" "{dest_filepath}"
-            else
-              mkdir -p "{cache_key_dirname}"
-              {miss}
-              cp "{dest_filepath}" "{cache_key_path}"
-            fi
+            while true; do
+              if [ -f "{cache_key_path}" ]; then
+                 {cp} "{cache_key_path}" "{dest_filepath}"
+              else
+                mkdir -p "{cache_key_dirname}"
+                if mkdir "{cache_key_path}.lock"; then
+                  {miss}
+                  {cp} "{dest_filepath}" "{cache_key_path}"
+                  rm -rf "{cache_key_path}.lock"
+                else
+                  while [ -d "{cache_key_path}.lock" ]; do
+                    if [ "$(($(date +%s) - $(stat -c %W "{cache_key_path}.lock")))" -ge 300 ]; then
+                      rm -rf "{cache_key_path}.lock"
+                      continue
+                    fi
+                    sleep 5
+                  done
+                  {cp} "{cache_key_path}" "{dest_filepath}"
+                fi
+              fi
+              break
+            done
             """
         else:
             raise TypeError(self.os)
