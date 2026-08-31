@@ -1,4 +1,4 @@
-""" Documentation for this package can be found at https://pydatatask.readthedocs.io/en/stable/"""
+"""Documentation for this package can be found at https://pydatatask.readthedocs.io/en/stable/"""
 
 from .repository import *
 from .task import *
