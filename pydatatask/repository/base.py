@@ -74,8 +74,10 @@ class StrDict(dict):
 
 # Base Classes
 class Repository(ABC):
-    """A repository is a key-value store where the keys are names of jobs. Since the values have unspecified
-    semantics, the only operations you can do on a generic repository are query for keys.
+    """A repository is a key-value store where the keys are names of jobs.
+
+    Since the values have unspecified semantics, the only operations you can do on a generic repository are query for
+    keys.
 
     A repository can be async-iterated to get a listing of its members.
     """
@@ -107,6 +109,7 @@ class Repository(ABC):
 
     async def filter_jobs(self, iterator: AsyncIterable[str], /) -> AsyncIterator[str]:
         """Apply `is_valid_job_id` as a filter to an async iterator."""
+
         async for job in iterator:
             if self.is_valid_job_id(job):
                 yield job
@@ -118,6 +121,7 @@ class Repository(ABC):
 
         The default implementation is quite inefficient; please override this if possible.
         """
+
         async for x in self:
             if x == item:
                 return True
@@ -158,7 +162,6 @@ class Repository(ABC):
 
         TODO: this docstring is woefully outdated. See LinkKind.
         """
-
         force_path = task.links[link_name].force_path
         content_keyed_md5 = task.links[link_name].content_keyed_md5
         assert not content_keyed_md5 or isinstance(self, (repomodule.BlobRepository, repomodule.MetadataRepository))
@@ -528,9 +531,7 @@ class BlobRepository(Repository, ABC):
         raise NotImplementedError
 
     async def blobdump(self, job: str, value: Union[bytes, str]):
-        """
-        Convenience function: dump the entire contents of a string or bytestring into a job.
-        """
+        """Convenience function: dump the entire contents of a string or bytestring into a job."""
         if isinstance(value, (bytes, memoryview, bytearray)):
             async with await self.open(job, "wb") as fp:
                 await fp.write(value)
@@ -539,9 +540,8 @@ class BlobRepository(Repository, ABC):
                 await fp.write(value)
 
     async def blobinfo(self, job: str) -> bytes:
-        """
-        Convenience function: read the entire contents of a job into a bytestring.
-        """
+        """Convenience function: read the entire contents of a job into a bytestring."""
+
         async with await self.open(job, "rb") as fp:
             return await fp.read()
 
@@ -936,8 +936,10 @@ class BlockingRepository(Repository):
 
 
 class YamlMetadataRepository(MetadataRepository, ABC):
-    """A metadata repository based on a blob repository. When info is accessed, it will **load the target file into
-    memory**, parse it as yaml, and return the resulting object.
+    """A metadata repository based on a blob repository.
+
+    When info is accessed, it will **load the target file into memory**, parse it as yaml, and return the resulting
+    object.
 
     This is a base class, and must be overridden to implement the blob loading portion.
     """

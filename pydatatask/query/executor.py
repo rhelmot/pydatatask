@@ -27,7 +27,9 @@ from itertools import product as iproduct
 from typing_extensions import Mapping, TypeAlias
 
 from pydatatask import repository as repomodule
-from pydatatask.query.parser import ArgTypes
+from pydatatask.query.parser import (
+    ArgTypes,
+)
 from pydatatask.query.parser import FunctionDefinition as ParsedFunctionDefinition
 from pydatatask.query.parser import (
     FunctionType,

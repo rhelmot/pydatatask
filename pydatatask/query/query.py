@@ -100,8 +100,7 @@ class Query:
     async def execute(self, parameters: Dict[str, Any]) -> QueryValue:
         """Execute the query against a set of parameters.
 
-        Returns a QueryValue, which may be formatted with
-        `format_response`.
+        Returns a QueryValue, which may be formatted with `format_response`.
         """
         scope = self._make_scope(parameters)
         executor = Executor(scope)
