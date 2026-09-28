@@ -94,7 +94,8 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
                   requests:                    
                     cpu: 10m
                     memory: 100Mi
-            """,
+            """
+               ,
             logs=repoLogs,
             done=repoDone,
         )
@@ -134,14 +135,11 @@ class TestKube(unittest.IsolatedAsyncioTestCase):
             assert "node" in repoDone.data[job]
             async with await repoLogs.open(job, "r") as fp:
                 logs = await fp.read()
-            assert (
-                logs
-                == f"""\
+            assert logs == f"""\
 Hello world!
 The message of the day is {base64.b64encode(weh.encode()).decode()}. That's great!
 Goodbye world!
 """
-            )
 
     async def asyncTearDown(self):
         if self.minikube_profile is not None and self.minikube_path is not None:
