@@ -175,8 +175,9 @@ class AbstractProcessManager(Executor):
         stdout: Union[str, Path, None],
         stderr: Union[str, Path, "_StderrIsStdout", None],
     ) -> str:
-        """Launch a process on the target system. This function MUST NOT wait until the process has terminated
-        before returning.
+        """Launch a process on the target system.
+
+        This function MUST NOT wait until the process has terminated before returning.
 
         :param args: The command line of the process to launch. ``args[0]`` is the executable to run.
         :param environ: A set of environment variables to add to the target process' environment.

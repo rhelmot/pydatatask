@@ -55,7 +55,6 @@ def build_agent_app(
     pipeline: Pipeline, owns_pipeline: bool = False, flush_period: Optional[timedelta] = None
 ) -> web.Application:
     """Given a pipeline, generate an aiohttp web app to serve its repositories."""
-
     error_log: Dict[str, Tuple[float, str]] = {}
 
     @web.middleware
@@ -224,6 +223,7 @@ async def cat_data(item: repomodule.Repository, job: str, stream: AWriteStreamBa
 
 async def cat_fs_meta(item: repomodule.FilesystemRepository, job: str, stream: AWriteStreamBase):
     """Copy the manifest of one job of a filesystem repository to a stream."""
+
     async for directory, dirs, files, links in item.walk(job):
         for name in dirs:
             await stream.write(f"{directory}/{name}/\n".encode())
@@ -235,6 +235,7 @@ async def cat_fs_meta(item: repomodule.FilesystemRepository, job: str, stream: A
 
 async def cat_fs_entry(item: repomodule.FilesystemRepository, job: str, stream: AWriteStreamBase, path: str):
     """Copy one file of one job on a filesystem repository to a stream."""
+
     async with await item.open(job, path) as fp:
         await async_copyfile(fp, stream)
 
