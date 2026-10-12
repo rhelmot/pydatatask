@@ -642,8 +642,8 @@ class Task(ABC):
         """Return the repository whose job membership is used to determine whether a task instance should be
         launched.
 
-        If an override is not provided to the constructor, this is that, otherwise it is
-        ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
+        If an override is not provided to the constructor, this is that, otherwise it is ``AND(*requred_for_start,
+        NOT(OR(*inhibits_start)))``.
         """
         base_listing = []
         scoped_listing = defaultdict(list)
@@ -896,8 +896,8 @@ class Task(ABC):
         """Return the repository whose job membership is used to determine whether a task instance should be
         launched.
 
-        If an override is provided to the constructor, this is that, otherwise it is
-        ``AND(*requred_for_start, NOT(OR(*inhibits_start)))``.
+        If an override is provided to the constructor, this is that, otherwise it is ``AND(*requred_for_start,
+        NOT(OR(*inhibits_start)))``.
         """
         if self._ready is None:
             self._ready = self._make_ready()
@@ -959,8 +959,9 @@ class Task(ABC):
 
     @abstractmethod
     async def update(self) -> Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]:
-        """Part one of the pipeline maintenance loop. Override this to perform any maintenance operations on the set
-        of live tasks. Typically, this entails reaping finished processes.
+        """Part one of the pipeline maintenance loop.
+
+        Override this to perform any maintenance operations on the set of live tasks. Typically, this entails reaping finished processes.
 
         Returns a tuple: The start time for any currently live replicas, and the set of jobs that were reaped in this
         update.
@@ -1262,8 +1263,7 @@ class ParanoidAsyncGenerator(jinja2.compiler.CodeGenerator):
 class KubeTask(TemplateShellTask):
     """A task which runs a kubernetes pod.
 
-    Will automatically link a `LiveKubeRepository` as "live" with
-    ``inhibits_output, is_status``
+    Will automatically link a `LiveKubeRepository` as "live" with ``inhibits_output, is_status``
     """
 
     def __init__(
@@ -1691,16 +1691,17 @@ class FunctionTaskProtocol(Protocol):
 
 
 class InProcessSyncTask(Task):
-    """A task which runs in-process. Typical usage of this task might look like the following:
+    """A task which runs in-process.
 
-    .. code:: python
+    Typical usage of this task might look like the following:
+        .. code:: python
 
-        @InProcessSyncTask("my_task", done_repo)
-        async def my_task(inp, out):
-            await out.dump(await inp.info())
+            @InProcessSyncTask("my_task", done_repo)
+            async def my_task(inp, out):
+                await out.dump(await inp.info())
 
-        my_task.link("inp", repo_input, LinkKind.InputRepo)
-        my_task.link("out", repo_output, LinkKind.OutputRepo)
+            my_task.link("inp", repo_input, LinkKind.InputRepo)
+            my_task.link("out", repo_output, LinkKind.OutputRepo)
     """
 
     def __init__(
@@ -1797,8 +1798,9 @@ class InProcessSyncTask(Task):
 
 
 class ExecutorTask(Task):
-    """A task which runs python functions in a :external:class:`concurrent.futures.Executor`. This has not been
-    tested on anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
+    """A task which runs python functions in a :external:class:`concurrent.futures.Executor`.
+
+    This has not been tested on anything but the :external:class:`concurrent.futures.ThreadPoolExecutor`, so beware!
 
     See `InProcessSyncTask` for information on how to use instances of this class as decorators for their bodies.
 
@@ -1969,48 +1971,49 @@ class ExecutorTask(Task):
 
 
 class KubeFunctionTask(KubeTask):
-    """A task which runs a python function on a kubernetes cluster. Requires a pod template which will execute a.
+    """A task which runs a python function on a kubernetes cluster.
 
-    python script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job]
-    --sync``.
+    Requires a pod template which will execute a.
+        python script calling `pydatatask.main.main`. This works by running ``python3 main.py launch [task] [job]
+        --sync``.
 
-    Sample usage:
+        Sample usage:
 
-    .. code:: python
+        .. code:: python
 
-        @KubeFunctionTask(
-            "my_task",
-            podman,
-            resman,
-            '''
-                apiVersion: v1
-                kind: Pod
-                spec:
-                  containers:
-                    - name: leader
-                      image: "docker.example.com/my/image"
-                      command:
-                        - python3
-                        - {{argv0}}
-                        - launch
-                        - "{{task}}"
-                        - "{{job}}"
-                        - "--force"
-                        - "--sync"
-                      resources:
-                        requests:
-                          cpu: 100m
-                          memory: 1Gi
-            ''',
-            repo_done,
-            repo_func_done,
-            repo_logs,
-        )
-        async def my_task(inp, out):
-            await out.dump(await inp.info())
+            @KubeFunctionTask(
+                "my_task",
+                podman,
+                resman,
+                '''
+                    apiVersion: v1
+                    kind: Pod
+                    spec:
+                      containers:
+                        - name: leader
+                          image: "docker.example.com/my/image"
+                          command:
+                            - python3
+                            - {{argv0}}
+                            - launch
+                            - "{{task}}"
+                            - "{{job}}"
+                            - "--force"
+                            - "--sync"
+                          resources:
+                            requests:
+                              cpu: 100m
+                              memory: 1Gi
+                ''',
+                repo_done,
+                repo_func_done,
+                repo_logs,
+            )
+            async def my_task(inp, out):
+                await out.dump(await inp.info())
 
-        my_task.link("inp", repo_input, LinkKind.InputRepo)
-        my_task.link("out", repo_output, LinkKind.OutputRepo)
+            my_task.link("inp", repo_input, LinkKind.InputRepo)
+            my_task.link("out", repo_output, LinkKind.OutputRepo)
     """
 
     def __init__(
