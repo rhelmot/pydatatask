@@ -144,7 +144,6 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def dump_tarball(self, job: str, stream: AReadStreamBase) -> None:
         """Add an entire filesystem from a tarball."""
-
         cursor = self.dump(job)
         await cursor.__anext__()
         async with await aiotarfile.open_rd(stream) as tar:
@@ -171,6 +170,7 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def iter_members(self, job: str) -> AsyncIterator[FilesystemEntry]:
         """Read out an entire filesystem iteratively, as a series of FilesystemEntry objects."""
+
         async for rtop, dirs, regulars, symlinks in self.walk(job):
             rtopp = Path(rtop)
             for name in dirs:
@@ -196,6 +196,7 @@ class FilesystemRepository(Repository, abc.ABC):
 
     async def get_tarball(self, job: str, dest: AWriteStreamBase) -> None:
         """Stream a tarball for the given job to the provided asynchronous stream."""
+
         async with await aiotarfile.open_wr(AWriteStreamWrapper(dest), aiotarfile.CompressionType.Gzip) as tar:
             async for member in self.iter_members(job):
                 if member.type == FilesystemType.FILE:
