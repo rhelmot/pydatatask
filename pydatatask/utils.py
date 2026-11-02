@@ -323,7 +323,7 @@ P = ParamSpec("P")
 
 
 def asyncasynccontextmanager(
-    f: Callable[P, AsyncIterator[_T]]
+    f: Callable[P, AsyncIterator[_T]],
 ) -> Callable[P, Coroutine[Any, Any, AsyncContextManager[_T]]]:
     """Like asynccontextmanager but needs to be awaited first."""
 
