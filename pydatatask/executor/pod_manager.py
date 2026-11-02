@@ -285,6 +285,7 @@ class PodManager(Executor):
 
     async def query(self, job=None, task=None, replica=None) -> List[Any]:
         """Return a list of pods labeled for this podman's app and (optional) the given job and task."""
+
         async with self._lock:
             if self._cached_pods is None:
                 self._cached_pods = (

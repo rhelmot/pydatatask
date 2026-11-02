@@ -191,8 +191,9 @@ class Pipeline:
         task_allowlist: Optional[List[str]] = None,
         task_denylist: Optional[List[str]] = None,
     ):
-        """This method can be called to set properties of the current run. Only settings set to non-none will be
-        updated.
+        """This method can be called to set properties of the current run.
+
+        Only settings set to non-none will be updated.
 
         :param synchronous: Whether jobs will be started and completed in-process, waiting for their completion before a
             launch phase succeeds.
@@ -302,8 +303,9 @@ class Pipeline:
         await self.session.close()
 
     async def update(self, launch: bool = True) -> bool:
-        """Perform one round of pipeline maintenance, running the update phase and then the launch phase. The
-        pipeline must be opened for this function to run.
+        """Perform one round of pipeline maintenance, running the update phase and then the launch phase.
+
+        The pipeline must be opened for this function to run.
 
         :return: Whether there is any activity in the pipeline.
         """
@@ -315,8 +317,9 @@ class Pipeline:
         return any(any(live) or any(reaped) for live, reaped, _ in info.values()) or result2
 
     async def _update_only_update(self) -> Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]]:
-        """Perform one round of the update phase of pipeline maintenance. The pipeline must be opened for this
-        function to run.
+        """Perform one round of the update phase of pipeline maintenance.
+
+        The pipeline must be opened for this function to run.
 
         :return: Whether there were any live jobs.
         """
@@ -331,8 +334,9 @@ class Pipeline:
     async def _update_only_launch(
         self, info: Dict[str, Tuple[Dict[Tuple[str, int], datetime], Set[str], Set[str]]]
     ) -> bool:
-        """Perform one round of the launch phase of pipeline maintenance. The pipeline must be opened for this
-        function to run.
+        """Perform one round of the launch phase of pipeline maintenance.
+
+        The pipeline must be opened for this function to run.
 
         :return: Whether there were any jobs launched or ready to launch.
         """
@@ -557,7 +561,7 @@ class Pipeline:
 
     @staticmethod
     def _make_single_func(
-        func: Optional[Callable[[str], Awaitable[List[str]]]]
+        func: Optional[Callable[[str], Awaitable[List[str]]]],
     ) -> Optional[Callable[[str], Awaitable[str]]]:
         if func is None:
             return None
