@@ -249,32 +249,32 @@ def p_expr_name(p):
 
 
 def p_expr_stringlit(p):
-    """expr : STRING_LITERAL"""
+    """Expr : STRING_LITERAL."""
     p[0] = StringLiteral(p[1][1:-1])
 
 
 def p_expr_intlit(p):
-    """expr : INT_LITERAL"""
+    """Expr : INT_LITERAL."""
     p[0] = IntLiteral(int(p[1], 0))
 
 
 def p_expr_boollit(p):
-    """expr : BOOL_LITERAL"""
+    """Expr : BOOL_LITERAL."""
     p[0] = BoolLiteral(p[1] == "true")
 
 
 def p_expr_keylit(p):
-    """expr : KEY_LITERAL"""
+    """Expr : KEY_LITERAL."""
     p[0] = KeyLiteral(p[1][1:-1])
 
 
 def p_expr_list(p):
-    """expr : LBRACE args RBRACE"""
+    """Expr : LBRACE args RBRACE."""
     p[0] = ListLiteral(p[2])
 
 
 def p_expr_index(p):
-    """expr : expr LBRACKET expr RBRACKET"""
+    """Expr : expr LBRACKET expr RBRACKET."""
     p[0] = FunctionCall(FuncExpr("__index__", []), [p[1], p[3]])
 
 
@@ -299,10 +299,7 @@ def p_expr_binop(p):
 
 
 def p_expr_unop(p):
-    """expr : NOT expr
-    | TILDE expr
-    | PLUS expr %prec UMINUS
-    | MINUS expr %prec UMINUS"""
+    """Expr : NOT expr | TILDE expr | PLUS expr %prec UMINUS | MINUS expr %prec UMINUS."""
     p[0] = FunctionCall(FuncExpr(UNOP_TOKEN_MAPPING[p[1]], []), [p[2]])
 
 
@@ -367,10 +364,7 @@ def p_tempargs_multiple(p):
 
 
 def p_tempexpr(p):
-    """
-    tempexpr : funcexpr
-             | expr
-    """
+    """Tempexpr : funcexpr | expr."""
     p[0] = p[1]
 
 
