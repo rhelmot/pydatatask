@@ -70,11 +70,12 @@ class DockerRepository(Repository):
 
     @job_getter
     async def info(self, job):
-        """The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain". e.g.:
+        """The info provided by a docker repository is a dict with two keys, "withdomain" and "withoutdomain".
 
-        .. code::
+        e.g.:
+                .. code::
 
-            { "withdomain": "docker.example.com/myname/myrepo:job", "withoutdomain": "myname/myrepo:job" }
+                    { "withdomain": "docker.example.com/myname/myrepo:job", "withoutdomain": "myname/myrepo:job" }
         """
         return {
             "withdomain": f"{self.domain}/{self.repository}:{job}",
